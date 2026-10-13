@@ -1,0 +1,27 @@
+{
+  "identifier": 2,
+  "threshold": 2,
+  "signers": 3,
+  "bind": "127.0.0.1:9102",
+  "data_dir": "data/keyholder-2-old-vault",
+  "secrets_dir": ".secrets/old-dealer/node-2",
+  "game_config": "config/game.testnet.old-vault.json",
+  "lightwalletd": [
+    "https://zaino.testnet.unsafe.zec.rocks:443",
+    "https://testnet.zec.rocks:443"
+  ],
+  "peers": [
+    {
+      "identifier": 1,
+      "url": "http://127.0.0.1:9101",
+      "identity": "369328c943f851c9be20f72269041dd7f0581e8b8d351ad69b66bd1745849842"
+    },
+    {
+      "identifier": 3,
+      "url": "http://127.0.0.1:9103",
+      "identity": "a00fae326d31b87bbb826683d5bb179602e52e279d6113f74ba1b994682227c7"
+    }
+  ],
+  "coordinator_identity": "e129a3dc7e6eaab20b7f151ac5672433c4a0490fc72c37bef493a7dc6b8ddf35",
+  "poll_secs": 10
+}

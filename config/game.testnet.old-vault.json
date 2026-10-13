@@ -1,0 +1,27 @@
+{
+  "params": {
+    "network": "test",
+    "genesis_height": 4499174,
+    "blocks_per_round": 24,
+    "target_spacing_secs": 25,
+    "rake_bps": 500,
+    "cache_odds": 625,
+    "min_dig_zat": 100000,
+    "marginal_fee_zat": 5000,
+    "drand": {
+      "beacon_id": "quicknet",
+      "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+      "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+      "period_secs": 3,
+      "genesis_time": 1692803367,
+      "scheme": "bls-unchained-g1-rfc9380"
+    },
+    "reveal_delay_secs": 900,
+    "mtp_window": 11,
+    "honest_clock_skew_secs": 300
+  },
+  "vault_address": "utest123wq0lx66duqc4n4lwszr5705zh3lyy3c7dn49kjv86decmnft99lvum8cqhfvm9p4k5q2v9qlqxymc75p8kqs2ngjnrmd652stwfjkm",
+  "sealing_public_key": "eaec5d6fa869cf2a19814a7a3a74e78afd422690b3000b5823d78d0e4f774c3c",
+  "uivk": "uivktest1v48pjp0a8k8ttaywymgj3dhges4t5yapu3zm5qekhhq28058n6n2jvq9g3wqj3ne8sy2877n0uu796spg53z6yt4932um3s9r9800rwd2eudtjwczwsk2s2ta2u7uyfcet8q9eurmv",
+  "genesis_height": 4499174
+}
