@@ -1,0 +1,18 @@
+{
+  "source": "https://api.drand.sh/v2/chains/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info and https://api.drand.sh/v2/beacons/quicknet/rounds/<round>, fetched 2026-10-13",
+  "chain": {
+    "beacon_id": "quicknet",
+    "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+    "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+    "period_secs": 3,
+    "genesis_time": 1692803367,
+    "scheme": "bls-unchained-g1-rfc9380"
+  },
+  "beacons": [
+    { "round": 1, "signature": "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b" },
+    { "round": 1000, "signature": "b44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39" },
+    { "round": 5000000, "signature": "a597f735255263bf239b481d8065e0ef91eed416290da51e3ee6f128a9be29b4429525552c32fbbdb0dee406743a863b" },
+    { "round": 10000000, "signature": "a187c9f5800521e986b5658924696682071ce7ae965486e8fd08bc2c4758bdbb9ed9ecb7beee392a38214e321ecd434f" },
+    { "round": 33039325, "signature": "a8dc604d5c04f5fc9ab0a1624fac80d06604a04844689bc8c5cf73693335507643e263cbed3b8db39dafe7253bd2aed6" }
+  ]
+}

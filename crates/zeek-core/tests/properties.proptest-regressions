@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9b636ac89329aab0a2908ddec667c6be5a9de7e71b538ebe698bd63645a4347a # shrinks to digs = ClassifiedDigs { valid: [ValidDig { note: ReceivedNote { txid: "1111111111111111111111111111111111111111111111111111111111111111", output_index: 0, height: 1, value: 100000, memo: [] }, tile: 19, sealed_receiver: SealedReceiver(0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000) }], refunds: [], forfeits: [Forfeit { note: ReceivedNote { txid: "1111111111111111111111111111111111111111111111111111111111111111", output_index: 0, height: 1, value: 1, memo: [] }, reason: BelowMinimum { minimum: 100000 } }] }, previous_cache = 0, outcome = Drawn { treasure_tile: 19, cache_triggered: true }, round = 0

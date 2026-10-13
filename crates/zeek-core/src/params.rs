@@ -1,0 +1,335 @@
+//! Per-network game parameters.
+//!
+//! Every number below is sourced:
+//!
+//! * Block spacing: Zcash protocol spec § 5.3 sets `PostBlossomPoWTargetSpacing`
+//!   to 75 s (mainnet today; NU7 has no mainnet activation height). ZIP 218
+//!   lowers it to 25 s from NU7, which is live on testnet (height 4,465,026).
+//! * Rounds are sized to about ten minutes: 24 x 25 s on testnet, 8 x 75 s on
+//!   mainnet.
+//! * `marginal_fee_zat`: ZIP 317 `marginal_fee = 5000` zatoshis per logical
+//!   action.
+//! * Block timestamp rules: spec § 7.6, median-time-past over
+//!   `PoWMedianBlockSpan = 11` blocks (see [`crate::timing`]).
+//! * drand quicknet chain info: `https://api.drand.sh/v2/chains/52db…e971/info`
+//!   (scheme `bls-unchained-g1-rfc9380`, period 3 s, genesis 1692803367).
+
+use serde::{Deserialize, Serialize};
+
+use crate::COIN;
+
+/// Zcash network a game runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Network {
+    /// Zcash mainnet.
+    Main,
+    /// Zcash testnet.
+    Test,
+}
+
+impl Network {
+    /// The byte that tags a payout receiver's network inside a sealed memo.
+    pub const fn receiver_tag(self) -> u8 {
+        match self {
+            Network::Main => 0x00,
+            Network::Test => 0x01,
+        }
+    }
+
+    /// Inverse of [`Network::receiver_tag`].
+    pub const fn from_receiver_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0x00 => Some(Network::Main),
+            0x01 => Some(Network::Test),
+            _ => None,
+        }
+    }
+}
+
+/// Identity of a drand chain, as served by `/v2/chains/<hash>/info`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrandChain {
+    /// Beacon id (`quicknet`).
+    pub beacon_id: String,
+    /// Chain hash, hex.
+    pub chain_hash: String,
+    /// BLS12-381 G2 public key (96 bytes), hex.
+    pub public_key: String,
+    /// Seconds between rounds.
+    pub period_secs: u64,
+    /// Unix time of round 1.
+    pub genesis_time: u64,
+    /// Signature scheme id; only `bls-unchained-g1-rfc9380` is supported.
+    pub scheme: String,
+}
+
+impl DrandChain {
+    /// The League of Entropy quicknet chain.
+    ///
+    /// Source: `https://api.drand.sh/v2/chains/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info`.
+    pub fn quicknet() -> Self {
+        DrandChain {
+            beacon_id: "quicknet".to_owned(),
+            chain_hash: "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971".to_owned(),
+            public_key: "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a".to_owned(),
+            period_secs: 3,
+            genesis_time: 1_692_803_367,
+            scheme: SCHEME_BLS_UNCHAINED_G1_RFC9380.to_owned(),
+        }
+    }
+}
+
+/// The only drand scheme this crate verifies: signatures on G1, public key on
+/// G2, unchained (message = SHA-256 of the big-endian round number), RFC 9380
+/// hash-to-curve.
+pub const SCHEME_BLS_UNCHAINED_G1_RFC9380: &str = "bls-unchained-g1-rfc9380";
+
+/// Rake in basis points: 5%.
+pub const RAKE_BPS: u64 = 500;
+/// Deep Cache odds: 1 in 625 per round.
+pub const CACHE_ODDS: u32 = 625;
+/// Minimum dig: 0.001 ZEC.
+pub const MIN_DIG_ZAT: u64 = COIN / 1000;
+/// ZIP 317 marginal fee per logical action.
+pub const ZIP317_MARGINAL_FEE_ZAT: u64 = 5_000;
+/// Spec § 5.3 `PoWMedianBlockSpan`.
+pub const POW_MEDIAN_BLOCK_SPAN: u32 = 11;
+/// Spec § 5.3 `PostBlossomPoWTargetSpacing` (mainnet).
+pub const POST_BLOSSOM_TARGET_SPACING_SECS: u64 = 75;
+/// ZIP 218 `PostNU7PoWTargetSpacing` (testnet, NU7 active).
+pub const POST_NU7_TARGET_SPACING_SECS: u64 = 25;
+/// Bound on how far an honest miner's clock may lag or lead real time.
+///
+/// Honest Zcash nodes reject blocks more than two hours in the future (spec
+/// § 7.6) and in practice keep clocks within seconds; five minutes is a
+/// deliberately loose assumption for the argument in [`crate::timing`].
+pub const HONEST_CLOCK_SKEW_SECS: u64 = 300;
+
+/// Parameters fixing every rule of a Zeek game on one network.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameParams {
+    /// Network the vault lives on.
+    pub network: Network,
+    /// First block of round 0.
+    pub genesis_height: u32,
+    /// Blocks per round.
+    pub blocks_per_round: u32,
+    /// Target block spacing in effect, seconds.
+    pub target_spacing_secs: u64,
+    /// Rake in basis points of the pot, sent to the Deep Cache.
+    pub rake_bps: u64,
+    /// The Cache breaks open with probability `1 / cache_odds` per round.
+    pub cache_odds: u32,
+    /// Smallest dig that is counted; smaller digs are forfeited.
+    pub min_dig_zat: u64,
+    /// Fee charged per payout or refund output (ZIP 317 marginal fee).
+    pub marginal_fee_zat: u64,
+    /// drand chain that supplies the treasure randomness.
+    pub drand: DrandChain,
+    /// Seconds after the *expected* window close at which the round's beacon
+    /// is scheduled; see [`crate::beacon::beacon_round_for`].
+    pub reveal_delay_secs: u64,
+    /// Blocks after the window whose timestamps form the median-time-past
+    /// used by the timing rule (`PoWMedianBlockSpan`).
+    pub mtp_window: u32,
+    /// Assumed bound on honest miners' clock error, seconds.
+    pub honest_clock_skew_secs: u64,
+}
+
+/// Errors from validating [`GameParams`].
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ParamsError {
+    #[error("blocks_per_round must be at least 1")]
+    ZeroBlocksPerRound,
+    #[error("rake_bps {0} exceeds 10000")]
+    RakeTooLarge(u64),
+    #[error("cache_odds must be at least 1")]
+    ZeroCacheOdds,
+    #[error("mtp_window must be at least 1")]
+    ZeroMtpWindow,
+    #[error("target_spacing_secs must be at least 1")]
+    ZeroTargetSpacing,
+    #[error("drand period must be at least 1 second")]
+    ZeroDrandPeriod,
+    #[error("unsupported drand scheme `{0}`; only `bls-unchained-g1-rfc9380` is supported")]
+    UnsupportedDrandScheme(String),
+    #[error("drand public key is not 96 hex-encoded bytes")]
+    BadDrandPublicKey,
+    #[error("reveal_delay_secs is too short: it must cover the mtp_window blocks after the close plus the honest clock skew ({minimum} s), got {actual} s")]
+    RevealDelayTooShort { minimum: u64, actual: u64 },
+    #[error("arithmetic overflow in parameters")]
+    Overflow,
+}
+
+impl GameParams {
+    /// Testnet parameters: 24 blocks of 25 s (NU7, ZIP 218) per round.
+    pub fn testnet(genesis_height: u32) -> Self {
+        Self::with_spacing(
+            Network::Test,
+            genesis_height,
+            POST_NU7_TARGET_SPACING_SECS,
+            24,
+        )
+    }
+
+    /// Mainnet parameters: 8 blocks of 75 s (post-Blossom, spec § 5.3) per round.
+    pub fn mainnet(genesis_height: u32) -> Self {
+        Self::with_spacing(
+            Network::Main,
+            genesis_height,
+            POST_BLOSSOM_TARGET_SPACING_SECS,
+            8,
+        )
+    }
+
+    fn with_spacing(
+        network: Network,
+        genesis_height: u32,
+        target_spacing_secs: u64,
+        blocks_per_round: u32,
+    ) -> Self {
+        GameParams {
+            network,
+            genesis_height,
+            blocks_per_round,
+            target_spacing_secs,
+            rake_bps: RAKE_BPS,
+            cache_odds: CACHE_ODDS,
+            min_dig_zat: MIN_DIG_ZAT,
+            marginal_fee_zat: ZIP317_MARGINAL_FEE_ZAT,
+            drand: DrandChain::quicknet(),
+            reveal_delay_secs: Self::minimum_reveal_delay(
+                target_spacing_secs,
+                POW_MEDIAN_BLOCK_SPAN,
+                HONEST_CLOCK_SKEW_SECS,
+            ),
+            mtp_window: POW_MEDIAN_BLOCK_SPAN,
+            honest_clock_skew_secs: HONEST_CLOCK_SKEW_SECS,
+        }
+    }
+
+    /// The smallest reveal delay the timing rule can work with: time for the
+    /// `mtp_window` post-close blocks plus one more at **twice** the target
+    /// spacing (so a moderately slow chain is not voided), plus the assumed
+    /// clock skew. Testnet: 300 + 12·25·2 = 900 s; mainnet: 300 + 12·75·2 =
+    /// 2100 s.
+    pub fn minimum_reveal_delay(target_spacing_secs: u64, mtp_window: u32, skew: u64) -> u64 {
+        2 * target_spacing_secs * (u64::from(mtp_window) + 1) + skew
+    }
+
+    /// Checks internal consistency.
+    pub fn validate(&self) -> Result<(), ParamsError> {
+        if self.blocks_per_round == 0 {
+            return Err(ParamsError::ZeroBlocksPerRound);
+        }
+        if self.rake_bps > 10_000 {
+            return Err(ParamsError::RakeTooLarge(self.rake_bps));
+        }
+        if self.cache_odds == 0 {
+            return Err(ParamsError::ZeroCacheOdds);
+        }
+        if self.mtp_window == 0 {
+            return Err(ParamsError::ZeroMtpWindow);
+        }
+        if self.target_spacing_secs == 0 {
+            return Err(ParamsError::ZeroTargetSpacing);
+        }
+        if self.drand.period_secs == 0 {
+            return Err(ParamsError::ZeroDrandPeriod);
+        }
+        if self.drand.scheme != SCHEME_BLS_UNCHAINED_G1_RFC9380 {
+            return Err(ParamsError::UnsupportedDrandScheme(
+                self.drand.scheme.clone(),
+            ));
+        }
+        match hex::decode(&self.drand.public_key) {
+            Ok(bytes) if bytes.len() == 96 => {}
+            _ => return Err(ParamsError::BadDrandPublicKey),
+        }
+        let minimum = self
+            .target_spacing_secs
+            .checked_mul(2)
+            .and_then(|s| s.checked_mul(u64::from(self.mtp_window) + 1))
+            .and_then(|s| s.checked_add(self.honest_clock_skew_secs))
+            .ok_or(ParamsError::Overflow)?;
+        if self.reveal_delay_secs < minimum {
+            return Err(ParamsError::RevealDelayTooShort {
+                minimum,
+                actual: self.reveal_delay_secs,
+            });
+        }
+        Ok(())
+    }
+
+    /// Expected wall-clock length of a round.
+    pub fn round_duration_secs(&self) -> Result<u64, ParamsError> {
+        u64::from(self.blocks_per_round)
+            .checked_mul(self.target_spacing_secs)
+            .ok_or(ParamsError::Overflow)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_validate_and_last_about_ten_minutes() {
+        for params in [GameParams::testnet(1), GameParams::mainnet(1)] {
+            params.validate().expect("valid");
+            assert_eq!(params.round_duration_secs().expect("duration"), 600);
+            assert_eq!(params.rake_bps, 500);
+            assert_eq!(params.cache_odds, 625);
+            assert_eq!(params.min_dig_zat, 100_000);
+            assert_eq!(params.marginal_fee_zat, 5_000);
+        }
+        assert_eq!(GameParams::testnet(1).reveal_delay_secs, 900);
+        assert_eq!(GameParams::mainnet(1).reveal_delay_secs, 2_100);
+    }
+
+    #[test]
+    fn validation_catches_bad_values() {
+        let mut p = GameParams::testnet(1);
+        p.rake_bps = 10_001;
+        assert_eq!(p.validate(), Err(ParamsError::RakeTooLarge(10_001)));
+        let mut p = GameParams::testnet(1);
+        p.reveal_delay_secs = 10;
+        assert!(matches!(
+            p.validate(),
+            Err(ParamsError::RevealDelayTooShort {
+                minimum: 900,
+                actual: 10
+            })
+        ));
+        let mut p = GameParams::testnet(1);
+        p.drand.scheme = "pedersen-bls-chained".into();
+        assert!(matches!(
+            p.validate(),
+            Err(ParamsError::UnsupportedDrandScheme(_))
+        ));
+        let mut p = GameParams::testnet(1);
+        p.drand.public_key = "abcd".into();
+        assert_eq!(p.validate(), Err(ParamsError::BadDrandPublicKey));
+        let mut p = GameParams::testnet(1);
+        p.blocks_per_round = 0;
+        assert_eq!(p.validate(), Err(ParamsError::ZeroBlocksPerRound));
+    }
+
+    #[test]
+    fn params_round_trip_through_serde() {
+        let p = GameParams::testnet(4_500_000);
+        let json = serde_json::to_string(&p).expect("json");
+        let back: GameParams = serde_json::from_str(&json).expect("parse");
+        assert_eq!(p, back);
+        assert!(json.contains("\"network\":\"test\""));
+    }
+
+    #[test]
+    fn network_tags_round_trip() {
+        for n in [Network::Main, Network::Test] {
+            assert_eq!(Network::from_receiver_tag(n.receiver_tag()), Some(n));
+        }
+        assert_eq!(Network::from_receiver_tag(0x02), None);
+    }
+}

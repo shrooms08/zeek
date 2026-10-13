@@ -1,0 +1,36 @@
+[package]
+name = "zeek-core"
+version = "0.1.0"
+description = "Zeek game rules: pure, deterministic, wasm-compatible (rounds, dig memos, drand treasure draw, settlement)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hpke.workspace = true
+rand_core_09.workspace = true
+drand_verify.workspace = true
+sha2.workspace = true
+base64.workspace = true
+zcash_address.workspace = true
+zcash_protocol.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+proptest = "1.6"
+rand = { version = "0.9", default-features = false, features = ["std_rng"] }
+serde_json.workspace = true
+zip321.workspace = true
+
+# zeek-core never asks the OS for randomness, but hpke 0.13's AEAD crates enable
+# getrandom by default, and getrandom 0.2 refuses to build for
+# wasm32-unknown-unknown without a backend. The `js` backend (wasm-bindgen)
+# matches the browser verifier this crate targets.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
