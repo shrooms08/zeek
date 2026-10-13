@@ -58,3 +58,8 @@ shardtree = "0.7"
 zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.30.1", features = ["test-dependencies"] }
 zcash_protocol = { version = "0.10.5", features = ["local-consensus"] }
+
+# The pinned librustzcash crates gate NU7 behind this cfg (set in .cargo/config.toml);
+# tests must name the `LocalNetwork::nu7` field it adds.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

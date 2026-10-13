@@ -54,3 +54,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # builds while keeping our own crate quick to compile.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Testnet activated NU7 (consensus branch 0x77190AD9) at height 4,465,026, which the
+# published 0.10.x `zcash_protocol` only knows as a placeholder behind the
+# `zcash_unstable = "nu7"` cfg. `vendor/zcash_protocol` is the unmodified 0.10.6
+# source plus the two NU7 constants that 0.11.0-pre.0 ships; see
+# vendor/zcash_protocol/ZEEK-PATCH.md. The cfg itself is set in .cargo/config.toml.
+[patch.crates-io]
+zcash_protocol = { path = "vendor/zcash_protocol" }

@@ -3350,8 +3350,6 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b20adb1cdb6ab551e83d1507461e89b41fc67e800eec9e59e0c8de96152e8c5c"
 dependencies = [
  "corez",
  "document-features",

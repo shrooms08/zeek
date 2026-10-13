@@ -1,0 +1,6 @@
+# Enables the NU7 arms that the pinned librustzcash 0.10.x crates ship behind this
+# cfg (NU7 is live on Zcash testnet). Combined with the `[patch.crates-io]` entry
+# in Cargo.toml for `zcash_protocol`. Note: an exported RUSTFLAGS environment
+# variable overrides this setting and must contain the same flag.
+[build]
+rustflags = ["--cfg", "zcash_unstable=\"nu7\""]
