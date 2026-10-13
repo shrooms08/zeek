@@ -14,6 +14,12 @@ This repository contains:
 * `zeek-core` (Phase 2): the single source of truth for the game rules. Pure,
   deterministic, no I/O, and it builds for `wasm32-unknown-unknown`, so the
   round engine, every keyholder node and a browser verifier run the same code.
+* `zeek-engine` (Phase 3): the round engine. It follows testnet with the
+  vault's public incoming viewing key, verifies drand beacons, settles rounds
+  with `zeek-core` into signed-later payout plans, and serves the board over
+  HTTP and WebSocket. It never holds spend authority.
+* `zeek-dig` (Phase 3): the test player tool, one single-key shielded wallet
+  per player, which digs by paying the vault with a sealed memo.
 
 Since NU6.3 ("Ironwood") payments to the vault land in the **Ironwood** pool:
 Orchard-shaped notes (same keys, same spend authorization) with version 3 note
@@ -38,6 +44,17 @@ crates/zeek-core    game rules library (no network, no filesystem, wasm-capable)
   src/settle.rs     settlement with the conservation invariant
   src/board.rs      public board views
   tests/            property tests, real drand quicknet beacons as fixtures
+crates/zeek-engine  round engine library + `zeek-engine` binary
+  src/chain.rs      lightwalletd compact-block follower with reorg rollback
+  src/decrypt.rs    trial decryption with the external-scope IVK (Ironwood + Orchard)
+  src/beacon.rs     multi-relay drand fetcher (first verifiable answer wins)
+  src/processor.rs  status -> timing rule -> beacon -> classify -> settle (zeek-core)
+  src/db.rs         SQLite (blocks, notes, beacons, settlement plans)
+  src/api.rs        axum REST + WebSocket
+  src/proof.rs      proof bundle + zeek-core-only recomputation (docs/proof-bundle.md)
+crates/zeek-dig     `zeek-dig` test player tool
+config/             committed public game configs (no secrets)
+docs/               proof bundle format and real artifacts of settled rounds
 crates/zeek-vault   library + `zeek-vault` CLI (testnet only)
   src/frost.rs      FROST keygen and rerandomized signing (reddsa RedPallas ciphersuite)
   src/keys.rs       FROST group key -> Orchard FVK (ak, nk, rivk) -> UFVK -> address
@@ -121,6 +138,30 @@ aggregated signature verifies under `rk = ak + [alpha] G`, exactly what the
 transaction commits to. Before applying a signature the vault checks that the
 action's `rk` equals its own group key randomized by that `alpha`, so it can
 never sign a spend it does not control.
+
+## Running the engine and playing
+
+```sh
+zeek-vault sealing-keygen            # once: .secrets/payout-sealing.json
+zeek-vault address                   # vault address, UFVK and the public UIVK
+# config/game.testnet.json holds the GameParams, vault address, sealing public
+# key, UIVK and genesis height (notes below it are ignored by the game).
+cargo run --release -p zeek-engine   # API on 127.0.0.1:8787 (see .env.example)
+
+zeek-dig init alice && zeek-dig sync alice && zeek-dig balance alice
+zeek-dig dig alice --tile 3 --amount 0.005 --engine http://127.0.0.1:8787
+```
+
+API: `GET /v1/config`, `/v1/board`, `/v1/rounds/pending`, `/v1/rounds/{n}`,
+`/v1/rounds/{n}/proof`, `/v1/health`, WebSocket `/v1/stream`. Sealed payout
+receivers are the only receiver form the engine stores or serves.
+
+Dig detection uses the vault's **external-scope** unified incoming viewing
+key: payments to the vault's address are visible, the vault's own change
+(internal scope) is not, so change can never be mistaken for a dig. The pinned
+`zcash_client_sqlite` can only import full viewing keys, so the engine scans
+compact blocks itself and completes each hit from the full transaction to
+read the memo.
 
 ## Game rules (zeek-core)
 
