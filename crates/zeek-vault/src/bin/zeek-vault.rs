@@ -1,0 +1,294 @@
+//! `zeek-vault` command-line interface (Zcash testnet only).
+
+use anyhow::{bail, Context};
+use clap::{Args, Parser, Subcommand};
+use rand_core::OsRng;
+use zcash_protocol::consensus::BlockHeight;
+use zeek_vault::config::Config;
+use zeek_vault::send::{format_zec, SendRequest};
+use zeek_vault::store::{KeyholderFile, SecretsDir, VaultFile};
+use zeek_vault::{frost, keys, lightwalletd, send, wallet, VaultError};
+
+#[derive(Parser)]
+#[command(
+    name = "zeek-vault",
+    version,
+    about = "2-of-3 FROST vault for Zeek (Zcash testnet)"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Generate FROST key shares and the vault's Orchard viewing key.
+    Keygen(KeygenArgs),
+    /// Print the vault's unified address and unified full viewing key.
+    Address,
+    /// Scan testnet via lightwalletd for the vault's notes.
+    Sync(SyncArgs),
+    /// Report the vault's spendable Orchard balance and notes.
+    Balance,
+    /// Spend from the vault with a FROST threshold signature.
+    Send(SendArgs),
+}
+
+#[derive(Args)]
+struct KeygenArgs {
+    /// Minimum number of keyholders needed to sign.
+    #[arg(long, default_value_t = 2)]
+    threshold: u16,
+    /// Total number of keyholders.
+    #[arg(long, default_value_t = 3)]
+    signers: u16,
+    /// Replace existing key files.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Args)]
+struct SyncArgs {
+    /// Block height to start scanning from when importing the account for the
+    /// first time (defaults to the current chain tip).
+    #[arg(long)]
+    birthday: Option<u32>,
+}
+
+#[derive(Args)]
+struct SendArgs {
+    /// Destination testnet unified address (must have an Orchard receiver).
+    #[arg(long)]
+    to: String,
+    /// Amount in ZEC, e.g. 0.001.
+    #[arg(long)]
+    amount: String,
+    /// Comma-separated keyholder numbers that will sign, e.g. 1,3.
+    #[arg(long, value_delimiter = ',')]
+    signers: Vec<u16>,
+    /// Optional UTF-8 memo.
+    #[arg(long)]
+    memo: Option<String>,
+}
+
+fn main() -> anyhow::Result<()> {
+    // `.env` is optional; a missing file is not an error.
+    let _ = dotenvy::dotenv();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .init();
+
+    let cli = Cli::parse();
+    let config = Config::from_env()?;
+    let secrets = SecretsDir::new(config.secrets_dir());
+
+    match cli.command {
+        Command::Keygen(args) => keygen(&secrets, args),
+        Command::Address => address(&secrets),
+        Command::Sync(args) => runtime()?.block_on(sync(&config, &secrets, args)),
+        Command::Balance => balance(&config, &secrets),
+        Command::Send(args) => runtime()?.block_on(send_cmd(&config, &secrets, args)),
+    }
+}
+
+fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("starting async runtime")
+}
+
+fn keygen(secrets: &SecretsDir, args: KeygenArgs) -> anyhow::Result<()> {
+    if !args.force {
+        secrets.check_absent(args.signers)?;
+    }
+
+    let out = frost::dealer_keygen(args.threshold, args.signers, OsRng)?;
+    let group_key = frost::group_key_bytes(&out.public_key_package)?;
+    let fvk = keys::derive_full_viewing_key(&group_key, OsRng)?;
+    let ufvk = keys::unified_full_viewing_key(&fvk)?;
+    let address = keys::encode_address(&keys::orchard_only_address(&ufvk)?);
+
+    let vault = VaultFile::new(
+        args.threshold,
+        args.signers,
+        &out.public_key_package,
+        &fvk,
+        &ufvk,
+        &address,
+    )?;
+    secrets.write_vault(&vault)?;
+    for (id, key_package) in &out.key_packages {
+        let n = frost::identifier_number(id)?;
+        secrets.write_keyholder(n, &KeyholderFile::new(n, key_package)?)?;
+    }
+
+    println!(
+        "Generated a {}-of-{} FROST vault (trusted dealer; production will use DKG).",
+        args.threshold, args.signers
+    );
+    println!("Secrets directory: {}", secrets.path().display());
+    for n in 1..=args.signers {
+        println!("  keyholder {n}: {}", secrets.keyholder_path(n).display());
+    }
+    println!("  public vault:  {}", secrets.vault_path().display());
+    println!("Group verifying key (ak): {}", hex::encode(group_key));
+    println!("Address: {address}");
+    Ok(())
+}
+
+fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
+    let vault = secrets.load_vault()?;
+    // Re-derive from the stored viewing key so a tampered file is noticed.
+    let fvk = vault.orchard_fvk()?;
+    let ufvk = keys::unified_full_viewing_key(&fvk)?;
+    let derived = keys::encode_address(&keys::orchard_only_address(&ufvk)?);
+    if derived != vault.address {
+        bail!(
+            "vault.json address {} does not match the address derived from its viewing key {}",
+            vault.address,
+            derived
+        );
+    }
+    println!("Network: testnet");
+    println!("Unified address (Orchard-only receiver):");
+    println!("  {}", vault.address);
+    println!("Unified full viewing key:");
+    println!("  {}", keys::encode_ufvk(&ufvk));
+    Ok(())
+}
+
+async fn sync(config: &Config, secrets: &SecretsDir, args: SyncArgs) -> anyhow::Result<()> {
+    let mut vault = secrets.load_vault()?;
+    let ufvk = vault.ufvk()?;
+    let url = config.lightwalletd_url()?;
+
+    println!("Connecting to {url} ...");
+    let mut client = lightwalletd::connect(url).await?;
+    let info = lightwalletd::lightd_info(&mut client).await?;
+    println!(
+        "Connected: chain={} lightwalletd={} zcashd/zebra={} height={}",
+        info.chain_name, info.version, info.zcashd_build, info.block_height
+    );
+
+    let mut db = wallet::open(config.data_dir())?;
+    let birthday = args.birthday.map(BlockHeight::from_u32);
+    let had_account = wallet::find_account(&db, &ufvk)?.is_some();
+    let (account, birthday_height) =
+        wallet::ensure_account(&mut db, &mut client, &ufvk, birthday).await?;
+    if !had_account {
+        println!("Imported view-only account {account:?} with birthday {birthday_height}");
+        vault.birthday_height = Some(birthday_height.into());
+        secrets.write_vault(&vault)?;
+    }
+
+    println!("Syncing (this scans from height {birthday_height}) ...");
+    wallet::sync(&mut db, &mut client).await?;
+    let report = wallet::balance(&db, account)?;
+    println!(
+        "Synced. chain tip {} fully scanned {} spendable {} ZEC pending {} ZEC",
+        report.chain_tip,
+        report.fully_scanned,
+        format_zec(report.spendable),
+        format_zec(report.pending)
+    );
+    Ok(())
+}
+
+fn balance(config: &Config, secrets: &SecretsDir) -> anyhow::Result<()> {
+    let vault = secrets.load_vault()?;
+    let ufvk = vault.ufvk()?;
+    let db = wallet::open(config.data_dir())?;
+    let account = wallet::find_account(&db, &ufvk)?.ok_or(VaultError::AccountMissing)?;
+    let report = wallet::balance(&db, account)?;
+
+    println!("Vault address: {}", vault.address);
+    println!("Chain tip (wallet view): {}", report.chain_tip);
+    println!("Fully scanned height:    {}", report.fully_scanned);
+    println!(
+        "Spendable Orchard:       {} ZEC",
+        format_zec(report.spendable)
+    );
+    println!(
+        "Pending confirmation:    {} ZEC",
+        format_zec(report.pending)
+    );
+    println!("Total Orchard:           {} ZEC", format_zec(report.total));
+    println!("Orchard notes: {}", report.notes.len());
+    for note in &report.notes {
+        let depth = note
+            .confirmations
+            .map(|c| format!("{c} confirmations"))
+            .unwrap_or_else(|| "unmined".to_owned());
+        println!(
+            "  {}:{}  {} ZEC  mined at {}  {}  {}",
+            note.txid,
+            note.output_index,
+            format_zec(note.value),
+            note.mined_height
+                .map(|h| h.to_string())
+                .unwrap_or_else(|| "-".into()),
+            depth,
+            if note.spendable {
+                "spendable"
+            } else {
+                "not yet spendable"
+            }
+        );
+    }
+    Ok(())
+}
+
+async fn send_cmd(config: &Config, secrets: &SecretsDir, args: SendArgs) -> anyhow::Result<()> {
+    let vault = secrets.load_vault()?;
+    let public_key_package = vault.public_key_package()?;
+
+    if args.signers.len() < usize::from(vault.threshold) {
+        bail!(
+            "{}",
+            VaultError::NotEnoughSigners {
+                given: args.signers.len(),
+                threshold: vault.threshold
+            }
+        );
+    }
+    let mut key_packages = Vec::with_capacity(args.signers.len());
+    for n in &args.signers {
+        key_packages.push(secrets.load_keyholder(*n, &vault)?);
+    }
+    let signers: Vec<&frost::KeyPackage> = key_packages.iter().collect();
+
+    let ufvk = vault.ufvk()?;
+    let url = config.lightwalletd_url()?;
+    let mut client = lightwalletd::connect(url).await?;
+    let mut db = wallet::open(config.data_dir())?;
+    let account = wallet::find_account(&db, &ufvk)?.ok_or(VaultError::AccountMissing)?;
+
+    println!("Refreshing wallet state before spending ...");
+    wallet::sync(&mut db, &mut client).await?;
+
+    let request = SendRequest {
+        to: args.to,
+        amount_zec: args.amount,
+        memo: args.memo,
+    };
+    let outcome = send::send(
+        &mut db,
+        &mut client,
+        account,
+        &public_key_package,
+        &signers,
+        &request,
+    )
+    .await?;
+
+    println!("Broadcast txid: {}", outcome.txid);
+    println!("Signed Orchard actions: {}", outcome.signed_actions);
+    println!("Fee paid: {} ZEC", format_zec(outcome.fee));
+    println!("Signers: {:?}", args.signers);
+    Ok(())
+}
