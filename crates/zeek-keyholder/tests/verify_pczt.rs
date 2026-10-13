@@ -23,7 +23,7 @@ use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::builder::{BuildConfig, Builder, BundlePadding, PcztResult};
 use zcash_primitives::transaction::fees::zip317;
 use zcash_primitives::transaction::fees::FeeRule;
-use zcash_protocol::consensus::{BlockHeight, TEST_NETWORK};
+use zcash_protocol::consensus::TEST_NETWORK;
 use zcash_protocol::memo::{Memo, MemoBytes};
 use zcash_protocol::value::Zatoshis;
 use zeek_core::digs::{ClassifiedDigs, ReceivedNote, ValidDig};
