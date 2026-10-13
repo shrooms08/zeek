@@ -5,7 +5,7 @@ use zcash_client_backend::proto::service::compact_tx_streamer_client::CompactTxS
 use zcash_client_backend::proto::service::{
     BlockId, ChainSpec, Empty, LightdInfo, RawTransaction, TreeState,
 };
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{BlockHeight, BranchId};
 
 use crate::error::VaultError;
 
@@ -14,6 +14,41 @@ pub type Client = CompactTxStreamerClient<Channel>;
 
 /// Chain name `lightwalletd` reports for testnet.
 pub const TESTNET_CHAIN_NAME: &str = "test";
+
+/// Testnet NU7 activation height (ZIP 259). Kept as a literal so the check
+/// below works even in a build whose `zcash_protocol` does not know NU7.
+pub const NU7_TESTNET_ACTIVATION: u32 = 4_465_026;
+
+/// Whether this build was compiled with the `zcash_unstable="nu7"` cfg that
+/// the pinned librustzcash crates need to speak NU7 (see `.cargo/config.toml`).
+pub const fn nu7_supported() -> bool {
+    cfg!(zcash_unstable = "nu7")
+}
+
+/// Refuses to run against a chain this build cannot follow.
+///
+/// `supported` is [`nu7_supported`] (a parameter so the failure path is
+/// testable), `tip` the server's chain height and `branch_hex` the consensus
+/// branch id the server reports. A tip at or past NU7 activation without NU7
+/// support, or a branch id this build does not recognise, means every
+/// transaction built here would be rejected by the network.
+pub fn check_consensus_support(
+    supported: bool,
+    tip: u32,
+    branch_hex: &str,
+) -> Result<(), VaultError> {
+    if !supported && tip >= NU7_TESTNET_ACTIVATION {
+        return Err(VaultError::Nu7Unsupported {
+            tip,
+            activation: NU7_TESTNET_ACTIVATION,
+        });
+    }
+    let branch = u32::from_str_radix(branch_hex.trim_start_matches("0x"), 16)
+        .map_err(|_| VaultError::UnknownConsensusBranch(branch_hex.to_owned()))?;
+    BranchId::try_from(branch)
+        .map(|_| ())
+        .map_err(|_| VaultError::UnknownConsensusBranch(branch_hex.to_owned()))
+}
 
 /// Connects to `url` (http or https) and checks that it serves testnet.
 pub async fn connect(url: &str) -> Result<Client, VaultError> {
@@ -31,6 +66,10 @@ pub async fn connect(url: &str) -> Result<Client, VaultError> {
     if info.chain_name != TESTNET_CHAIN_NAME {
         return Err(VaultError::WrongNetwork(info.chain_name));
     }
+    let tip = u32::try_from(info.block_height).map_err(|_| {
+        VaultError::BadResponse(format!("chain height {} overflows u32", info.block_height))
+    })?;
+    check_consensus_support(nu7_supported(), tip, &info.consensus_branch_id)?;
     Ok(client)
 }
 
@@ -74,4 +113,44 @@ pub async fn broadcast(client: &mut Client, tx_bytes: Vec<u8>) -> Result<(), Vau
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NETWORK;
+    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+    #[test]
+    fn this_build_supports_nu7_and_the_literal_matches_the_library() {
+        assert!(
+            nu7_supported(),
+            "build without --cfg zcash_unstable=\"nu7\""
+        );
+        assert_eq!(
+            NETWORK.activation_height(NetworkUpgrade::Nu7),
+            Some(BlockHeight::from_u32(NU7_TESTNET_ACTIVATION))
+        );
+        check_consensus_support(true, 4_500_000, "77190ad9").expect("supported");
+        check_consensus_support(false, NU7_TESTNET_ACTIVATION - 1, "37a5165b").expect("pre-NU7 ok");
+    }
+
+    #[test]
+    fn refuses_nu7_chains_without_support_and_unknown_branches() {
+        assert!(matches!(
+            check_consensus_support(false, NU7_TESTNET_ACTIVATION, "77190ad9"),
+            Err(VaultError::Nu7Unsupported {
+                tip: NU7_TESTNET_ACTIVATION,
+                activation: NU7_TESTNET_ACTIVATION
+            })
+        ));
+        assert!(matches!(
+            check_consensus_support(true, 4_500_000, "deadbeef"),
+            Err(VaultError::UnknownConsensusBranch(_))
+        ));
+        assert!(matches!(
+            check_consensus_support(true, 4_500_000, "not-hex"),
+            Err(VaultError::UnknownConsensusBranch(_))
+        ));
+    }
 }

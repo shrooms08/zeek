@@ -113,6 +113,16 @@ pub enum VaultError {
     #[error("lightwalletd is serving chain `{0}` but this vault only works on `test`")]
     WrongNetwork(String),
 
+    #[error(
+        "the chain is at height {tip}, past NU7 activation ({activation}), but this binary was built without NU7 support; rebuild from the repository root so that .cargo/config.toml applies (`cargo build --release`), or export RUSTFLAGS='--cfg zcash_unstable=\"nu7\"', and do not run a binary built elsewhere"
+    )]
+    Nu7Unsupported { tip: u32, activation: u32 },
+
+    #[error(
+        "lightwalletd reports consensus branch `{0}`, which this build does not recognise; transactions built here would be rejected, refusing to run"
+    )]
+    UnknownConsensusBranch(String),
+
     #[error("lightwalletd returned an unusable response: {0}")]
     BadResponse(String),
 
