@@ -37,9 +37,14 @@ enum Command {
 struct DigArgs {
     name: String,
     /// Tile to dig, 0..=24.
-    #[arg(long)]
-    tile: u8,
-    /// Amount in ZEC, e.g. 0.005.
+    #[arg(long, conflicts_with = "tiles")]
+    tile: Option<u8>,
+    /// Several tiles in one transaction (comma-separated), e.g. 0,1,2. The
+    /// outputs share a txid, so they are linkable to each other by anyone
+    /// with the public UIVK.
+    #[arg(long, value_delimiter = ',', conflicts_with = "tile")]
+    tiles: Vec<u8>,
+    /// Amount in ZEC per tile, e.g. 0.005.
     #[arg(long)]
     amount: String,
     /// Round to name in the memo: `auto` (the board's current round) or a number.
@@ -102,8 +107,19 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Dig(args) => runtime.block_on(async {
-            if args.tile >= zeek_core::TILE_COUNT {
-                anyhow::bail!("tile must be 0..=24");
+            let tiles: Vec<u8> = match (args.tile, args.tiles.is_empty()) {
+                (Some(t), _) => vec![t],
+                (None, false) => args.tiles.clone(),
+                (None, true) => anyhow::bail!("pass --tile N or --tiles a,b,c"),
+            };
+            if tiles.iter().any(|t| *t >= zeek_core::TILE_COUNT) {
+                anyhow::bail!("tiles must be 0..=24");
+            }
+            let mut unique = tiles.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            if unique.len() != tiles.len() {
+                anyhow::bail!("tiles must be distinct");
             }
             let choice = if args.round == "auto" {
                 RoundChoice::Auto
@@ -131,14 +147,14 @@ fn main() -> anyhow::Result<()> {
                 &board,
                 &dig::DigRequest {
                     choice,
-                    tile: args.tile,
+                    tiles,
                     amount_zec: args.amount,
                 },
             )
             .await?;
             println!(
-                "Dug tile {} for round {} with {} zatoshis (fee {}), target height {}",
-                outcome.tile,
+                "Dug tiles {:?} for round {} with {} zatoshis each (fee {}), target height {}",
+                outcome.tiles,
                 outcome.memo_round,
                 outcome.amount_zat,
                 outcome.fee_zat,

@@ -100,10 +100,17 @@ pub fn choose_round(board: &EngineBoard, choice: RoundChoice) -> Result<u32, Dig
 }
 
 /// What the player asked for.
+///
+/// Several tiles go into **one** transaction with one vault output per tile,
+/// each carrying its own sealed memo. Anyone holding the public UIVK sees
+/// that those outputs share a txid, so digs sent together are linkable to
+/// each other (not to the player); sending tiles separately avoids that at
+/// the cost of one fee per transaction. The choice is the player's.
 #[derive(Clone, Debug)]
 pub struct DigRequest {
     pub choice: RoundChoice,
-    pub tile: u8,
+    /// Tiles to dig, each with `amount_zec`.
+    pub tiles: Vec<u8>,
     pub amount_zec: String,
 }
 
@@ -111,7 +118,8 @@ pub struct DigRequest {
 pub struct DigOutcome {
     pub txid: String,
     pub memo_round: u32,
-    pub tile: u8,
+    pub tiles: Vec<u8>,
+    /// Amount per tile.
     pub amount_zat: u64,
     pub fee_zat: u64,
     pub target_height: u32,
@@ -129,7 +137,9 @@ pub async fn dig(
     if config.params.network != Network::Test {
         return Err(DigError::Game("this tool plays on testnet only".into()));
     }
-    let tile = request.tile;
+    if request.tiles.is_empty() {
+        return Err(DigError::Game("at least one tile is required".into()));
+    }
     let memo_round = choose_round(board, request.choice)?;
     let amount = send::parse_zec(&request.amount_zec)?;
     if amount.into_u64() < config.params.min_dig_zat {
@@ -143,22 +153,44 @@ pub async fn dig(
     let receiver = PayoutReceiver::from_unified_address(Network::Test, &player.address()?)
         .map_err(|e| DigError::Game(e.to_string()))?;
     let mut rng = rand_09::rngs::OsRng.unwrap_err();
-    let memo = DigMemo::seal(
-        memo_round,
-        tile,
-        &receiver,
-        &config.sealing_public_key,
-        &mut rng,
-    )
-    .map_err(|e| DigError::Game(e.to_string()))?;
-    let uri = payment::dig_payment_uri(
-        Network::Test,
-        &config.vault_address,
-        amount.into_u64(),
-        &memo,
-    )
-    .map_err(|e| DigError::Game(e.to_string()))?;
-    let request = zip321::TransactionRequest::from_uri(&uri)
+    let vault = zcash_address::ZcashAddress::try_from_encoded(&config.vault_address)
+        .map_err(|e| DigError::Game(format!("vault address: {e}")))?;
+    let mut payments = Vec::with_capacity(request.tiles.len());
+    for tile in &request.tiles {
+        let memo = DigMemo::seal(
+            memo_round,
+            *tile,
+            &receiver,
+            &config.sealing_public_key,
+            &mut rng,
+        )
+        .map_err(|e| DigError::Game(e.to_string()))?;
+        // One payment per tile; the single-tile form is checked against the
+        // ZIP 321 URI builder so both paths encode the memo identically.
+        if request.tiles.len() == 1 {
+            payment::dig_payment_uri(
+                Network::Test,
+                &config.vault_address,
+                amount.into_u64(),
+                &memo,
+            )
+            .map_err(|e| DigError::Game(e.to_string()))?;
+        }
+        let memo_bytes = zcash_protocol::memo::MemoBytes::from_bytes(&memo.encode_unpadded())
+            .map_err(|e| DigError::Game(format!("memo: {e}")))?;
+        payments.push(
+            zip321::Payment::new(
+                vault.clone(),
+                Some(amount),
+                Some(memo_bytes),
+                None,
+                None,
+                vec![],
+            )
+            .map_err(|e| DigError::Game(format!("payment: {e}")))?,
+        );
+    }
+    let request_tx = zip321::TransactionRequest::new(payments)
         .map_err(|e| DigError::Game(format!("payment request: {e}")))?;
 
     let usk = player.spending_key()?;
@@ -178,7 +210,7 @@ pub async fn dig(
         pczt,
         target_height,
         fee,
-    } = send::prepare_pczt(db, account, request, &report)?;
+    } = send::prepare_pczt(db, account, request_tx, &report)?;
     if send::circuit_version_for(target_height)? != circuit {
         return Err(VaultError::CircuitMismatch {
             built: format!("{circuit:?}"),
@@ -193,7 +225,7 @@ pub async fn dig(
     Ok(DigOutcome {
         txid: transaction.txid().to_string(),
         memo_round,
-        tile,
+        tiles: request.tiles.clone(),
         amount_zat: amount.into_u64(),
         fee_zat: fee.into_u64(),
         target_height: target_height.into(),

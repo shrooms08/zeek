@@ -22,6 +22,7 @@ zcash_client_sqlite.workspace = true
 zcash_keys.workspace = true
 zcash_protocol.workspace = true
 zip321.workspace = true
+zcash_address.workspace = true
 zip32.workspace = true
 secrecy.workspace = true
 rand_core.workspace = true
