@@ -16,6 +16,8 @@ zeek-core = { path = "../zeek-core" }
 zeek-vault = { path = "../zeek-vault" }
 
 orchard.workspace = true
+zcash_note_encryption = "0.4.1"
+zcash_primitives.workspace = true
 pczt.workspace = true
 zcash_client_backend.workspace = true
 zcash_client_sqlite.workspace = true

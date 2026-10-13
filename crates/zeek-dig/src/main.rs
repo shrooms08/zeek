@@ -1,6 +1,7 @@
 //! `zeek-dig`: test players for Zeek on testnet.
 
 mod dig;
+mod notes;
 mod wallet;
 
 use anyhow::Context;
@@ -29,6 +30,13 @@ enum Command {
     Sync { name: String },
     /// Show the player's Ironwood balance.
     Balance { name: String },
+    /// List the player's unspent notes with their decrypted memos, or every
+    /// output of one transaction that belongs to the player (--txid).
+    Notes {
+        name: String,
+        #[arg(long)]
+        txid: Option<String>,
+    },
     /// Dig: pay the vault with a sealed dig memo.
     Dig(DigArgs),
 }
@@ -106,6 +114,35 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Notes { name, txid } => runtime.block_on(async {
+            let player = Player::new(secrets.path(), &name)?;
+            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let usk = player.spending_key()?;
+            let listed = match txid {
+                Some(txid) => notes::notes_in_transaction(&mut client, &usk, &txid).await?,
+                None => {
+                    let mut db = player.open_db()?;
+                    let account = player.ensure_account(&mut db, &mut client).await?;
+                    vault_wallet::sync(&mut db, &mut client).await?;
+                    let report = vault_wallet::balance(&db, account)?;
+                    notes::notes_with_memos(&mut client, &usk, &report.notes).await?
+                }
+            };
+            for note in listed {
+                println!(
+                    "{}:{} {} zat at {} [{}] {}",
+                    note.txid,
+                    note.output_index,
+                    note.value,
+                    note.height
+                        .map(|h| h.to_string())
+                        .unwrap_or_else(|| "unmined".into()),
+                    note.scope,
+                    note.memo
+                );
+            }
+            Ok(())
+        }),
         Command::Dig(args) => runtime.block_on(async {
             let tiles: Vec<u8> = match (args.tile, args.tiles.is_empty()) {
                 (Some(t), _) => vec![t],
