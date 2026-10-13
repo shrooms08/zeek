@@ -4,6 +4,14 @@
 //! The vault's unified full viewing key is imported as a view-only account:
 //! the wallet can find and track notes but holds no spending key. Spending
 //! happens separately via FROST (see [`crate::send`]).
+//!
+//! Since NU6.3 (Ironwood) every payment to the vault's Orchard receiver lands
+//! in the **Ironwood** pool: the backend trial-decrypts Ironwood outputs with
+//! the same Orchard incoming viewing key but under the Ironwood note-encryption
+//! domain (ZIP 2005, note plaintext lead byte `0x03`) and tracks them as a
+//! separate pool with its own commitment tree. Balances and notes are therefore
+//! reported per pool; the legacy Orchard pool only matters for notes received
+//! before NU6.3.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +19,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use orchard::ValuePool;
 use rand_core::OsRng;
 use zcash_client_backend::data_api::chain::{error, BlockCache, BlockSource};
 use zcash_client_backend::data_api::locking::LockFilter;
@@ -18,13 +27,14 @@ use zcash_client_backend::data_api::scanning::ScanRange;
 use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
 use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::data_api::{
-    Account, AccountBirthday, AccountPurpose, InputSource, MaxSpendMode, TargetValue, WalletRead,
-    WalletWrite,
+    Account, AccountBirthday, AccountPurpose, Balance, InputSource, MaxSpendMode, TargetValue,
+    WalletRead, WalletWrite,
 };
 use zcash_client_backend::proto::compact_formats::CompactBlock;
+use zcash_client_backend::wallet::ReceivedNote;
 use zcash_client_sqlite::util::SystemClock;
 use zcash_client_sqlite::wallet::init::init_wallet_db;
-use zcash_client_sqlite::{AccountUuid, WalletDb};
+use zcash_client_sqlite::{AccountUuid, ReceivedNoteId, WalletDb};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::consensus::{BlockHeight, TestNetwork};
 use zcash_protocol::value::Zatoshis;
@@ -116,9 +126,12 @@ pub async fn sync(db: &mut Db, client: &mut Client) -> Result<(), VaultError> {
         .map_err(|e| VaultError::Sync(e.to_string()))
 }
 
-/// One Orchard note known to the wallet.
+/// One shielded note known to the wallet.
 #[derive(Clone, Debug)]
 pub struct NoteReport {
+    /// Pool the note lives in: Ironwood (active) or legacy Orchard (closed to
+    /// deposits since NU6.3).
+    pub pool: ValuePool,
     /// Transaction that created the note.
     pub txid: String,
     /// Action index within that transaction.
@@ -133,6 +146,37 @@ pub struct NoteReport {
     pub spendable: bool,
 }
 
+/// Value held in one pool, split by spendability.
+#[derive(Clone, Copy, Debug)]
+pub struct PoolBalance {
+    /// Value spendable under the default confirmations policy.
+    pub spendable: Zatoshis,
+    /// Value waiting for more confirmations (received notes and change).
+    pub pending: Zatoshis,
+    /// Total value including pending.
+    pub total: Zatoshis,
+}
+
+impl PoolBalance {
+    /// An empty pool.
+    pub const ZERO: Self = PoolBalance {
+        spendable: Zatoshis::ZERO,
+        pending: Zatoshis::ZERO,
+        total: Zatoshis::ZERO,
+    };
+
+    fn from_balance(balance: &Balance) -> Result<Self, VaultError> {
+        let pending = (balance.change_pending_confirmation()
+            + balance.value_pending_spendability())
+        .ok_or_else(|| VaultError::Wallet("pending balance overflow".into()))?;
+        Ok(PoolBalance {
+            spendable: balance.spendable_value(),
+            pending,
+            total: balance.total(),
+        })
+    }
+}
+
 /// Balance summary for the vault account.
 #[derive(Clone, Debug)]
 pub struct BalanceReport {
@@ -140,38 +184,42 @@ pub struct BalanceReport {
     pub chain_tip: u32,
     /// Highest fully scanned height.
     pub fully_scanned: u32,
-    /// Orchard value spendable under the default confirmations policy.
-    pub spendable: Zatoshis,
-    /// Orchard value waiting for more confirmations.
-    pub pending: Zatoshis,
-    /// Total Orchard value including pending.
-    pub total: Zatoshis,
-    /// Orchard notes with at least one confirmation.
+    /// Ironwood pool balance: the pool every payment to the vault lands in
+    /// after NU6.3 and the only pool `send` spends from.
+    pub ironwood: PoolBalance,
+    /// Legacy Orchard pool balance. Non-zero only for notes received before
+    /// NU6.3; such funds cannot be spent by this vault (see
+    /// [`VaultError::FundsInClosedOrchardPool`]).
+    pub orchard: PoolBalance,
+    /// Mined notes in either pool with their confirmation depth.
     pub notes: Vec<NoteReport>,
+    /// Confirmations the default policy requires before a received (external)
+    /// note is spendable.
+    pub min_confirmations: u32,
+    /// Confirmations the default policy requires before change is spendable.
+    pub change_confirmations: u32,
 }
 
-/// Reads the account's Orchard balance and note list from the wallet.
+/// Reads the account's per-pool balance and note list from the wallet.
 pub fn balance(db: &Db, account: AccountUuid) -> Result<BalanceReport, VaultError> {
+    let policy = ConfirmationsPolicy::default();
     let summary = db
-        .get_wallet_summary(ConfirmationsPolicy::default())
+        .get_wallet_summary(policy)
         .map_err(wallet_err)?
         .ok_or_else(|| {
             VaultError::Wallet("wallet has not been synced yet; run `zeek-vault sync`".into())
         })?;
     let chain_tip = summary.chain_tip_height();
-    let (spendable, pending, total) = match summary.account_balances().get(&account) {
-        Some(balance) => {
-            let orchard = balance.orchard_balance();
-            let pending = (orchard.change_pending_confirmation()
-                + orchard.value_pending_spendability())
-            .unwrap_or(Zatoshis::ZERO);
-            (orchard.spendable_value(), pending, orchard.total())
-        }
-        None => (Zatoshis::ZERO, Zatoshis::ZERO, Zatoshis::ZERO),
+    let (ironwood, orchard) = match summary.account_balances().get(&account) {
+        Some(balance) => (
+            PoolBalance::from_balance(balance.ironwood_balance())?,
+            PoolBalance::from_balance(balance.orchard_balance())?,
+        ),
+        None => (PoolBalance::ZERO, PoolBalance::ZERO),
     };
 
     let target: TargetHeight = (chain_tip + 1).into();
-    let spendable_now = select_notes(db, account, target, ConfirmationsPolicy::default())?;
+    let spendable_now = select_notes(db, account, target, policy)?;
     let all_mined = select_notes(db, account, target, ConfirmationsPolicy::MIN)?;
 
     let notes = all_mined
@@ -185,51 +233,67 @@ pub fn balance(db: &Db, account: AccountUuid) -> Result<BalanceReport, VaultErro
     Ok(BalanceReport {
         chain_tip: chain_tip.into(),
         fully_scanned: summary.fully_scanned_height().into(),
-        spendable,
-        pending,
-        total,
+        ironwood,
+        orchard,
         notes,
+        min_confirmations: policy.untrusted().get(),
+        change_confirmations: policy.trusted().get(),
     })
 }
+
+/// Key identifying a note across pools: `(pool, txid, action index)`.
+type NoteKey = (ValuePool, String, u16);
 
 fn select_notes(
     db: &Db,
     account: AccountUuid,
     target: TargetHeight,
     policy: ConfirmationsPolicy,
-) -> Result<BTreeMap<(String, u16), NoteReport>, VaultError> {
+) -> Result<BTreeMap<NoteKey, NoteReport>, VaultError> {
     let tip = target.saturating_sub(1);
     let notes = db
         .select_spendable_notes(
             account,
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
-            &[ShieldedPool::Orchard],
+            &[ShieldedPool::Ironwood, ShieldedPool::Orchard],
             target,
             policy,
             &[],
             LockFilter::Unfiltered,
         )
         .map_err(wallet_err)?;
-    Ok(notes
-        .take_orchard()
+    let orchard = notes.orchard().to_vec();
+    let ironwood = notes.take_ironwood();
+    let report = |pool: ValuePool, n: ReceivedNote<ReceivedNoteId, orchard::Note>| {
+        let txid = n.txid().to_string();
+        let mined_height = n.mined_height().map(u32::from);
+        let confirmations = mined_height.map(|h| u32::from(tip).saturating_sub(h) + 1);
+        (
+            (pool, txid.clone(), n.output_index()),
+            NoteReport {
+                pool,
+                txid,
+                output_index: n.output_index(),
+                value: Zatoshis::from_u64(n.note().value().inner()).unwrap_or(Zatoshis::ZERO),
+                mined_height,
+                confirmations,
+                spendable: false,
+            },
+        )
+    };
+    Ok(ironwood
         .into_iter()
-        .map(|n| {
-            let txid = n.txid().to_string();
-            let mined_height = n.mined_height().map(u32::from);
-            let confirmations = mined_height.map(|h| u32::from(tip).saturating_sub(h) + 1);
-            (
-                (txid.clone(), n.output_index()),
-                NoteReport {
-                    txid,
-                    output_index: n.output_index(),
-                    value: Zatoshis::from_u64(n.note().value().inner()).unwrap_or(Zatoshis::ZERO),
-                    mined_height,
-                    confirmations,
-                    spendable: false,
-                },
-            )
-        })
+        .map(|n| report(ValuePool::Ironwood, n))
+        .chain(orchard.into_iter().map(|n| report(ValuePool::Orchard, n)))
         .collect())
+}
+
+/// Human-readable pool name for CLI output.
+pub fn pool_name(pool: ValuePool) -> &'static str {
+    match pool {
+        ValuePool::Ironwood => "ironwood",
+        ValuePool::Orchard => "orchard",
+    }
 }
 
 /// Converts any wallet error into the crate's error type.

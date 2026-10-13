@@ -28,9 +28,9 @@ enum Command {
     Address,
     /// Scan testnet via lightwalletd for the vault's notes.
     Sync(SyncArgs),
-    /// Report the vault's spendable Orchard balance and notes.
+    /// Report the vault's Ironwood (and legacy Orchard) balance and notes.
     Balance,
-    /// Spend from the vault with a FROST threshold signature.
+    /// Spend Ironwood funds from the vault with a FROST threshold signature.
     Send(SendArgs),
 }
 
@@ -57,7 +57,8 @@ struct SyncArgs {
 
 #[derive(Args)]
 struct SendArgs {
-    /// Destination testnet unified address (must have an Orchard receiver).
+    /// Destination testnet unified address (must have an Orchard receiver,
+    /// which is how the Ironwood pool is addressed).
     #[arg(long)]
     to: String,
     /// Amount in ZEC, e.g. 0.001.
@@ -155,7 +156,7 @@ fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
         );
     }
     println!("Network: testnet");
-    println!("Unified address (Orchard-only receiver):");
+    println!("Unified address (Orchard receiver; payments land in the Ironwood pool):");
     println!("  {}", vault.address);
     println!("Unified full viewing key:");
     println!("  {}", keys::encode_ufvk(&ufvk));
@@ -190,11 +191,12 @@ async fn sync(config: &Config, secrets: &SecretsDir, args: SyncArgs) -> anyhow::
     wallet::sync(&mut db, &mut client).await?;
     let report = wallet::balance(&db, account)?;
     println!(
-        "Synced. chain tip {} fully scanned {} spendable {} ZEC pending {} ZEC",
+        "Synced. chain tip {} fully scanned {} | Ironwood spendable {} ZEC pending {} ZEC | legacy Orchard total {} ZEC",
         report.chain_tip,
         report.fully_scanned,
-        format_zec(report.spendable),
-        format_zec(report.pending)
+        format_zec(report.ironwood.spendable),
+        format_zec(report.ironwood.pending),
+        format_zec(report.orchard.total)
     );
     Ok(())
 }
@@ -209,23 +211,42 @@ fn balance(config: &Config, secrets: &SecretsDir) -> anyhow::Result<()> {
     println!("Vault address: {}", vault.address);
     println!("Chain tip (wallet view): {}", report.chain_tip);
     println!("Fully scanned height:    {}", report.fully_scanned);
+    println!("Ironwood pool (where payments to the vault land since NU6.3):");
     println!(
-        "Spendable Orchard:       {} ZEC",
-        format_zec(report.spendable)
+        "  spendable:             {} ZEC",
+        format_zec(report.ironwood.spendable)
     );
     println!(
-        "Pending confirmation:    {} ZEC",
-        format_zec(report.pending)
+        "  pending confirmations: {} ZEC",
+        format_zec(report.ironwood.pending)
     );
-    println!("Total Orchard:           {} ZEC", format_zec(report.total));
-    println!("Orchard notes: {}", report.notes.len());
+    println!(
+        "  total:                 {} ZEC",
+        format_zec(report.ironwood.total)
+    );
+    if report.orchard.total.into_u64() > 0 {
+        println!("Legacy Orchard pool (closed to ordinary payments since NU6.3; not spendable by this vault):");
+        println!(
+            "  total:                 {} ZEC",
+            format_zec(report.orchard.total)
+        );
+    } else {
+        println!("Legacy Orchard pool:     none");
+    }
+    println!(
+        "Notes: {} (received notes need {} confirmations, change needs {})",
+        report.notes.len(),
+        report.min_confirmations,
+        report.change_confirmations
+    );
     for note in &report.notes {
         let depth = note
             .confirmations
             .map(|c| format!("{c} confirmations"))
             .unwrap_or_else(|| "unmined".to_owned());
         println!(
-            "  {}:{}  {} ZEC  mined at {}  {}  {}",
+            "  [{}] {}:{}  {} ZEC  mined at {}  {}  {}",
+            wallet::pool_name(note.pool),
             note.txid,
             note.output_index,
             format_zec(note.value),
@@ -233,10 +254,10 @@ fn balance(config: &Config, secrets: &SecretsDir) -> anyhow::Result<()> {
                 .map(|h| h.to_string())
                 .unwrap_or_else(|| "-".into()),
             depth,
-            if note.spendable {
-                "spendable"
-            } else {
-                "not yet spendable"
+            match (note.pool, note.spendable) {
+                (orchard::ValuePool::Orchard, _) => "legacy pool, not spendable here",
+                (_, true) => "spendable",
+                (_, false) => "not yet spendable",
             }
         );
     }
@@ -287,7 +308,22 @@ async fn send_cmd(config: &Config, secrets: &SecretsDir, args: SendArgs) -> anyh
     .await?;
 
     println!("Broadcast txid: {}", outcome.txid);
-    println!("Signed Orchard actions: {}", outcome.signed_actions);
+    println!(
+        "Transaction: {:?} on consensus branch {:?} (target height {})",
+        outcome.version, outcome.branch, outcome.target_height
+    );
+    println!("FROST-signed spends: {}", outcome.signed_spends.len());
+    for spend in &outcome.signed_spends {
+        println!(
+            "  {} action {}  value {}",
+            wallet::pool_name(spend.pool),
+            spend.index,
+            spend
+                .value
+                .map(|v| format_zec(zcash_protocol::value::Zatoshis::const_from_u64(v)))
+                .unwrap_or_else(|| "redacted".into())
+        );
+    }
     println!("Fee paid: {} ZEC", format_zec(outcome.fee));
     println!("Signers: {:?}", args.signers);
     Ok(())

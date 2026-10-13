@@ -9,6 +9,15 @@
 //! generated here from a throw-away spending key using the spec's own PRF
 //! derivation and then kept inside the viewing key.
 //!
+//! # Ironwood
+//!
+//! The Ironwood pool introduced by NU6.3 reuses Orchard key material and the
+//! Orchard receiver type: a unified address with an Orchard receiver is how an
+//! Ironwood payment is addressed (`zcash_keys` treats the two pools as sharing
+//! that receiver, and the wallet backend trial-decrypts Ironwood outputs with
+//! the Orchard incoming viewing key under the ZIP 2005 note-encryption
+//! domain). No new receiver or address encoding is needed for the vault.
+//!
 //! # The `ak` encoding constraint
 //!
 //! The spec defines `ak = SpendAuthSig.DerivePublic(ask)` and requires the
@@ -99,6 +108,8 @@ pub fn unified_full_viewing_key(fvk: &FullViewingKey) -> Result<UnifiedFullViewi
 }
 
 /// Derives the vault's default unified address with only an Orchard receiver.
+///
+/// After NU6.3 payments to this receiver are created in the Ironwood pool.
 pub fn orchard_only_address(ufvk: &UnifiedFullViewingKey) -> Result<UnifiedAddress, VaultError> {
     ufvk.default_address(UnifiedAddressRequest::ORCHARD)
         .map(|(address, _index)| address)

@@ -1,5 +1,15 @@
-//! `zeek-vault`: a 2-of-3 FROST threshold key that controls a Zcash Orchard
-//! address and spends from it on **testnet**.
+//! `zeek-vault`: a 2-of-3 FROST threshold key that controls a Zcash
+//! Orchard-protocol address and spends from the **Ironwood** pool on
+//! **testnet**.
+//!
+//! Since NU6.3 ("Ironwood") the Orchard pool is closed to ordinary payments
+//! and every payment to the vault's Orchard receiver lands in the Ironwood
+//! pool, whose notes are Orchard-shaped (same keys, same RedPallas spend
+//! authorization under `rk = ak + [alpha] G`) but use version 3 note
+//! plaintexts and a separate commitment tree, and are carried in the Ironwood
+//! bundle of a version 6 transaction. Testnet is further past NU7, which
+//! keeps that transaction format; see the workspace `Cargo.toml` for how the
+//! NU7 consensus branch is provided.
 //!
 //! The crate is organised as a pipeline:
 //!
@@ -9,10 +19,11 @@
 //!   key (`ak`, `nk`, `rivk`) and derives the unified viewing key and address.
 //! * [`store`] persists one key file per keyholder plus a public vault file.
 //! * [`lightwalletd`] and [`wallet`] talk to a `lightwalletd` server and keep a
-//!   view-only `zcash_client_sqlite` wallet in sync.
-//! * [`send`] builds a PCZT, proves it, FROST-signs every Orchard spend with
-//!   the correct per-action randomizer, extracts the transaction and
-//!   broadcasts it.
+//!   view-only `zcash_client_sqlite` wallet in sync, reporting Ironwood and
+//!   legacy Orchard balances separately.
+//! * [`send`] builds a V6 PCZT spending Ironwood notes, proves it, FROST-signs
+//!   every spend that awaits a signature (in either Orchard-protocol bundle)
+//!   with that action's randomizer, extracts the transaction and broadcasts it.
 //!
 //! # What is simulated in this spike
 //!

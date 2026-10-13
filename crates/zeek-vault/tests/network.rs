@@ -41,9 +41,10 @@ async fn lightwalletd_serves_testnet() {
     let info = lightwalletd::lightd_info(&mut client).await.expect("info");
     assert_eq!(info.chain_name, "test");
     let tip = lightwalletd::latest_height(&mut client).await.expect("tip");
-    assert!(
-        u32::from(tip) > 4_134_000,
-        "testnet is past NU6.3, got {tip}"
+    assert!(u32::from(tip) > 4_465_026, "testnet is past NU7, got {tip}");
+    assert_eq!(
+        info.consensus_branch_id, "77190ad9",
+        "lightwalletd must report the NU7 consensus branch"
     );
     let state = lightwalletd::tree_state(&mut client, tip)
         .await
@@ -75,8 +76,9 @@ async fn vault_sync_from_tip_reports_zero_balance() {
     wallet::sync(&mut db, &mut client).await.expect("sync");
     let report = wallet::balance(&db, account).expect("balance");
     assert!(report.chain_tip >= u32::from(birthday));
-    assert_eq!(report.spendable.into_u64(), 0);
-    assert_eq!(report.total.into_u64(), 0);
+    assert_eq!(report.ironwood.spendable.into_u64(), 0);
+    assert_eq!(report.ironwood.total.into_u64(), 0);
+    assert_eq!(report.orchard.total.into_u64(), 0);
     assert!(report.notes.is_empty());
 }
 
@@ -117,6 +119,13 @@ async fn funded_vault_send() {
     )
     .await
     .expect("send");
-    println!("broadcast {}", outcome.txid);
-    assert!(outcome.signed_actions >= 1);
+    println!(
+        "broadcast {} ({:?} on {:?})",
+        outcome.txid, outcome.version, outcome.branch
+    );
+    assert!(!outcome.signed_spends.is_empty());
+    assert!(outcome
+        .signed_spends
+        .iter()
+        .all(|s| s.pool == orchard::ValuePool::Ironwood));
 }

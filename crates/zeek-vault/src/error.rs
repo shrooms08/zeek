@@ -87,19 +87,18 @@ pub enum VaultError {
     #[error("aggregated FROST signature failed verification against the randomized verifying key")]
     SignatureVerification,
 
-    #[error("randomized verifying key for action {index} does not match the action's rk")]
-    RkMismatch { index: usize },
+    #[error(
+        "randomized verifying key for {pool} action {index} does not match the action's rk; the spend is not controlled by this vault's key"
+    )]
+    RkMismatch { pool: String, index: usize },
 
-    #[error("Orchard action {index} is missing its spend-auth randomizer (alpha)")]
-    MissingAlpha { index: usize },
+    #[error("{pool} action {index} is missing its spend-auth randomizer (alpha)")]
+    MissingAlpha { pool: String, index: usize },
 
-    #[error("Orchard action {index} has an invalid spend-auth randomizer (alpha)")]
-    InvalidAlpha { index: usize },
+    #[error("{pool} action {index} still carries a dummy spending key; refusing to sign")]
+    DummyKeyPresent { pool: String, index: usize },
 
-    #[error("Orchard action {index} still carries a dummy spending key; refusing to sign")]
-    DummyKeyPresent { index: usize },
-
-    #[error("the PCZT contains no Orchard spends to sign")]
+    #[error("the PCZT contains no Orchard-protocol spends to sign")]
     NothingToSign,
 
     #[error("configuration error: {0}")]
@@ -132,8 +131,45 @@ pub enum VaultError {
     #[error("invalid destination address: {0}")]
     InvalidAddress(String),
 
-    #[error("destination address has no Orchard receiver; this vault only sends to Orchard")]
+    #[error(
+        "destination address has no Orchard-protocol receiver; this vault only sends to the Ironwood pool, which is addressed through a unified address with an Orchard receiver"
+    )]
     NoOrchardReceiver,
+
+    #[error(
+        "the vault's funds are in the legacy Orchard pool ({orchard} zatoshis, {ironwood} zatoshis in Ironwood); NU6.3 closed Orchard to ordinary payments, so they can only leave through a ZIP 318 turnstile migration, which this vault does not perform; refusing to build a transaction"
+    )]
+    FundsInClosedOrchardPool { orchard: u64, ironwood: u64 },
+
+    #[error(
+        "insufficient confirmed Ironwood funds: {required} zatoshis required but only {spendable} spendable; {pending} zatoshis are waiting for confirmations (received notes need {min_confirmations} confirmations, change needs {change_confirmations}); run `zeek-vault sync` later and retry"
+    )]
+    FundsNotYetSpendable {
+        spendable: u64,
+        pending: u64,
+        required: u64,
+        min_confirmations: u32,
+        change_confirmations: u32,
+    },
+
+    #[error(
+        "the proposal selected an input from the {0} pool, but only Ironwood inputs are allowed"
+    )]
+    UnexpectedInputPool(String),
+
+    #[error(
+        "the extracted transaction is {version} on consensus branch {branch}, but the target height {target_height} requires {expected_version} on branch {expected_branch}"
+    )]
+    WrongTransactionVersion {
+        version: String,
+        branch: String,
+        expected_version: String,
+        expected_branch: String,
+        target_height: u32,
+    },
+
+    #[error("the Orchard circuit version changed between proving-key construction ({built:?}) and the proposal's target height ({required:?})")]
+    CircuitMismatch { built: String, required: String },
 
     #[error("invalid ZEC amount `{0}`: expected a decimal with at most 8 fractional digits")]
     InvalidAmount(String),
