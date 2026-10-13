@@ -59,17 +59,37 @@ pub fn derive_full_viewing_key<R: RngCore + CryptoRng>(
     group_key: &[u8; 32],
     mut rng: R,
 ) -> Result<FullViewingKey, VaultError> {
+    let throwaway = random_spending_key(&mut rng);
+    full_viewing_key_with_ak(group_key, &throwaway)
+}
+
+/// Like [`derive_full_viewing_key`], but `nk` and `rivk` come from the
+/// spending key derived from `seed`, so that every party holding the same
+/// seed derives the same viewing key (used after a DKG ceremony, where the
+/// seed is a transcript every participant contributed to). `seed` must not be
+/// one of the negligible fraction of byte strings the `orchard` crate rejects.
+pub fn derive_full_viewing_key_from_seed(
+    group_key: &[u8; 32],
+    seed: [u8; 32],
+) -> Result<FullViewingKey, VaultError> {
+    let candidate = SpendingKey::from_bytes(seed);
+    let sk = Option::<SpendingKey>::from(candidate)
+        .ok_or_else(|| VaultError::KeyDerivation("seed is not a valid spending key".into()))?;
+    full_viewing_key_with_ak(group_key, &sk)
+}
+
+fn full_viewing_key_with_ak(
+    group_key: &[u8; 32],
+    throwaway: &SpendingKey,
+) -> Result<FullViewingKey, VaultError> {
     if group_key[31] & 0x80 != 0 {
         return Err(VaultError::OddGroupKey);
     }
     if !ak_is_encodable(group_key) {
         return Err(VaultError::InvalidGroupKey);
     }
-
-    let throwaway = random_spending_key(&mut rng);
-    let mut raw = FullViewingKey::from(&throwaway).to_bytes();
+    let mut raw = FullViewingKey::from(throwaway).to_bytes();
     raw[..32].copy_from_slice(group_key);
-
     let fvk = FullViewingKey::from_bytes(&raw).ok_or(VaultError::InvalidFullViewingKey);
     raw.zeroize();
     fvk
@@ -175,6 +195,17 @@ mod tests {
             derive_full_viewing_key(&[0u8; 32], OsRng),
             Err(VaultError::InvalidGroupKey)
         ));
+    }
+
+    #[test]
+    fn seeded_derivation_is_deterministic() {
+        let ak = group_key();
+        let a = derive_full_viewing_key_from_seed(&ak, [5u8; 32]).expect("a");
+        let b = derive_full_viewing_key_from_seed(&ak, [5u8; 32]).expect("b");
+        let c = derive_full_viewing_key_from_seed(&ak, [6u8; 32]).expect("c");
+        assert_eq!(a.to_bytes(), b.to_bytes());
+        assert_ne!(a.to_bytes(), c.to_bytes());
+        assert_eq!(ak_bytes(&a), ak);
     }
 
     #[test]

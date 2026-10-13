@@ -39,6 +39,14 @@ pub type Identifier = rp::Identifier;
 pub type KeyPackage = rp::keys::KeyPackage;
 /// The group verifying key and every participant's verifying share.
 pub type PublicKeyPackage = rp::keys::PublicKeyPackage;
+/// Round 1 secret nonces (single use).
+pub type SigningNonces = rp::round1::SigningNonces;
+/// Round 1 public commitments.
+pub type SigningCommitments = rp::round1::SigningCommitments;
+/// Coordinator's signing package: message plus every signer's commitments.
+pub type SigningPackage = rp::SigningPackage;
+/// Round 2 signature share.
+pub type SignatureShare = rp::round2::SignatureShare;
 
 /// Output of key generation: one key package per keyholder plus the public
 /// package shared by everyone.
@@ -123,6 +131,36 @@ pub struct RandomizedSignature {
     pub randomized_verifying_key: [u8; 32],
 }
 
+/// Round 1 of signing for one keyholder: fresh single-use nonces and the
+/// commitments to publish. The nonces must be used at most once and dropped
+/// on any abort.
+pub fn commit<R: RngCore + CryptoRng>(
+    key_package: &KeyPackage,
+    rng: &mut R,
+) -> (rp::round1::SigningNonces, rp::round1::SigningCommitments) {
+    rp::round1::commit(key_package.signing_share(), rng)
+}
+
+/// Round 2 of signing for one keyholder: its share of the rerandomized
+/// signature over `signing_package`, using the spend's randomizer `alpha`.
+///
+/// `frost_rerandomized::sign` is marked deprecated in favour of the seed-based
+/// API, which lets the coordinator *choose* a fresh randomizer. Orchard fixes
+/// the randomizer (`alpha`) in the PCZT before signing starts, so the
+/// seed-based flow does not apply here; the `Randomize` trait that would let
+/// us do this by hand is private.
+pub fn sign_share(
+    signing_package: &rp::SigningPackage,
+    nonces: &rp::round1::SigningNonces,
+    key_package: &KeyPackage,
+    alpha: &pallas::Scalar,
+) -> Result<rp::round2::SignatureShare, VaultError> {
+    let randomizer = Randomizer::<Ciphersuite>::from_scalar(*alpha);
+    #[allow(deprecated)]
+    let share = frost_rerandomized::sign(signing_package, nonces, key_package, randomizer)?;
+    Ok(share)
+}
+
 /// Produces a rerandomized FROST signature over `message` using exactly the
 /// given signers.
 ///
@@ -145,17 +183,13 @@ pub fn randomized_sign<R: RngCore + CryptoRng>(
     let mut nonces = BTreeMap::new();
     let mut commitments = BTreeMap::new();
     for key_package in signers {
-        let (signer_nonces, signer_commitments) =
-            rp::round1::commit(key_package.signing_share(), &mut rng);
+        let (signer_nonces, signer_commitments) = commit(key_package, &mut rng);
         nonces.insert(*key_package.identifier(), signer_nonces);
         commitments.insert(*key_package.identifier(), signer_commitments);
     }
 
     // The coordinator assembles the signing package and the randomizer.
     let signing_package = rp::SigningPackage::new(commitments, message);
-    let randomizer = Randomizer::<Ciphersuite>::from_scalar(*alpha);
-    let randomized_params =
-        RandomizedParams::from_randomizer(public_key_package.verifying_key(), randomizer);
 
     // Round 2: each signer produces a signature share with its randomized key.
     let mut shares = BTreeMap::new();
@@ -163,20 +197,27 @@ pub fn randomized_sign<R: RngCore + CryptoRng>(
         let signer_nonces = nonces
             .get(key_package.identifier())
             .ok_or_else(|| VaultError::UnknownSigner(0))?;
-        // `frost_rerandomized::sign` is marked deprecated in favour of the
-        // seed-based API, which lets the coordinator *choose* a fresh
-        // randomizer. Orchard fixes the randomizer (`alpha`) in the PCZT before
-        // signing starts, so the seed-based flow does not apply here; the
-        // `Randomize` trait that would let us do this by hand is private.
-        #[allow(deprecated)]
-        let share =
-            frost_rerandomized::sign(&signing_package, signer_nonces, key_package, randomizer)?;
+        let share = sign_share(&signing_package, signer_nonces, key_package, alpha)?;
         shares.insert(*key_package.identifier(), share);
     }
 
+    aggregate(&signing_package, &shares, public_key_package, alpha)
+}
+
+/// Aggregates signature shares for the spend with randomizer `alpha` and
+/// verifies the result against the randomized group key before returning it.
+pub fn aggregate(
+    signing_package: &rp::SigningPackage,
+    shares: &BTreeMap<Identifier, rp::round2::SignatureShare>,
+    public_key_package: &PublicKeyPackage,
+    alpha: &pallas::Scalar,
+) -> Result<RandomizedSignature, VaultError> {
+    let randomizer = Randomizer::<Ciphersuite>::from_scalar(*alpha);
+    let randomized_params =
+        RandomizedParams::from_randomizer(public_key_package.verifying_key(), randomizer);
     aggregate_shares(
-        &signing_package,
-        &shares,
+        signing_package,
+        shares,
         public_key_package,
         &randomized_params,
     )
@@ -213,7 +254,7 @@ pub(crate) fn aggregate_shares(
 
 /// Rejects signer sets that are too small, contain duplicates, or contain a
 /// package that does not belong to this group.
-fn check_signer_set(
+pub fn check_signer_set(
     signers: &[&KeyPackage],
     public_key_package: &PublicKeyPackage,
 ) -> Result<(), VaultError> {
