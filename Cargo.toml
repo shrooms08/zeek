@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/zeek-core", "crates/zeek-vault", "crates/zeek-engine", "crates/zeek-dig"]
+members = ["crates/zeek-core", "crates/zeek-vault", "crates/zeek-engine", "crates/zeek-dig", "crates/zeek-keyholder"]
 
 [workspace.package]
 edition = "2021"
@@ -26,6 +26,10 @@ zcash_primitives = "0.30.1"
 zcash_protocol = "0.10.5"
 zip321 = "0.9"
 zip32 = "0.2"
+
+# Keyholder identity and wire encoding.
+ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+postcard = { version = "1.1", features = ["use-std"] }
 
 # Crypto plumbing.
 group = "0.13"

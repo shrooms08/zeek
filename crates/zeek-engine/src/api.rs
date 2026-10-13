@@ -23,8 +23,10 @@ use zeek_core::seal::SealingPublicKey;
 use zeek_core::settle::{Payout, RoundOutcome};
 
 use crate::config::{GameConfig, SETTLE_CONFIRMATIONS};
-use crate::db::{Db, PlanStatus};
+use crate::coordinator::Coordinator;
+use crate::db::{Db, PayoutRecord, PlanStatus};
 use crate::error::EngineError;
+use crate::ledger::Ledger;
 use crate::processor::{BoardState, Event, PendingRound, Processor};
 use crate::proof::ProofBundle;
 
@@ -34,6 +36,8 @@ pub struct AppState {
     pub db: Mutex<Db>,
     pub events: broadcast::Sender<Event>,
     pub started: Instant,
+    /// Present when this engine also coordinates payouts.
+    pub coordinator: Option<Arc<Mutex<Coordinator>>>,
 }
 
 /// `GET /v1/config`.
@@ -79,6 +83,8 @@ pub struct SettledRound {
     pub forfeited: u64,
     pub plan_status: PlanStatus,
     pub settled_at_height: u32,
+    /// Payout transaction, once broadcast.
+    pub payout: Option<PayoutRecord>,
 }
 
 /// `GET /v1/rounds/{n}`.
@@ -141,6 +147,7 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         .route("/v1/rounds/{round}", get(round))
         .route("/v1/rounds/{round}/proof", get(proof))
         .route("/v1/health", get(health))
+        .route("/v1/vault/ledger", get(vault_ledger))
         .route("/v1/stream", get(stream))
         .with_state(state);
     if !cors_origins.is_empty() {
@@ -194,6 +201,7 @@ pub fn round_response(
     let params = &processor.config().params;
     let (window, status, context) = processor.status(db, round)?;
     let settlement = db.settlement(round)?;
+    let payout = db.payout(round)?;
     let voided = status == RoundStatus::Voided;
     let notes = db
         .notes_in_range(window.start, window.end)?
@@ -233,6 +241,7 @@ pub fn round_response(
             forfeited: s.forfeited,
             plan_status: row.status,
             settled_at_height: row.settled_at_height,
+            payout: payout.clone(),
         }
     });
     Ok(RoundResponse {
@@ -278,6 +287,18 @@ async fn proof(
             format!("round {round} is not settled yet"),
         )),
     }
+}
+
+async fn vault_ledger(State(state): State<Arc<AppState>>) -> ApiResult<Ledger> {
+    let Some(coordinator) = &state.coordinator else {
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "this engine is not configured as the payout coordinator".into(),
+        ));
+    };
+    let db = lock(&state).await;
+    let coordinator = coordinator.lock().await;
+    Ok(Json(coordinator.ledger(&db, &state.processor)?))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<HealthResponse> {

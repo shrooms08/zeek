@@ -103,25 +103,80 @@ pub struct BeaconRow {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStatus {
-    /// Computed and waiting for the keyholders to sign the payouts (Phase 4).
+    /// Computed and waiting for the keyholders to sign the payouts.
     AwaitingSignatures,
+    /// The payout transaction was broadcast (see the payout record).
+    Paid,
+    /// The settlement has no payout to make (everything stayed in the vault).
+    NothingToPay,
 }
 
 impl PlanStatus {
     fn as_str(self) -> &'static str {
         match self {
             PlanStatus::AwaitingSignatures => "awaiting_signatures",
+            PlanStatus::Paid => "paid",
+            PlanStatus::NothingToPay => "nothing_to_pay",
         }
     }
 
     fn parse(s: &str) -> Result<Self, EngineError> {
         match s {
             "awaiting_signatures" => Ok(PlanStatus::AwaitingSignatures),
+            "paid" => Ok(PlanStatus::Paid),
+            "nothing_to_pay" => Ok(PlanStatus::NothingToPay),
             other => Err(EngineError::Corrupt(format!(
                 "unknown plan status `{other}`"
             ))),
         }
     }
+}
+
+/// State of a payout transaction for one round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PayoutState {
+    /// A signing session was opened; the transaction may or may not have
+    /// been broadcast (inspect before retrying).
+    Signing,
+    /// Broadcast and recorded in the vault wallet.
+    Broadcast,
+}
+
+impl PayoutState {
+    fn as_str(self) -> &'static str {
+        match self {
+            PayoutState::Signing => "signing",
+            PayoutState::Broadcast => "broadcast",
+        }
+    }
+
+    fn parse(s: &str) -> Result<Self, EngineError> {
+        match s {
+            "signing" => Ok(PayoutState::Signing),
+            "broadcast" => Ok(PayoutState::Broadcast),
+            other => Err(EngineError::Corrupt(format!(
+                "unknown payout state `{other}`"
+            ))),
+        }
+    }
+}
+
+/// A payout record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayoutRecord {
+    pub round: u32,
+    pub state: PayoutState,
+    /// Signing session id, hex.
+    pub session: String,
+    /// Transaction id once broadcast (display hex).
+    pub txid: Option<String>,
+    /// Chain tip when the record was last updated.
+    pub height: u32,
+    /// Fee of the payout transaction.
+    pub fee: u64,
+    /// Keyholders that signed.
+    pub signers: Vec<u16>,
 }
 
 /// A settled round.
@@ -194,6 +249,15 @@ impl Db {
                  randomness TEXT NOT NULL,
                  relay TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS payouts (
+                 round INTEGER PRIMARY KEY,
+                 state TEXT NOT NULL,
+                 session TEXT NOT NULL,
+                 txid TEXT,
+                 height INTEGER NOT NULL,
+                 fee INTEGER NOT NULL,
+                 signers TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS settlements (
                  round INTEGER PRIMARY KEY,
                  settled_at_height INTEGER NOT NULL,
@@ -259,6 +323,21 @@ impl Db {
     /// Records the chain tip reported by the block source.
     pub fn set_chain_tip(&self, height: u32) -> Result<(), EngineError> {
         self.set_meta("chain_tip", &height.to_string())
+    }
+
+    /// `nTime` of the chain tip block, recorded while the tip is below genesis.
+    pub fn chain_tip_time(&self) -> Result<Option<u64>, EngineError> {
+        self.meta("chain_tip_time")?
+            .map(|v| {
+                v.parse::<u64>()
+                    .map_err(|_| EngineError::Corrupt("chain_tip_time is not a number".into()))
+            })
+            .transpose()
+    }
+
+    /// Records the chain tip's `nTime`.
+    pub fn set_chain_tip_time(&self, time: u64) -> Result<(), EngineError> {
+        self.set_meta("chain_tip_time", &time.to_string())
     }
 
     // ---- blocks ----
@@ -532,6 +611,99 @@ impl Db {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Updates a settlement's plan status.
+    pub fn set_plan_status(&self, round: u32, status: PlanStatus) -> Result<(), EngineError> {
+        self.conn.execute(
+            "UPDATE settlements SET status = ?1 WHERE round = ?2",
+            params![status.as_str(), round],
+        )?;
+        Ok(())
+    }
+
+    // ---- payouts ----
+
+    /// Records that a signing session was opened for `round`.
+    pub fn insert_payout(&self, record: &PayoutRecord) -> Result<(), EngineError> {
+        self.conn.execute(
+            "INSERT INTO payouts (round, state, session, txid, height, fee, signers)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.round,
+                record.state.as_str(),
+                record.session,
+                record.txid,
+                record.height,
+                record.fee,
+                serde_json::to_string(&record.signers)
+                    .map_err(|e| EngineError::Corrupt(e.to_string()))?
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Marks the round's payout as broadcast.
+    pub fn mark_payout_broadcast(
+        &self,
+        round: u32,
+        txid: &str,
+        height: u32,
+        signers: &[u16],
+    ) -> Result<(), EngineError> {
+        self.conn.execute(
+            "UPDATE payouts SET state = 'broadcast', txid = ?1, height = ?2, signers = ?3 WHERE round = ?4",
+            params![
+                txid,
+                height,
+                serde_json::to_string(signers).map_err(|e| EngineError::Corrupt(e.to_string()))?,
+                round
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Removes a payout record whose session aborted before broadcast.
+    pub fn delete_payout_if_signing(&self, round: u32) -> Result<(), EngineError> {
+        self.conn.execute(
+            "DELETE FROM payouts WHERE round = ?1 AND state = 'signing'",
+            params![round],
+        )?;
+        Ok(())
+    }
+
+    /// The payout record of `round`.
+    pub fn payout(&self, round: u32) -> Result<Option<PayoutRecord>, EngineError> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT state, session, txid, height, fee, signers FROM payouts WHERE round = ?1",
+                params![round],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, u32>(3)?,
+                        r.get::<_, u64>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|(state, session, txid, height, fee, signers)| {
+            Ok(PayoutRecord {
+                round,
+                state: PayoutState::parse(&state)?,
+                session,
+                txid,
+                height,
+                fee,
+                signers: serde_json::from_str::<Vec<u16>>(&signers)
+                    .map_err(|e| EngineError::Corrupt(e.to_string()))?,
+            })
+        })
+        .transpose()
+    }
+
     // ---- reorgs ----
 
     /// Forgets every block and note at or above `height`, plus any settlement
@@ -585,6 +757,23 @@ impl Db {
                 r.get::<_, String>(2)?,
                 r.get::<_, u32>(3)?,
                 r.get::<_, u64>(4)?,
+                r.get::<_, u64>(5)?,
+                r.get::<_, String>(6)?
+            ))
+        })? {
+            out.push_str(&row?);
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT round, state, session, coalesce(txid, ''), height, fee, signers FROM payouts ORDER BY round",
+        )?;
+        for row in stmt.query_map([], |r| {
+            Ok(format!(
+                "payout {} {} {} {} {} {} {}\n",
+                r.get::<_, u32>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, u32>(4)?,
                 r.get::<_, u64>(5)?,
                 r.get::<_, String>(6)?
             ))

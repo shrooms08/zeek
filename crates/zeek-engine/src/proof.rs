@@ -43,6 +43,9 @@ pub struct ProofBundle {
     pub previous_cache: u64,
     /// The settlement as the engine computed it.
     pub settlement: Settlement,
+    /// Payout transaction record, once the keyholders signed and it was broadcast.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payout: Option<crate::db::PayoutRecord>,
 }
 
 /// Errors from recomputing a bundle.

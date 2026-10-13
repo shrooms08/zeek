@@ -9,6 +9,7 @@ use zeek_engine::api::{router, AppState};
 use zeek_engine::beacon::RelayFetcher;
 use zeek_engine::chain::{self, LightwalletdSource};
 use zeek_engine::config::{EngineSettings, GameConfig};
+use zeek_engine::coordinator::{Coordinator, CoordinatorSettings};
 use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::{Event, Processor};
@@ -32,7 +33,12 @@ fn main() -> anyhow::Result<()> {
         .block_on(run(settings, config))
 }
 
+fn settings_url(settings: &EngineSettings) -> String {
+    settings.lightwalletd_url.clone()
+}
+
 async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()> {
+    let settings_ref = settings.clone();
     let scanner = DigScanner::new(config.incoming_viewing_key()?);
     let db = Db::open(&settings.db_path)?;
     let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
@@ -45,11 +51,23 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         "engine starting"
     );
 
+    let coordinator = match CoordinatorSettings::from_env()? {
+        Some(settings) => {
+            let coordinator = Coordinator::new(settings, &settings_url(&settings_ref))?;
+            tracing::info!(
+                vault = coordinator.vault_address(),
+                "payout coordinator enabled"
+            );
+            Some(Arc::new(Mutex::new(coordinator)))
+        }
+        None => None,
+    };
     let state = Arc::new(AppState {
         processor: Processor::new(config.clone()),
         db: Mutex::new(db),
         events: events.clone(),
         started: Instant::now(),
+        coordinator: coordinator.clone(),
     });
 
     let listener = tokio::net::TcpListener::bind(&settings.bind)
@@ -101,6 +119,18 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     drand_round: closed.drand_round,
                     beacon_time: closed.beacon_time,
                 });
+            }
+            if let Some(coordinator) = &coordinator {
+                let mut coordinator = coordinator.lock().await;
+                match coordinator.pay_next(&mut db, &processor, &config).await {
+                    Ok(Some(report)) => events_out.push(Event::Paid {
+                        round: report.round,
+                        txid: report.txid,
+                        signers: report.signers,
+                    }),
+                    Ok(None) => {}
+                    Err(e) => tracing::error!(error = %e, "payout attempt failed"),
+                }
             }
             let board = processor.board(&db)?;
             if last_board.as_ref() != Some(&board) {

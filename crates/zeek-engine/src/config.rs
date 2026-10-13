@@ -27,6 +27,11 @@ pub struct GameConfig {
     /// First block of round 0; must equal `params.genesis_height`. Notes below
     /// it are operator float and are ignored by the game.
     pub genesis_height: u32,
+    /// Deep Cache balance carried into round 0 from a previous vault
+    /// (zatoshis). It is the first round's `previous_cache` and an obligation
+    /// in the ledger from the start.
+    #[serde(default)]
+    pub initial_cache_zat: u64,
 }
 
 impl GameConfig {

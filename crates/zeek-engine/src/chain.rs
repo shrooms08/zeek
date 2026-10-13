@@ -141,6 +141,18 @@ pub async fn ingest(
 ) -> Result<IngestReport, EngineError> {
     let chain_tip = source.latest_height().await?;
     db.set_chain_tip(chain_tip)?;
+    // Before genesis no block is stored; keep the tip's time so the board can
+    // estimate when round 0 starts.
+    if chain_tip < config.genesis_height {
+        if let Some(block) = source
+            .block_range(chain_tip, chain_tip)
+            .await?
+            .into_iter()
+            .next()
+        {
+            db.set_chain_tip_time(u64::from(block.time))?;
+        }
+    }
     let mut report = IngestReport {
         chain_tip,
         stored_tip: db.tip()?.map(|b| b.height),

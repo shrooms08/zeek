@@ -47,6 +47,12 @@ pub enum Event {
         outcome: RoundOutcome,
         new_cache: u64,
     },
+    /// A payout transaction was broadcast.
+    Paid {
+        round: u32,
+        txid: String,
+        signers: Vec<u16>,
+    },
 }
 
 /// The public board.
@@ -65,8 +71,11 @@ pub struct BoardState {
     pub window: RoundWindow,
     /// Blocks until the window closes (counting from the tip).
     pub blocks_remaining: u32,
-    /// `tip_time + blocks_remaining · target_spacing`.
+    /// `tip_time + blocks_remaining · target_spacing` (0 before genesis).
     pub estimated_close_time: u64,
+    /// Before genesis: `chain_tip_time + (genesis − chain_tip) · target_spacing`;
+    /// `None` once the game has started.
+    pub estimated_start_time: Option<u64>,
     /// Sum of valid digs so far.
     pub pot: u64,
     /// Deep Cache balance carried into this round.
@@ -204,6 +213,17 @@ impl Processor {
             self.cache_balance(db)?,
         )
         .map_err(|e| EngineError::Corrupt(e.to_string()))?;
+        let estimated_start_time = match (tip_time, db.chain_tip_time()?) {
+            (0, Some(chain_tip_time)) if chain_tip < params.genesis_height => Some(
+                chain_tip_time
+                    .checked_add(
+                        u64::from(params.genesis_height - chain_tip)
+                            .saturating_mul(params.target_spacing_secs),
+                    )
+                    .ok_or(EngineError::Overflow("estimated start time"))?,
+            ),
+            _ => None,
+        };
         // Unknown (0) until the first game block is stored.
         let estimated_close_time = if tip_time == 0 {
             0
@@ -223,6 +243,7 @@ impl Processor {
             window,
             blocks_remaining: view.blocks_remaining,
             estimated_close_time,
+            estimated_start_time,
             pot: view.pot,
             cache: view.cache,
             depths: view.depths,
@@ -294,6 +315,7 @@ impl Processor {
             outcome: row.outcome,
             previous_cache: row.settlement.previous_cache,
             settlement: row.settlement.clone(),
+            payout: db.payout(row.round)?,
         })
     }
 

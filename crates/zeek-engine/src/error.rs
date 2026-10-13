@@ -72,6 +72,29 @@ pub enum EngineError {
 
     #[error("server error: {0}")]
     Server(String),
+
+    #[error("message rejected: {0}")]
+    Protocol(String),
+
+    #[error("keyholder {identifier} refused to sign: {reason}")]
+    Refused { identifier: u16, reason: String },
+
+    #[error("not enough keyholders approved the payout: {approved} of {needed} ({details})")]
+    NotEnoughSigners {
+        approved: usize,
+        needed: usize,
+        details: String,
+    },
+
+    #[error("payout for rounds {rounds:?} would need {deficit} zatoshis more than the fees collected, but the operator float is only {float}; refusing to build it")]
+    OperatorFloatExhausted {
+        rounds: Vec<u32>,
+        deficit: u64,
+        float: u64,
+    },
+
+    #[error("rounds {0:?} already have a payout transaction")]
+    AlreadyPaid(Vec<u32>),
 }
 
 impl EngineError {

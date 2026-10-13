@@ -87,6 +87,7 @@ impl TestVault {
                 .to_unified_incoming_viewing_key()
                 .encode(&zcash_protocol::consensus::TEST_NETWORK),
             genesis_height,
+            initial_cache_zat: 0,
         }
     }
 

@@ -335,6 +335,7 @@ async fn http_api_serves_the_round() {
         db: Mutex::new(db),
         events,
         started: std::time::Instant::now(),
+        coordinator: None,
     });
     let app = router(state, &["http://localhost:5173".to_owned()]);
 

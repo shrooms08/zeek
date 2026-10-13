@@ -20,11 +20,15 @@ pub mod api;
 pub mod beacon;
 pub mod chain;
 pub mod config;
+pub mod coordinator;
 pub mod db;
 pub mod decrypt;
 pub mod error;
+pub mod identity;
+pub mod ledger;
 pub mod processor;
 pub mod proof;
+pub mod protocol;
 #[cfg(any(test, feature = "testkit"))]
 pub mod synthetic;
 
