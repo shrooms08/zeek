@@ -6,10 +6,14 @@ winning tile and the vault pays the winners. The vault is never controlled by a
 single key: it is a 2-of-3 FROST threshold key (rerandomized RedPallas, as the
 Orchard protocol requires), so no single operator can move player funds.
 
-This repository currently contains the Phase 1 vault spike: `zeek-vault`, a
-CLI that generates the FROST keys, derives the vault's address, syncs a
-view-only wallet against Zcash **testnet**, and spends from the vault with
-2-of-3 FROST signatures applied to a PCZT.
+This repository contains:
+
+* `zeek-vault` (Phase 1): a CLI that generates the FROST keys, derives the
+  vault's address, syncs a view-only wallet against Zcash **testnet**, and
+  spends from the vault with 2-of-3 FROST signatures applied to a PCZT.
+* `zeek-core` (Phase 2): the single source of truth for the game rules. Pure,
+  deterministic, no I/O, and it builds for `wasm32-unknown-unknown`, so the
+  round engine, every keyholder node and a browser verifier run the same code.
 
 Since NU6.3 ("Ironwood") payments to the vault land in the **Ironwood** pool:
 Orchard-shaped notes (same keys, same spend authorization) with version 3 note
@@ -21,6 +25,19 @@ the same transaction format; see "Consensus branch" below.
 ## Layout
 
 ```
+crates/zeek-core    game rules library (no network, no filesystem, wasm-capable)
+  src/params.rs     GameParams per network, drand quicknet chain info
+  src/rounds.rs     height <-> round, round window, round status
+  src/memo.rs       dig memo (ZIP 302 0xFF data) and the payout receiver
+  src/seal.rs       HPKE sealing of payout receivers (X25519 / HKDF-SHA256 / ChaCha20Poly1305)
+  src/payment.rs    ZIP 321 payment URI for a dig
+  src/beacon.rs     drand quicknet verification, round/time math, round binding
+  src/timing.rs     the timing rule that voids unsafe rounds (argument in the docs)
+  src/random.rs     unbiased treasure-tile and Deep Cache draws
+  src/digs.rs       valid / refund / forfeit classification
+  src/settle.rs     settlement with the conservation invariant
+  src/board.rs      public board views
+  tests/            property tests, real drand quicknet beacons as fixtures
 crates/zeek-vault   library + `zeek-vault` CLI (testnet only)
   src/frost.rs      FROST keygen and rerandomized signing (reddsa RedPallas ciphersuite)
   src/keys.rs       FROST group key -> Orchard FVK (ak, nk, rivk) -> UFVK -> address
@@ -105,12 +122,31 @@ transaction commits to. Before applying a signature the vault checks that the
 action's `rk` equals its own group key randomized by that `alpha`, so it can
 never sign a spend it does not control.
 
+## Game rules (zeek-core)
+
+Each round is `blocks_per_round` blocks (24 x 25 s on testnet, 8 x 75 s on
+mainnet, about ten minutes). A dig is a shielded payment of at least
+0.001 ZEC to the vault whose memo is `0xFF "ZEEK" 1 round tile` followed by the
+digger's payout receiver sealed with HPKE to the vault's sealing key, bound to
+the round and tile. When the window closes, the drand quicknet round fixed at
+the round's start reveals the treasure tile (rejection-sampled, no modulo
+bias). Diggers on that tile split the pot pro rata after a 5% rake into the
+Deep Cache; an empty treasure tile rolls the pot into the Cache; the Cache
+breaks open with 1-in-625 odds. Every payout and refund is one shielded output
+charged the ZIP 317 marginal fee (5000 zatoshis). Undecodable memos and digs
+under the minimum are forfeited to the Cache; digs for the wrong round,
+outside the window or in a voided round are refunded. A round is voided when
+the median timestamp of the 11 blocks after its window, plus the assumed
+honest clock skew, is not before the beacon's publication time (see the
+"Timing safety argument" in `crates/zeek-core/src/timing.rs`).
+
 ## Tests
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+cargo build -p zeek-core --target wasm32-unknown-unknown   # rustup target add wasm32-unknown-unknown
 # network tests (need ZEEK_LIGHTWALLETD_URL):
 cargo test -p zeek-vault --test network -- --ignored --skip funded_vault_send
 ```
