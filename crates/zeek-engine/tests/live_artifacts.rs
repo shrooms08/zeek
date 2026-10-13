@@ -22,15 +22,21 @@ fn examples_dir() -> PathBuf {
 #[test]
 fn saved_live_rounds_recompute_byte_for_byte() {
     let dir = examples_dir();
-    let mut bundles: Vec<PathBuf> = fs::read_dir(&dir)
-        .expect("docs/examples exists")
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".proof.json"))
-        })
-        .collect();
+    let mut bundles: Vec<PathBuf> = Vec::new();
+    for sub in [dir.clone(), dir.join("phase4")] {
+        let Ok(entries) = fs::read_dir(&sub) else {
+            continue;
+        };
+        bundles.extend(
+            entries
+                .filter_map(|entry| entry.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.ends_with(".proof.json"))
+                }),
+        );
+    }
     bundles.sort();
     assert!(
         !bundles.is_empty(),

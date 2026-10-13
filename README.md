@@ -20,6 +20,12 @@ This repository contains:
   HTTP and WebSocket. It never holds spend authority.
 * `zeek-dig` (Phase 3): the test player tool, one single-key shielded wallet
   per player, which digs by paying the vault with a sealed memo.
+* `zeek-keyholder` (Phase 4): the three independent keyholder nodes. They run
+  the FROST DKG between themselves, each follows the chain with its own
+  lightwalletd and database, recomputes every settlement, and signs a payout
+  only after verifying the transaction pays exactly that settlement. The
+  engine's coordinator (also Phase 4) builds payout transactions, collects two
+  signatures, and broadcasts.
 
 Since NU6.3 ("Ironwood") payments to the vault land in the **Ironwood** pool:
 Orchard-shaped notes (same keys, same spend authorization) with version 3 note
@@ -162,6 +168,29 @@ key: payments to the vault's address are visible, the vault's own change
 `zcash_client_sqlite` can only import full viewing keys, so the engine scans
 compact blocks itself and completes each hit from the full transaction to
 read the memo.
+
+## Keyholders and payouts (Phase 4)
+
+```sh
+# identities (one per node, one for the coordinator); public keys go into config/keyholder-N.json and .env
+zeek-keyholder identity-keygen --secrets-dir .secrets/keyholder-1
+zeek-keyholder identity-keygen --secrets-dir .secrets/coordinator
+# DKG: start all three with the same fresh 32-byte hex session id
+zeek-keyholder serve --config config/keyholder-1.json --dkg <session>   # ports 9101-9103
+zeek-keyholder address --config config/keyholder-1.json               # all three print the same address
+# copy .secrets/keyholder-1/payout-sealing.json to the other two nodes and to .secrets/ (engine)
+# then the engine with ZEEK_KEYHOLDERS set (see .env.example) pays settlements automatically
+curl http://127.0.0.1:8787/v1/vault/ledger
+```
+
+The vault's `ak` is the DKG group key; reddsa's RedPallas ciphersuite negates
+every share when the group key's y-coordinate is odd (`post_dkg`), and each
+node re-checks it. `nk` and `rivk` are derived from a transcript of every
+participant's round-1 package, so all nodes derive the same viewing key and
+address and abort otherwise. Every message between nodes and coordinator is
+an ed25519-signed envelope bound to a session; a coordinator that tampers
+with a payout is refused by every keyholder with the reason logged. The
+`rogue-demo` cargo feature exists only to demonstrate that refusal.
 
 ## Game rules (zeek-core)
 

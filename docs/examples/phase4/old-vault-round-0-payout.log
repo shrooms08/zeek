@@ -1,0 +1,6 @@
+[2m2026-10-13T22:30:10.883108Z[0m [32m INFO[0m payout coordinator enabled [3mvault[0m[2m=[0m"utest123wq0lx66duqc4n4lwszr5705zh3lyy3c7dn49kjv86decmnft99lvum8cqhfvm9p4k5q2v9qlqxymc75p8kqs2ngjnrmd652stwfjkm"
+[2m2026-10-13T22:30:19.231307Z[0m [32m INFO[0m payout transaction prepared [3mround[0m[2m=[0m0 [3moutputs[0m[2m=[0m1 [3mfee[0m[2m=[0m10000 [3mcollected[0m[2m=[0m5000 [3mdeficit[0m[2m=[0m5000 [3mfloat[0m[2m=[0m3460000
+[2m2026-10-13T22:30:20.176758Z[0m [32m INFO[0m approved the payout [3mkeyholder[0m[2m=[0m1
+[2m2026-10-13T22:30:20.176866Z[0m [32m INFO[0m approved the payout [3mkeyholder[0m[2m=[0m2
+[2m2026-10-13T22:30:20.176959Z[0m [32m INFO[0m approved the payout [3mkeyholder[0m[2m=[0m3
+[2m2026-10-13T22:30:20.753306Z[0m [32m INFO[0m payout broadcast [3mround[0m[2m=[0m0 [3mtxid[0m[2m=[0mccbe72fbe92eb57ae738a52e89079344aee2f9fc2dddd0b01d49dcbac5438626 [3msigners[0m[2m=[0m[1, 2]
