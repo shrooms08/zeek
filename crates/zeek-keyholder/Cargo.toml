@@ -1,0 +1,62 @@
+[package]
+name = "zeek-keyholder"
+version = "0.1.0"
+description = "Zeek keyholder node: FROST DKG participant that independently verifies every payout before signing"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "zeek-keyholder"
+path = "src/main.rs"
+
+[dependencies]
+zeek-core = { path = "../zeek-core" }
+zeek-vault = { path = "../zeek-vault" }
+zeek-engine = { path = "../zeek-engine" }
+
+reddsa.workspace = true
+frost-core.workspace = true
+orchard.workspace = true
+pasta_curves.workspace = true
+pczt.workspace = true
+zcash_keys.workspace = true
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+ed25519-dalek.workspace = true
+postcard.workspace = true
+sha2.workspace = true
+rand_core.workspace = true
+rand_09.workspace = true
+zeroize.workspace = true
+
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "signal", "net"] }
+axum.workspace = true
+reqwest.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+zeek-engine = { path = "../zeek-engine", features = ["testkit"] }
+incrementalmerkletree = "0.8.2"
+shardtree = "0.7"
+zcash_note_encryption = "0.4.1"
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }
