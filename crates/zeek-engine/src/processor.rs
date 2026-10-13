@@ -126,7 +126,7 @@ impl Processor {
                     .settlement
                     .new_cache
             }
-            None => 0,
+            None => self.config.initial_cache_zat,
         })
     }
 

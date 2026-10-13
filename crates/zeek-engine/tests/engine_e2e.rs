@@ -253,6 +253,39 @@ async fn round_is_ingested_settled_served_and_reproducible() {
 }
 
 #[tokio::test]
+async fn cache_carry_over_is_the_first_previous_cache() {
+    let Scenario { vault, mut chain } = scenario(0);
+    let mut config = vault.config(GENESIS);
+    config.initial_cache_zat = 777_000;
+    let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
+    let mut db = Db::open_in_memory().expect("db");
+    let mut processor = Processor::new(config.clone());
+    assert_eq!(processor.cache_balance(&db).expect("cache"), 777_000);
+    assert_eq!(config_response(&config).initial_cache_zat, 777_000);
+    ingest(&mut chain, &mut db, &scanner, &config)
+        .await
+        .expect("ingest");
+    let beacon_time = start_time(&config.params) + 600 + 900;
+    processor
+        .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+        .await
+        .expect("process");
+    let row = db.settlement(0).expect("row").expect("settled");
+    assert_eq!(row.settlement.previous_cache, 777_000);
+    assert!(
+        row.settlement.new_cache >= 777_000 + 60_000,
+        "rake lands on top of the carry-over"
+    );
+    let bundle = proof_response(&processor, &db, 0)
+        .expect("proof")
+        .expect("settled");
+    assert_eq!(
+        proof::recompute(&bundle).expect("recompute"),
+        bundle.settlement
+    );
+}
+
+#[tokio::test]
 async fn late_window_is_voided_and_refunded() {
     // The window closes 20 minutes late: the post-close median lands after
     // the beacon, so the timing rule voids the round.

@@ -50,6 +50,8 @@ pub struct ConfigResponse {
     pub genesis_height: u32,
     /// Confirmations the engine waits for after the timing-rule blocks.
     pub settle_confirmations: u32,
+    /// Deep Cache balance carried into round 0 from a previous vault.
+    pub initial_cache_zat: u64,
 }
 
 /// `GET /v1/rounds/pending`.
@@ -173,6 +175,7 @@ pub fn config_response(config: &GameConfig) -> ConfigResponse {
         uivk: config.uivk.clone(),
         genesis_height: config.genesis_height,
         settle_confirmations: SETTLE_CONFIRMATIONS,
+        initial_cache_zat: config.initial_cache_zat,
     }
 }
 
