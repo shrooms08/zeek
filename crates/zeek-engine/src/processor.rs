@@ -52,10 +52,12 @@ pub enum Event {
 /// The public board.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardState {
-    /// Chain tip the engine has scanned.
+    /// Chain tip the engine has scanned (0 before the game's genesis block).
     pub tip_height: u32,
-    /// `nTime` of that tip.
+    /// `nTime` of that tip (0 before genesis).
     pub tip_time: u64,
+    /// Chain tip reported by lightwalletd, which may be below genesis.
+    pub chain_tip: u32,
     /// Round the tip belongs to, or the first round if the game has not
     /// started.
     pub round: u32,
@@ -185,6 +187,9 @@ impl Processor {
         let params = &self.config.params;
         let tip = db.tip()?;
         let (tip_height, tip_time) = tip.map(|b| (b.height, b.time)).unwrap_or((0, 0));
+        // Before genesis nothing is stored; the chain tip lightwalletd reported
+        // still says how far away round 0 is.
+        let chain_tip = db.chain_tip()?.unwrap_or(tip_height).max(tip_height);
         let round = self.current_round(db)?;
         let (window, status, _) = self.status(db, round)?;
         let classified = self.classified(db, round, status == RoundStatus::Voided)?;
@@ -194,19 +199,25 @@ impl Processor {
             params,
             round,
             status,
-            tip_height,
+            chain_tip,
             &totals,
             self.cache_balance(db)?,
         )
         .map_err(|e| EngineError::Corrupt(e.to_string()))?;
-        let estimated_close_time = tip_time
-            .checked_add(
-                u64::from(view.blocks_remaining).saturating_mul(params.target_spacing_secs),
-            )
-            .ok_or(EngineError::Overflow("estimated close time"))?;
+        // Unknown (0) until the first game block is stored.
+        let estimated_close_time = if tip_time == 0 {
+            0
+        } else {
+            tip_time
+                .checked_add(
+                    u64::from(view.blocks_remaining).saturating_mul(params.target_spacing_secs),
+                )
+                .ok_or(EngineError::Overflow("estimated close time"))?
+        };
         Ok(BoardState {
             tip_height,
             tip_time,
+            chain_tip,
             round,
             status,
             window,

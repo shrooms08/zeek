@@ -224,6 +224,43 @@ impl Db {
         Ok(Db { conn })
     }
 
+    // ---- meta ----
+
+    /// Stores a key/value pair.
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<(), EngineError> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Reads a key/value pair.
+    pub fn meta(&self, key: &str) -> Result<Option<String>, EngineError> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    /// The chain tip last reported by the block source (which may be below
+    /// the game's genesis, when no block is stored yet).
+    pub fn chain_tip(&self) -> Result<Option<u32>, EngineError> {
+        self.meta("chain_tip")?
+            .map(|v| {
+                v.parse::<u32>()
+                    .map_err(|_| EngineError::Corrupt("chain_tip is not a number".into()))
+            })
+            .transpose()
+    }
+
+    /// Records the chain tip reported by the block source.
+    pub fn set_chain_tip(&self, height: u32) -> Result<(), EngineError> {
+        self.set_meta("chain_tip", &height.to_string())
+    }
+
     // ---- blocks ----
 
     /// Stores a block (replacing any row at the same height).

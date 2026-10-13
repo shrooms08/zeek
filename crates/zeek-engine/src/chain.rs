@@ -140,6 +140,7 @@ pub async fn ingest(
     config: &GameConfig,
 ) -> Result<IngestReport, EngineError> {
     let chain_tip = source.latest_height().await?;
+    db.set_chain_tip(chain_tip)?;
     let mut report = IngestReport {
         chain_tip,
         stored_tip: db.tip()?.map(|b| b.height),
