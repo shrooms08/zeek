@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/zeek-core", "crates/zeek-vault"]
+members = ["crates/zeek-core", "crates/zeek-vault", "crates/zeek-engine", "crates/zeek-dig"]
 
 [workspace.package]
 edition = "2021"
@@ -25,6 +25,7 @@ zcash_keys = { version = "0.16.1", features = ["orchard", "unstable-frost"] }
 zcash_primitives = "0.30.1"
 zcash_protocol = "0.10.5"
 zip321 = "0.9"
+zip32 = "0.2"
 
 # Crypto plumbing.
 group = "0.13"
@@ -38,6 +39,9 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tonic = { version = "0.14", features = ["tls-ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"
+axum = { version = "0.8.9", features = ["json", "ws"] }
+tower-http = { version = "0.7.1", features = ["cors", "trace"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json"] }
 
 # zeek-core cryptography (pure Rust, builds on wasm32-unknown-unknown).
 # hpke 0.14 needs sha2 0.11, which the pinned zcash_client_backend (via bip32)
@@ -45,6 +49,7 @@ async-trait = "0.1"
 hpke = { version = "0.13.0", default-features = false, features = ["alloc", "x25519"] }
 rand_core_09 = { package = "rand_core", version = "0.9" }
 rand_09 = { package = "rand", version = "0.9", default-features = false, features = ["std_rng", "os_rng"] }
+rand_08 = { package = "rand", version = "0.8", default-features = false, features = ["std_rng"] }
 drand_verify = { package = "drand-verify", version = "0.6.2", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }

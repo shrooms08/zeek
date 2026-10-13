@@ -1,0 +1,62 @@
+[package]
+name = "zeek-engine"
+version = "0.1.0"
+description = "Zeek round engine: follows testnet, detects digs with the vault's incoming viewing key, settles rounds with zeek-core, serves the board"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "zeek-engine"
+path = "src/bin/zeek-engine.rs"
+
+[dependencies]
+zeek-core = { path = "../zeek-core" }
+zeek-vault = { path = "../zeek-vault" }
+
+orchard.workspace = true
+zcash_client_backend.workspace = true
+zcash_keys.workspace = true
+zcash_note_encryption = "0.4.1"
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zcash_address.workspace = true
+
+rusqlite.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "signal", "net"] }
+tonic.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+reqwest.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+rand_09 = { workspace = true, optional = true }
+rand_08 = { workspace = true, optional = true }
+
+[features]
+# Synthetic chains and in-memory vaults for tests (`crate::synthetic`).
+testkit = ["dep:rand_09", "dep:rand_08"]
+
+[dev-dependencies]
+zeek-engine = { path = ".", features = ["testkit"] }
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+# The pinned librustzcash crates gate NU7 behind this cfg (set in .cargo/config.toml).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }
