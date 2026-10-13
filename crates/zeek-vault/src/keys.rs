@@ -34,7 +34,7 @@
 use orchard::keys::{FullViewingKey, SpendingKey};
 use rand_core::{CryptoRng, RngCore};
 use zcash_keys::address::UnifiedAddress;
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey};
 use zeroize::Zeroize;
 
 use crate::error::VaultError;
@@ -114,6 +114,19 @@ pub fn orchard_only_address(ufvk: &UnifiedFullViewingKey) -> Result<UnifiedAddre
     ufvk.default_address(UnifiedAddressRequest::ORCHARD)
         .map(|(address, _index)| address)
         .map_err(|e| VaultError::KeyDerivation(format!("default address: {e}")))
+}
+
+/// The vault's unified *incoming* viewing key: the external-scope Orchard IVK
+/// wrapped in a UIVK (ZIP 316). It detects payments to the vault's address but
+/// not the vault's own change, which is sent to the internal-scope address, so
+/// a board built from it never mistakes change for digs. It is public config.
+pub fn unified_incoming_viewing_key(ufvk: &UnifiedFullViewingKey) -> UnifiedIncomingViewingKey {
+    ufvk.to_unified_incoming_viewing_key()
+}
+
+/// Encodes a unified incoming viewing key for testnet.
+pub fn encode_uivk(uivk: &UnifiedIncomingViewingKey) -> String {
+    uivk.encode(&NETWORK)
 }
 
 /// Encodes a unified address for testnet.
@@ -202,6 +215,23 @@ mod tests {
         let receivers = ua.items();
         assert_eq!(receivers.len(), 1, "exactly one receiver");
         assert!(matches!(receivers[0], unified::Receiver::Orchard(_)));
+
+        // The UIVK carries only the external-scope Orchard IVK, which derives
+        // the same default address and nothing for the internal scope.
+        let uivk = unified_incoming_viewing_key(&ufvk);
+        let encoded_uivk = encode_uivk(&uivk);
+        assert!(encoded_uivk.starts_with("uivktest"), "{encoded_uivk}");
+        let decoded_uivk =
+            UnifiedIncomingViewingKey::decode(&NETWORK, &encoded_uivk).expect("uivk");
+        let ivk = decoded_uivk.orchard().as_ref().expect("orchard ivk");
+        assert_eq!(
+            ivk.to_bytes(),
+            fvk.to_ivk(orchard::keys::Scope::External).to_bytes()
+        );
+        assert_ne!(
+            ivk.to_bytes(),
+            fvk.to_ivk(orchard::keys::Scope::Internal).to_bytes()
+        );
 
         let reparsed = match Address::decode(&NETWORK, &encoded) {
             Some(Address::Unified(ua)) => ua,

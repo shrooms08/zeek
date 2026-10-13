@@ -52,6 +52,9 @@ pub enum VaultError {
     #[error("keyholder file not found at {0}")]
     KeyholderNotFound(PathBuf),
 
+    #[error("payout sealing key not found at {0}; run `zeek-vault sealing-keygen` first")]
+    SealingKeyNotFound(PathBuf),
+
     #[error("field `{field}` is not valid hex: {source}")]
     Hex {
         field: &'static str,

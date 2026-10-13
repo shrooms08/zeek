@@ -15,6 +15,8 @@ name = "zeek-vault"
 path = "src/bin/zeek-vault.rs"
 
 [dependencies]
+zeek-core = { path = "../zeek-core" }
+rand_09.workspace = true
 frost-core.workspace = true
 frost-rerandomized.workspace = true
 reddsa.workspace = true

@@ -2,11 +2,12 @@
 
 use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
+use rand_09::TryRngCore;
 use rand_core::OsRng;
 use zcash_protocol::consensus::BlockHeight;
 use zeek_vault::config::Config;
 use zeek_vault::send::{format_zec, SendRequest};
-use zeek_vault::store::{KeyholderFile, SecretsDir, VaultFile};
+use zeek_vault::store::{KeyholderFile, SealingKeyFile, SecretsDir, VaultFile};
 use zeek_vault::{frost, keys, lightwalletd, send, wallet, VaultError};
 
 #[derive(Parser)]
@@ -32,6 +33,16 @@ enum Command {
     Balance,
     /// Spend Ironwood funds from the vault with a FROST threshold signature.
     Send(SendArgs),
+    /// Generate the payout sealing key pair (HPKE) that diggers seal their
+    /// payout receivers to; writes .secrets/payout-sealing.json.
+    SealingKeygen(SealingKeygenArgs),
+}
+
+#[derive(Args)]
+struct SealingKeygenArgs {
+    /// Replace an existing sealing key file.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Args)]
@@ -93,7 +104,26 @@ fn main() -> anyhow::Result<()> {
         Command::Sync(args) => runtime()?.block_on(sync(&config, &secrets, args)),
         Command::Balance => balance(&config, &secrets),
         Command::Send(args) => runtime()?.block_on(send_cmd(&config, &secrets, args)),
+        Command::SealingKeygen(args) => sealing_keygen(&secrets, args),
     }
+}
+
+fn sealing_keygen(secrets: &SecretsDir, args: SealingKeygenArgs) -> anyhow::Result<()> {
+    // `OsRng` is fallible in rand 0.9; `unwrap_err` adapts it to the infallible
+    // `CryptoRng` the sealing keygen needs (an OS RNG failure aborts keygen).
+    let mut rng = rand_09::rngs::OsRng.unwrap_err();
+    let (private_key, public_key) = zeek_core::seal::generate_sealing_keypair(&mut rng);
+    let file = SealingKeyFile::new(&private_key);
+    secrets.write_sealing_key(&file, args.force)?;
+    println!(
+        "Wrote payout sealing key to {}",
+        secrets.sealing_path().display()
+    );
+    println!(
+        "Sealing public key (public config): {}",
+        hex::encode(public_key.to_bytes())
+    );
+    Ok(())
 }
 
 fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
@@ -160,6 +190,8 @@ fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
     println!("  {}", vault.address);
     println!("Unified full viewing key:");
     println!("  {}", keys::encode_ufvk(&ufvk));
+    println!("Unified incoming viewing key (external scope; detects digs, never change):");
+    println!("  {}", vault.uivk()?);
     Ok(())
 }
 

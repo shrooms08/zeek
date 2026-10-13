@@ -21,6 +21,8 @@ use orchard::keys::FullViewingKey;
 use serde::{Deserialize, Serialize};
 use zcash_keys::keys::UnifiedFullViewingKey;
 
+use zeek_core::seal::{SealingPrivateKey, SealingPublicKey};
+
 use crate::error::VaultError;
 use crate::frost::{self, KeyPackage, PublicKeyPackage};
 use crate::keys::FVK_LEN;
@@ -29,6 +31,8 @@ use crate::keys::FVK_LEN;
 pub const FILE_VERSION: u32 = 1;
 /// Name of the public vault file.
 pub const VAULT_FILE: &str = "vault.json";
+/// Name of the payout sealing key file.
+pub const SEALING_FILE: &str = "payout-sealing.json";
 
 /// Public description of the vault. Safe to share.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,6 +58,10 @@ pub struct VaultFile {
     /// Chain height the wallet was told to start scanning from, once known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub birthday_height: Option<u32>,
+    /// Unified incoming viewing key (external scope only), bech32m. Absent in
+    /// files written before it was introduced; derived on demand from the UFVK.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unified_incoming_viewing_key: Option<String>,
 }
 
 impl VaultFile {
@@ -79,7 +87,17 @@ impl VaultFile {
             unified_full_viewing_key: crate::keys::encode_ufvk(ufvk),
             address: address.to_owned(),
             birthday_height: None,
+            unified_incoming_viewing_key: Some(crate::keys::encode_uivk(
+                &crate::keys::unified_incoming_viewing_key(ufvk),
+            )),
         })
+    }
+
+    /// The encoded unified incoming viewing key, derived from the UFVK.
+    pub fn uivk(&self) -> Result<String, VaultError> {
+        Ok(crate::keys::encode_uivk(
+            &crate::keys::unified_incoming_viewing_key(&self.ufvk()?),
+        ))
     }
 
     /// Decodes the group verifying key.
@@ -160,6 +178,49 @@ impl KeyholderFile {
     }
 }
 
+/// The vault's payout sealing key pair (zeek-core HPKE). The private key is
+/// hex in this file only; it is never printed. No `Debug`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SealingKeyFile {
+    /// Schema version.
+    pub version: u32,
+    /// X25519 public key, hex. Public configuration.
+    pub public_key: String,
+    /// X25519 private key, hex. Secret.
+    private_key: String,
+}
+
+impl SealingKeyFile {
+    /// Builds the file from a fresh key pair.
+    pub fn new(private_key: &SealingPrivateKey) -> Self {
+        SealingKeyFile {
+            version: FILE_VERSION,
+            public_key: hex::encode(private_key.public_key().to_bytes()),
+            private_key: hex::encode(private_key.to_bytes()),
+        }
+    }
+
+    /// Decodes the private key and checks it matches the stored public key.
+    pub fn private_key(&self) -> Result<SealingPrivateKey, VaultError> {
+        let bytes = decode_hex(&self.private_key, "private_key")?;
+        let key = SealingPrivateKey::from_bytes(&bytes)
+            .map_err(|e| VaultError::KeyDerivation(format!("payout sealing key: {e}")))?;
+        if hex::encode(key.public_key().to_bytes()) != self.public_key {
+            return Err(VaultError::KeyDerivation(
+                "payout sealing file: public key does not match the private key".into(),
+            ));
+        }
+        Ok(key)
+    }
+
+    /// Decodes the public key.
+    pub fn public_key(&self) -> Result<SealingPublicKey, VaultError> {
+        let bytes = decode_hex(&self.public_key, "public_key")?;
+        SealingPublicKey::from_bytes(&bytes)
+            .map_err(|e| VaultError::KeyDerivation(format!("payout sealing key: {e}")))
+    }
+}
+
 /// Path helpers for the secrets directory.
 #[derive(Clone, Debug)]
 pub struct SecretsDir(PathBuf);
@@ -183,6 +244,30 @@ impl SecretsDir {
     /// Path of keyholder `n`'s file.
     pub fn keyholder_path(&self, n: u16) -> PathBuf {
         self.0.join(format!("keyholder-{n}.json"))
+    }
+
+    /// Path of the payout sealing key file.
+    pub fn sealing_path(&self) -> PathBuf {
+        self.0.join(SEALING_FILE)
+    }
+
+    /// Writes the payout sealing key file; refuses to overwrite unless `force`.
+    pub fn write_sealing_key(&self, file: &SealingKeyFile, force: bool) -> Result<(), VaultError> {
+        let path = self.sealing_path();
+        if path.exists() && !force {
+            return Err(VaultError::KeyFileExists(path));
+        }
+        self.ensure_dir()?;
+        write_json(&path, file)
+    }
+
+    /// Loads the payout sealing key file.
+    pub fn load_sealing_key(&self) -> Result<SealingKeyFile, VaultError> {
+        let path = self.sealing_path();
+        if !path.exists() {
+            return Err(VaultError::SealingKeyNotFound(path));
+        }
+        read_json(&path)
     }
 
     /// Returns an error if any file the vault would write already exists.
@@ -369,6 +454,34 @@ mod tests {
             dir.check_absent(3),
             Err(VaultError::KeyFileExists(_))
         ));
+    }
+
+    #[test]
+    fn sealing_key_file_round_trips_and_refuses_overwrite() {
+        use rand_09::rngs::StdRng;
+        use rand_09::SeedableRng;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = SecretsDir::new(tmp.path().join("secrets"));
+        assert!(matches!(
+            dir.load_sealing_key(),
+            Err(VaultError::SealingKeyNotFound(_))
+        ));
+        let (sk, pk) = zeek_core::seal::generate_sealing_keypair(&mut StdRng::seed_from_u64(1));
+        let file = SealingKeyFile::new(&sk);
+        dir.write_sealing_key(&file, false).expect("write");
+        assert!(matches!(
+            dir.write_sealing_key(&file, false),
+            Err(VaultError::KeyFileExists(_))
+        ));
+        dir.write_sealing_key(&file, true).expect("force");
+        let loaded = dir.load_sealing_key().expect("load");
+        assert_eq!(loaded.public_key().expect("pk"), pk);
+        assert_eq!(loaded.private_key().expect("sk").to_bytes(), sk.to_bytes());
+        let text = fs::read_to_string(dir.sealing_path()).expect("read");
+        assert!(
+            text.contains(&hex::encode(sk.to_bytes())),
+            "private key is stored"
+        );
     }
 
     #[cfg(unix)]

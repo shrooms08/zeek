@@ -44,6 +44,7 @@ async-trait = "0.1"
 # locks to a pre-release, so the 0.13 line (sha2 0.10, rand_core 0.9) is used.
 hpke = { version = "0.13.0", default-features = false, features = ["alloc", "x25519"] }
 rand_core_09 = { package = "rand_core", version = "0.9" }
+rand_09 = { package = "rand", version = "0.9", default-features = false, features = ["std_rng", "os_rng"] }
 drand_verify = { package = "drand-verify", version = "0.6.2", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }

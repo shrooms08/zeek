@@ -395,6 +395,126 @@ fn explain_insufficient(
     VaultError::insufficient(available, required)
 }
 
+/// A proposal turned into an unproven PCZT, with what the caller needs next.
+pub struct PreparedPczt {
+    /// The IO-finalized, unproven PCZT.
+    pub pczt: Pczt,
+    /// Height the proposal targets.
+    pub target_height: BlockHeight,
+    /// Total fee of the proposal.
+    pub fee: Zatoshis,
+}
+
+/// Proposes `tx_request` from `account`, spending Ironwood notes only, and
+/// turns it into a PCZT. `report` is the account's current balance, used to
+/// explain an insufficient-funds failure.
+pub fn prepare_pczt(
+    db: &mut Db,
+    account: AccountUuid,
+    tx_request: TransactionRequest,
+    report: &wallet::BalanceReport,
+) -> Result<PreparedPczt, VaultError> {
+    let proposal = propose_transfer::<_, _, _, _, <Db as WalletCommitmentTrees>::Error>(
+        db,
+        &NETWORK,
+        account,
+        &GreedyInputSelector::<Db>::new(),
+        &change_strategy(),
+        tx_request,
+        ConfirmationsPolicy::default(),
+        &SpendPolicy::shielded_pools([ShieldedPool::Ironwood]),
+        None,
+        // `None`: build at the version implied by the target height (V6 from NU6.3).
+        None,
+    )
+    .map_err(|e| match e {
+        WalletApiError::InsufficientFunds {
+            available,
+            required,
+        } => explain_insufficient(report, available, required),
+        other => VaultError::Build(other.to_string()),
+    })?;
+
+    for step in proposal.steps() {
+        for input in step
+            .shielded_inputs()
+            .map(|i| i.notes().iter())
+            .into_iter()
+            .flatten()
+        {
+            let pool = match input.note() {
+                Note::Orchard { pool, .. } => pool_name(*pool),
+                Note::Sapling(_) => "sapling",
+            };
+            if pool != pool_name(ValuePool::Ironwood) {
+                return Err(VaultError::UnexpectedInputPool(pool.to_owned()));
+            }
+        }
+    }
+
+    let fee = proposal
+        .steps()
+        .iter()
+        .map(|step| step.balance().fee_required())
+        .try_fold(Zatoshis::ZERO, |acc, f| acc + f)
+        .ok_or_else(|| VaultError::Build("fee overflow".into()))?;
+    let target_height = BlockHeight::from(proposal.min_target_height());
+
+    let pczt = create_pczt_from_proposal::<_, _, GreedyInputSelectorError, _, zip317::FeeError, _>(
+        db,
+        &NETWORK,
+        account,
+        OvkPolicy::Sender,
+        &proposal,
+        None,
+        BundlePadding::DEFAULT,
+    )
+    .map_err(|e| VaultError::Build(e.to_string()))?;
+
+    Ok(PreparedPczt {
+        pczt,
+        target_height,
+        fee,
+    })
+}
+
+/// Extracts a fully signed PCZT into a transaction, checks it is V6 on the
+/// expected branch, broadcasts it and records it in the wallet.
+pub async fn extract_broadcast_store(
+    db: &mut Db,
+    client: &mut Client,
+    pczt: Pczt,
+    verifying_key: &VerifyingKey,
+    target_height: BlockHeight,
+) -> Result<Transaction, VaultError> {
+    // `with_orchard` verifies the proofs and signatures of both the Orchard and
+    // the Ironwood bundle; post-NU6.3 they share the verifying key.
+    let transaction = TransactionExtractor::new(pczt.clone())
+        .with_orchard(verifying_key)
+        .extract()
+        .map_err(|e| VaultError::Pczt(format!("extract: {e:?}")))?;
+    check_version(&transaction, target_height)?;
+    let txid = transaction.txid();
+    let raw = serialize(&transaction)?;
+
+    lightwalletd::broadcast(client, raw).await?;
+    tracing::info!("broadcast accepted: {txid}");
+
+    let stored = extract_and_store_transaction_from_pczt::<_, ReceivedNoteId>(
+        db,
+        pczt,
+        None,
+        Some(verifying_key),
+    )
+    .map_err(wallet_err)?;
+    if stored != txid {
+        return Err(VaultError::Wallet(format!(
+            "stored txid {stored} differs from broadcast txid {txid}"
+        )));
+    }
+    Ok(transaction)
+}
+
 /// Runs the full spend pipeline against the wallet and lightwalletd.
 pub async fn send(
     db: &mut Db,
@@ -436,51 +556,11 @@ pub async fn send(
         "proposing transfer of {} ZEC from Ironwood",
         format_zec(amount)
     );
-    let proposal = propose_transfer::<_, _, _, _, <Db as WalletCommitmentTrees>::Error>(
-        db,
-        &NETWORK,
-        account,
-        &GreedyInputSelector::<Db>::new(),
-        &change_strategy(),
-        tx_request,
-        ConfirmationsPolicy::default(),
-        &SpendPolicy::shielded_pools([ShieldedPool::Ironwood]),
-        None,
-        // `None`: build at the version implied by the target height (V6 from NU6.3).
-        None,
-    )
-    .map_err(|e| match e {
-        WalletApiError::InsufficientFunds {
-            available,
-            required,
-        } => explain_insufficient(&report, available, required),
-        other => VaultError::Build(other.to_string()),
-    })?;
-
-    for step in proposal.steps() {
-        for input in step
-            .shielded_inputs()
-            .map(|i| i.notes().iter())
-            .into_iter()
-            .flatten()
-        {
-            let pool = match input.note() {
-                Note::Orchard { pool, .. } => pool_name(*pool),
-                Note::Sapling(_) => "sapling",
-            };
-            if pool != pool_name(ValuePool::Ironwood) {
-                return Err(VaultError::UnexpectedInputPool(pool.to_owned()));
-            }
-        }
-    }
-
-    let fee = proposal
-        .steps()
-        .iter()
-        .map(|step| step.balance().fee_required())
-        .try_fold(Zatoshis::ZERO, |acc, f| acc + f)
-        .ok_or_else(|| VaultError::Build("fee overflow".into()))?;
-    let target_height = BlockHeight::from(proposal.min_target_height());
+    let PreparedPczt {
+        pczt,
+        target_height,
+        fee,
+    } = prepare_pczt(db, account, tx_request, &report)?;
     let required_circuit = circuit_version_for(target_height)?;
     if required_circuit != circuit {
         return Err(VaultError::CircuitMismatch {
@@ -493,17 +573,6 @@ pub async fn send(
         format_zec(fee),
         target_height
     );
-
-    let pczt = create_pczt_from_proposal::<_, _, GreedyInputSelectorError, _, zip317::FeeError, _>(
-        db,
-        &NETWORK,
-        account,
-        OvkPolicy::Sender,
-        &proposal,
-        None,
-        BundlePadding::DEFAULT,
-    )
-    .map_err(|e| VaultError::Build(e.to_string()))?;
 
     let pczt = prove(pczt, &proving_key)?;
 
@@ -520,34 +589,11 @@ pub async fn send(
         );
     }
 
-    // `with_orchard` verifies the proofs and signatures of both the Orchard and
-    // the Ironwood bundle; post-NU6.3 they share the verifying key.
-    let transaction = TransactionExtractor::new(pczt.clone())
-        .with_orchard(&verifying_key)
-        .extract()
-        .map_err(|e| VaultError::Pczt(format!("extract: {e:?}")))?;
-    check_version(&transaction, target_height)?;
-    let txid = transaction.txid();
-    let raw = serialize(&transaction)?;
-
-    lightwalletd::broadcast(client, raw).await?;
-    tracing::info!("broadcast accepted: {txid}");
-
-    let stored = extract_and_store_transaction_from_pczt::<_, ReceivedNoteId>(
-        db,
-        pczt,
-        None,
-        Some(&verifying_key),
-    )
-    .map_err(wallet_err)?;
-    if stored != txid {
-        return Err(VaultError::Wallet(format!(
-            "stored txid {stored} differs from broadcast txid {txid}"
-        )));
-    }
+    let transaction =
+        extract_broadcast_store(db, client, pczt, &verifying_key, target_height).await?;
 
     Ok(SendOutcome {
-        txid,
+        txid: transaction.txid(),
         version: transaction.version(),
         branch: transaction.consensus_branch_id(),
         target_height: target_height.into(),
