@@ -1,0 +1,63 @@
+[package]
+name = "zeek-verify"
+version = "0.1.0"
+description = "Independent verifier for Zeek rounds and win proofs (native and wasm32; the CLI talks to any lightwalletd)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "zeek-verify"
+path = "src/bin/zeek-verify.rs"
+required-features = ["cli"]
+
+[dependencies]
+zeek-core = { path = "../zeek-core" }
+orchard.workspace = true
+pasta_curves.workspace = true
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zcash_note_encryption = "0.4.1"
+zcash_keys = { version = "0.16.1", default-features = false, features = ["orchard"] }
+zcash_client_backend = { version = "0.24.0", default-features = false, features = ["orchard"] }
+incrementalmerkletree = "0.8.2"
+nonempty = "0.11"
+prost = "0.14"
+blake2b_simd = "1"
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+postcard.workspace = true
+base64.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+# CLI only (native): gRPC to any lightwalletd, HTTP to the engine, the relay server.
+tokio = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+cli = [
+    "dep:tokio", "dep:clap", "dep:anyhow", "dep:tonic", "dep:reqwest", "dep:axum",
+    "dep:tower-http", "dep:tracing", "dep:tracing-subscriber",
+    "zcash_client_backend/lightwalletd-tonic-transport",
+    "zcash_client_backend/lightwalletd-tonic-tls-webpki-roots",
+]
+
+[dev-dependencies]
+zeek-engine = { path = "../zeek-engine", features = ["testkit"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

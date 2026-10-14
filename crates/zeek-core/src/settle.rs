@@ -5,12 +5,13 @@
 //! conservation invariant, which is checked before returning:
 //!
 //! ```text
-//! valid digs + refunded digs + forfeits + previous Cache
-//!     == paid amounts + fees + new Cache
+//! valid digs + refunded digs + forfeits + shouts + previous Cache
+//!     == paid amounts + fees + shout fees + new Cache
 //! ```
 //!
 //! where `fees` are the dig fees charged to the notes the payout transaction
-//! spends plus the output fees charged to the outputs it creates.
+//! spends plus the output fees charged to the outputs it creates, and `shout
+//! fees` are the dig fees reserved for spending shout notes later (rules v4).
 //!
 //! Rules (all integer arithmetic, `u128` only for the pro-rata products):
 //!
@@ -33,6 +34,13 @@
 //!    `dig_fee_zat` for its input and `marginal_fee_zat` for its output and
 //!    gets the rest back. If its value is at most the two fees combined it is
 //!    forfeited to the Cache whole and its note is not spent.
+//!
+//! 6. A shout (rules v4) is charged `dig_fee_zat` for the action that will
+//!    spend its note some day; the rest goes to the Cache. Shout notes are
+//!    not payout inputs (the vault keeps them, like forfeits), so the dig
+//!    fee is reserved rather than collected: it is reported as `shout_fees`
+//!    and stays with the operator float, which pays for every input the
+//!    rules do not charge. Shouts are never refunded.
 //!
 //! The notes a payout transaction must spend are exactly the charged ones:
 //! [`payout_inputs`] lists them in a deterministic order. Rules v1 (proof
@@ -164,6 +172,16 @@ pub struct Settlement {
     /// under rules v1, whose bundles omit the field).
     #[serde(default)]
     pub dig_fees: u64,
+    /// Sum of the shouts (rules v4; absent and zero before).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shouts: u64,
+    /// Dig fees reserved for spending the shout notes later (rules v4).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shout_fees: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn add(a: u64, b: u64) -> Result<u64, SettleError> {
@@ -364,6 +382,22 @@ pub fn settle(
     // Forfeits always feed the Cache.
     flows.credit_cache(forfeited)?;
 
+    // Shouts feed the Cache minus the dig fee reserved for their notes.
+    let shouts = digs.shouted_value().ok_or(SettleError::Overflow)?;
+    let mut shout_fees = 0u64;
+    for shout in &digs.shouts {
+        let to_cache = shout
+            .note
+            .value
+            .checked_sub(dig_fee)
+            .ok_or(SettleError::DigBelowFee {
+                value: shout.note.value,
+                dig_fee,
+            })?;
+        flows.credit_cache(to_cache)?;
+        shout_fees = add(shout_fees, dig_fee)?;
+    }
+
     let (pot, rake, distributable, treasure_tile_total, winners, cache_paid) = match outcome {
         RoundOutcome::Voided => {
             // Nothing is drawn: valid digs are refunded like any other refund.
@@ -502,8 +536,11 @@ pub fn settle(
         });
     }
 
-    let inputs_total = add(add(add(gross_digs, refunded)?, forfeited)?, previous_cache)?;
-    let outputs_total = add(add(total_paid, total_fees)?, cache)?;
+    let inputs_total = add(
+        add(add(add(gross_digs, refunded)?, forfeited)?, shouts)?,
+        previous_cache,
+    )?;
+    let outputs_total = add(add(add(total_paid, total_fees)?, shout_fees)?, cache)?;
     if inputs_total != outputs_total {
         return Err(SettleError::Conservation {
             inputs: inputs_total,
@@ -528,6 +565,8 @@ pub fn settle(
         total_paid,
         forfeited,
         dig_fees,
+        shouts,
+        shout_fees,
     })
 }
 
@@ -570,6 +609,7 @@ mod tests {
                 round: memo_round,
                 tile: 2,
                 sealed_receiver: sealed(seed),
+                message: None,
             },
             reason,
         }
@@ -580,6 +620,7 @@ mod tests {
             valid,
             refunds: vec![],
             forfeits: vec![],
+            shouts: vec![],
         }
     }
 
@@ -717,6 +758,46 @@ mod tests {
     }
 
     #[test]
+    fn shouts_feed_the_cache_minus_a_reserved_dig_fee() {
+        use crate::digs::Shout;
+        let p = GameParams::testnet(1);
+        let d = ClassifiedDigs {
+            valid: vec![valid(3, 100_000, 1)],
+            shouts: vec![
+                Shout {
+                    note: note(50_000),
+                    message: Some("hi".into()),
+                },
+                Shout {
+                    note: note(70_000),
+                    message: None,
+                },
+            ],
+            ..ClassifiedDigs::default()
+        };
+        let drawn = RoundOutcome::Drawn {
+            treasure_tile: 7,
+            cache_triggered: false,
+        };
+        let s = settle(&p, 0, &d, 1_000, drawn).expect("settle");
+        assert_eq!(s.shouts, 120_000);
+        assert_eq!(s.shout_fees, 10_000);
+        // Cache: previous 1,000 + shouts 110,000 + the whole pot (95,000,
+        // nobody on tile 7: rake and distributable both roll over).
+        assert_eq!(s.new_cache, 1_000 + 110_000 + 95_000);
+        assert!(s.payouts.is_empty());
+        // Shout notes are not payout inputs.
+        assert_eq!(payout_inputs(&p, &d, drawn).expect("inputs").len(), 1);
+        let json = serde_json::to_string(&s).expect("json");
+        assert!(json.contains("\"shout_fees\":10000"));
+        // Without shouts the fields are omitted, so older bundles round-trip.
+        let plain = settle(&p, 0, &ClassifiedDigs::default(), 0, drawn).expect("settle");
+        assert!(!serde_json::to_string(&plain)
+            .expect("json")
+            .contains("shout"));
+    }
+
+    #[test]
     fn refunds_forfeits_and_dust_outputs() {
         let p = GameParams::testnet(1);
         let d = ClassifiedDigs {
@@ -729,6 +810,7 @@ mod tests {
                 note: note(7_000),
                 reason: ForfeitReason::BelowMinimum { minimum: 100_000 },
             }],
+            shouts: vec![],
         };
         let s = settle(&p, 1, &d, 0, drawn(24, false)).expect("settle");
         // No winner: distributable (90,250) rolls into the Cache, plus rake
@@ -792,10 +874,12 @@ mod tests {
                     round: 9,
                     tile: 0,
                     sealed_receiver: sealed(4),
+                    message: None,
                 },
                 reason: RefundReason::WrongRound { memo_round: 9 },
             }],
             forfeits: vec![],
+            shouts: vec![],
         };
         let inputs = payout_inputs(&p, &d, drawn(0, false)).expect("inputs");
         let keys: Vec<(u32, String, u16)> = inputs

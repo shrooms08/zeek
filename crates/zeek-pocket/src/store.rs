@@ -147,6 +147,9 @@ pub enum OutgoingKind {
         amount_zat: u64,
         memo: Option<String>,
     },
+    /// A Campfire shout (rules v4). Appended last: postcard identifies
+    /// variants by position, so stored states of earlier versions still load.
+    Shout { amount_zat: u64, message: String },
 }
 
 /// Lifecycle of an outgoing transaction.

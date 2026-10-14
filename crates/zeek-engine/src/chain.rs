@@ -34,6 +34,28 @@ pub trait ChainSource: Send {
         -> Result<Vec<CompactBlock>, EngineError>;
     /// Raw bytes of a mined transaction (txid in internal byte order).
     async fn transaction(&mut self, txid: &[u8; 32]) -> Result<Vec<u8>, EngineError>;
+    /// The height the source reports for a transaction (0 when unknown).
+    /// Not proof of inclusion: callers confirm it in the block's compact
+    /// transactions.
+    async fn transaction_height(&mut self, txid: &[u8; 32]) -> Result<u32, EngineError>;
+}
+
+/// The height a transaction is mined at, confirmed by finding its txid in
+/// the compact block at the height the source reports; `None` while it is
+/// not mined (or the source does not know it).
+pub async fn confirmed_height(
+    source: &mut dyn ChainSource,
+    txid: &[u8; 32],
+) -> Result<Option<u32>, EngineError> {
+    let height = source.transaction_height(txid).await?;
+    if height == 0 {
+        return Ok(None);
+    }
+    let blocks = source.block_range(height, height).await?;
+    let included = blocks
+        .iter()
+        .any(|b| b.height == u64::from(height) && b.vtx.iter().any(|t| t.txid == txid[..]));
+    Ok(included.then_some(height))
 }
 
 /// `lightwalletd` as a [`ChainSource`].
@@ -99,6 +121,20 @@ impl ChainSource for LightwalletdSource {
             .map_err(zeek_vault::VaultError::from)?
             .into_inner();
         Ok(raw.data)
+    }
+
+    async fn transaction_height(&mut self, txid: &[u8; 32]) -> Result<u32, EngineError> {
+        let raw = self
+            .client
+            .get_transaction(TxFilter {
+                block: None,
+                index: 0,
+                hash: txid.to_vec(),
+            })
+            .await
+            .map_err(zeek_vault::VaultError::from)?
+            .into_inner();
+        Ok(u32::try_from(raw.height).unwrap_or(0))
     }
 }
 

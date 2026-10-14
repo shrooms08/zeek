@@ -111,8 +111,21 @@ async fn fund_scan_dig_mine_and_rewind() {
         round: 7,
         blocks_remaining,
         chain_tip: tip,
+        message: None,
     };
     assert!(wallet.build_dig(&engine_config, &request(3)).is_err());
+    // Campfire is not active in this game: a message is refused up front.
+    let with_message = DigRequest {
+        message: Some("hello".into()),
+        ..request(10)
+    };
+    assert_eq!(
+        wallet
+            .build_dig(&engine_config, &with_message)
+            .expect_err("inactive")
+            .code(),
+        "invalid_request"
+    );
 
     // Two tiles, one transaction.
     let built = wallet.build_dig(&engine_config, &request(10)).expect("dig");

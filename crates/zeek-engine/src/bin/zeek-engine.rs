@@ -301,6 +301,9 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     Ok(None) => {}
                     Err(e) => tracing::error!(error = %e, "payout attempt failed"),
                 }
+                if let Err(e) = coordinator.record_openings(&mut db, &mut source, &config).await {
+                    tracing::warn!(error = %e, "recording payout openings failed; retrying next pass");
+                }
             }
             let board = processor.board(&db)?;
             if last_board.as_ref() != Some(&board) {

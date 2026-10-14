@@ -4797,6 +4797,7 @@ name = "zeek-pocket"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "bip39",
  "chacha20poly1305",
  "console_error_panic_hook",
@@ -4830,6 +4831,7 @@ dependencies = [
  "zcash_protocol",
  "zeek-core",
  "zeek-engine",
+ "zeek-verify",
  "zeroize",
  "zip32",
  "zip321",
@@ -4876,6 +4878,41 @@ dependencies = [
  "zeek-core",
  "zeroize",
  "zip321",
+]
+
+[[package]]
+name = "zeek-verify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "blake2b_simd",
+ "clap",
+ "hex",
+ "incrementalmerkletree",
+ "nonempty",
+ "orchard",
+ "pasta_curves",
+ "postcard",
+ "prost",
+ "rand_core 0.6.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tonic",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+ "zcash_client_backend",
+ "zcash_keys",
+ "zcash_note_encryption",
+ "zcash_primitives",
+ "zcash_protocol",
+ "zeek-core",
+ "zeek-engine",
 ]
 
 [[package]]

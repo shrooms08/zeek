@@ -71,7 +71,147 @@ fn js_err(e: PocketError) -> JsValue {
     .unwrap_or_else(|_| JsValue::from_str(&e.to_string()))
 }
 
-/// Builds the any-wallet dig request: JSON
+/// Builds the any-wallet shout request (rules v4): JSON
+/// `{ config, message, amountZat, chainTip }` in, a ZIP 321 URI out.
+#[wasm_bindgen(js_name = buildShoutRequest)]
+pub fn build_shout_request(request: &str) -> Result<JsValue, JsValue> {
+    let request: request::AnyWalletShoutRequest = from_json(request, "shout request")?;
+    to_js(&request::build_shout(&request).map_err(js_err)?)
+}
+
+fn verify_err(message: impl Into<String>) -> JsValue {
+    js_err(PocketError::InvalidRequest(message.into()))
+}
+
+fn bundle_from(json: &str) -> Result<zeek_core::proof::ProofBundle, JsValue> {
+    from_json(json, "proof bundle")
+}
+
+/// Verifier step 1: the compact-block range a round's checks need, after
+/// checking the bundle's window against its parameters.
+#[wasm_bindgen(js_name = verifyPlan)]
+pub fn verify_plan(bundle: &str) -> Result<JsValue, JsValue> {
+    let bundle = bundle_from(bundle)?;
+    zeek_verify::checks::check_window(&bundle).map_err(|e| verify_err(e.to_string()))?;
+    let (start, end) = zeek_verify::checks::block_range(&bundle);
+    to_js(&serde_json::json!({
+        "start": start,
+        "end": end,
+        "payoutHeight": zeek_verify::checks::payout_height(&bundle),
+    }))
+}
+
+/// Verifier step 2: trial-decrypts the window's compact blocks (relay
+/// encoding) with the public UIVK and returns the txids to fetch.
+#[wasm_bindgen(js_name = verifyScan)]
+pub fn verify_scan(bundle: &str, config: &str, blocks: &[u8]) -> Result<JsValue, JsValue> {
+    let bundle = bundle_from(bundle)?;
+    let config: zeek_verify::checks::PublicConfig = from_json(config, "public config")?;
+    let ivk = config.ivk().map_err(|e| verify_err(e.to_string()))?;
+    let blocks = zeek_verify::chain::Blocks::new(
+        zeek_verify::chain::decode_relay_blocks(blocks).map_err(|e| verify_err(e.to_string()))?,
+    );
+    let hits = zeek_verify::checks::scan_window(&bundle, &ivk, &blocks);
+    to_js(&zeek_verify::checks::transactions_to_fetch(&bundle, &hits))
+}
+
+fn mined_txs(
+    txs: &js_sys::Array,
+    network: zeek_core::params::Network,
+) -> Result<std::collections::BTreeMap<String, zeek_verify::chain::MinedTx>, JsValue> {
+    use prost::Message;
+    let mut out = std::collections::BTreeMap::new();
+    for value in txs.iter() {
+        let bytes = js_sys::Uint8Array::new(&value).to_vec();
+        let raw = zcash_client_backend::proto::service::RawTransaction::decode(bytes.as_slice())
+            .map_err(|e| verify_err(format!("raw transaction: {e}")))?;
+        let height = u32::try_from(raw.height).map_err(|_| verify_err("height overflows"))?;
+        let mined = zeek_verify::chain::MinedTx {
+            raw: raw.data,
+            height,
+        };
+        let tx = zeek_verify::chain::parse_tx(network, "fetched", &mined)
+            .map_err(|e| verify_err(e.to_string()))?;
+        out.insert(tx.txid().to_string(), mined);
+    }
+    Ok(out)
+}
+
+/// Verifier step 3: runs the five checks. `blocks` holds the window, the
+/// blocks after it and the payout block (relay encoding); `txs` the relay's
+/// `RawTransaction` responses for the txids of step 2.
+#[wasm_bindgen(js_name = verifyRound)]
+pub fn verify_round(
+    bundle: &str,
+    config: &str,
+    blocks: &[u8],
+    txs: js_sys::Array,
+) -> Result<JsValue, JsValue> {
+    let bundle = bundle_from(bundle)?;
+    let config: zeek_verify::checks::PublicConfig = from_json(config, "public config")?;
+    let ivk = config.ivk().map_err(|e| verify_err(e.to_string()))?;
+    let blocks = zeek_verify::chain::Blocks::new(
+        zeek_verify::chain::decode_relay_blocks(blocks).map_err(|e| verify_err(e.to_string()))?,
+    );
+    let txs = mined_txs(&txs, bundle.params.network)?;
+    let report = zeek_verify::checks::verify_round(&zeek_verify::checks::RoundInput {
+        config: &config,
+        bundle: &bundle,
+        blocks: &blocks,
+        txs: &txs,
+        ivk: &ivk,
+    });
+    to_js(&report)
+}
+
+/// Decodes a base64url win proof into its claim fields (round, payout).
+#[wasm_bindgen(js_name = decodeWinProof)]
+pub fn decode_win_proof(encoded: &str) -> Result<JsValue, JsValue> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded.trim())
+        .map_err(|_| verify_err("the proof is not base64url"))?;
+    let proof =
+        zeek_verify::win::WinProof::decode(&bytes).map_err(|e| verify_err(e.to_string()))?;
+    to_js(&serde_json::json!({
+        "id": zeek_verify::win::WinProof::id(&bytes),
+        "round": proof.round,
+        "payoutIndex": proof.payout_index,
+        "payoutTxid": proof.payout_txid,
+    }))
+}
+
+/// Verifies a win proof: the round's bundle, the relay's `RawTransaction`
+/// response for the payout transaction, and the relay-encoded compact block
+/// at its height (to confirm inclusion).
+#[wasm_bindgen(js_name = verifyWinProof)]
+pub fn verify_win_proof(
+    encoded: &str,
+    bundle: &str,
+    payout_tx: &[u8],
+    block: &[u8],
+) -> Result<JsValue, JsValue> {
+    use base64::Engine;
+    use prost::Message;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded.trim())
+        .map_err(|_| verify_err("the proof is not base64url"))?;
+    let proof =
+        zeek_verify::win::WinProof::decode(&bytes).map_err(|e| verify_err(e.to_string()))?;
+    let bundle = bundle_from(bundle)?;
+    let raw = zcash_client_backend::proto::service::RawTransaction::decode(payout_tx)
+        .map_err(|e| verify_err(format!("raw transaction: {e}")))?;
+    let mined = zeek_verify::chain::MinedTx {
+        raw: raw.data,
+        height: u32::try_from(raw.height).map_err(|_| verify_err("height overflows"))?,
+    };
+    let blocks = zeek_verify::chain::Blocks::new(
+        zeek_verify::chain::decode_relay_blocks(block).map_err(|e| verify_err(e.to_string()))?,
+    );
+    let included = zeek_verify::chain::txid_bytes(&proof.payout_txid)
+        .is_some_and(|t| blocks.contains_tx(mined.height, &t));
+    to_js(&zeek_verify::win::verify(&proof, &bundle, &mined, included))
+}
 /// `{ config, payoutAddress, tiles, amountEachZat, round, chainTip }` in,
 /// a ZIP 321 URI with one text-memo payment per tile out (see
 /// [`request::build`]). Needs no wallet.
@@ -250,6 +390,33 @@ impl PocketCore {
         let config: EngineConfig = from_json(config, "engine config")?;
         let request: DigRequest = from_json(request, "dig request")?;
         to_js(&self.wallet.build_dig(&config, &request).map_err(js_err)?)
+    }
+
+    /// Builds a shout (rules v4): JSON `{ message, amountZat, chainTip }`.
+    #[wasm_bindgen(js_name = buildShout)]
+    pub fn build_shout(&mut self, config: &str, request: &str) -> Result<JsValue, JsValue> {
+        let config: EngineConfig = from_json(config, "engine config")?;
+        let request: tx::ShoutRequest = from_json(request, "shout request")?;
+        to_js(&self.wallet.build_shout(&config, &request).map_err(js_err)?)
+    }
+
+    /// Builds a win proof for treasure payout `payoutIndex` of the round
+    /// whose proof bundle (format 4, with payout openings) is `bundle`.
+    /// Returns `{ id, proof }` with the proof base64url-encoded.
+    #[wasm_bindgen(js_name = createWinProof)]
+    pub fn create_win_proof(&self, bundle: &str, payout_index: u32) -> Result<JsValue, JsValue> {
+        use base64::Engine;
+        let bundle = bundle_from(bundle)?;
+        let (id, encoded) = self
+            .wallet
+            .create_win_proof(&bundle, payout_index)
+            .map_err(js_err)?;
+        to_js(&serde_json::json!({
+            "id": id,
+            "proof": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(encoded),
+            "round": bundle.round,
+            "payoutIndex": payout_index,
+        }))
     }
 
     /// Builds a send: JSON `{ to, amountZat, memo?, chainTip }`.

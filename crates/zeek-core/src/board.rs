@@ -190,6 +190,7 @@ mod tests {
             valid: vec![dig(2, 10), dig(2, 5), dig(24, 1)],
             refunds: vec![],
             forfeits: vec![],
+            shouts: vec![],
         };
         let totals = TileTotals::from_digs(&digs).expect("totals");
         assert_eq!(totals.0[2], 15);
@@ -198,6 +199,7 @@ mod tests {
             valid: vec![dig(25, 1)],
             refunds: vec![],
             forfeits: vec![],
+            shouts: vec![],
         };
         assert_eq!(
             TileTotals::from_digs(&bad),
@@ -232,6 +234,7 @@ mod tests {
             valid: vec![dig(1), dig(2)],
             refunds: vec![],
             forfeits: vec![],
+            shouts: vec![],
         };
         let v = BoardView::new(&p, 0, RoundStatus::Open, 1_000, &digs, 5).expect("view");
         assert_eq!(v.gross_dug_zat, 200_000);

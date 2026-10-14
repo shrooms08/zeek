@@ -99,7 +99,7 @@ pub enum MemoEncoding {
 
 fn memo_bytes(memo: &DigMemo, encoding: MemoEncoding) -> Vec<u8> {
     match encoding {
-        MemoEncoding::Binary => memo.encode_unpadded().to_vec(),
+        MemoEncoding::Binary => memo.encode_unpadded(),
         MemoEncoding::Text => memo.encode_text().into_bytes(),
     }
 }
@@ -119,6 +119,46 @@ pub fn dig_payment_uri(
         &[(amount_zat, memo)],
         MemoEncoding::Binary,
     )
+}
+
+/// Builds a ZIP 321 request for a shout (rules v4): `amount_zat` to the
+/// vault's `address` carrying `memo`.
+pub fn shout_request_uri(
+    network: Network,
+    address: &str,
+    amount_zat: u64,
+    memo: &crate::memo::ShoutMemo,
+    encoding: MemoEncoding,
+) -> Result<String, PaymentError> {
+    if amount_zat == 0 {
+        return Err(PaymentError::ZeroAmount);
+    }
+    if amount_zat > MAX_AMOUNT_ZAT {
+        return Err(PaymentError::AmountTooLarge(amount_zat));
+    }
+    let parsed = ZcashAddress::try_from_encoded(address.trim())
+        .map_err(|e| MemoError::InvalidAddress(e.to_string()))?;
+    let expected = match network {
+        Network::Main => NetworkType::Main,
+        Network::Test => NetworkType::Test,
+    };
+    parsed
+        .clone()
+        .convert_if_network::<AnyKind>(expected)
+        .map_err(|_| MemoError::AddressWrongNetwork)?;
+    if !parsed.can_receive_memo() {
+        return Err(PaymentError::NoMemoReceiver);
+    }
+    let bytes = match encoding {
+        MemoEncoding::Binary => memo.encode_unpadded(),
+        MemoEncoding::Text => memo.encode_text().into_bytes(),
+    };
+    Ok(format!(
+        "zcash:{}?amount={}&memo={}",
+        parsed.encode(),
+        amount_param(amount_zat),
+        URL_SAFE_NO_PAD.encode(bytes)
+    ))
 }
 
 /// Builds one ZIP 321 request with one payment per dig, all to the vault's
@@ -279,6 +319,57 @@ mod tests {
             dig_request_uri(Network::Test, &vault, &[], MemoEncoding::Text),
             Err(PaymentError::NoPayments)
         );
+    }
+
+    #[test]
+    fn campfire_requests_carry_messages_through_the_reference_parser() {
+        use crate::memo::{ShoutMemo, ZeekMemo};
+        let mut rng = StdRng::seed_from_u64(9);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let receiver = PayoutReceiver {
+            network: Network::Test,
+            orchard: [3; ORCHARD_RECEIVER_LEN],
+        };
+        let vault = receiver.to_unified_address().expect("ua");
+        let dig = DigMemo::seal(30, 8, &receiver, &pk, &mut rng)
+            .expect("seal")
+            .with_message(&"m".repeat(crate::memo::MAX_DIG_MESSAGE_LEN))
+            .expect("message");
+        let uri = dig_request_uri(
+            Network::Test,
+            &vault,
+            &[(100_000, &dig)],
+            MemoEncoding::Text,
+        )
+        .expect("uri");
+        let request = zip321::TransactionRequest::from_uri(&uri).expect("zip321");
+        let memo = request
+            .payments()
+            .get(&0)
+            .expect("payment")
+            .memo()
+            .expect("memo");
+        assert!(memo.as_slice().len() <= 512);
+        assert_eq!(
+            ZeekMemo::decode_text(memo.as_slice(), true).expect("decode"),
+            ZeekMemo::Dig(dig)
+        );
+        let shout = ShoutMemo::new("warm hands").expect("shout");
+        for encoding in [MemoEncoding::Text, MemoEncoding::Binary] {
+            let uri =
+                shout_request_uri(Network::Test, &vault, 50_000, &shout, encoding).expect("uri");
+            let request = zip321::TransactionRequest::from_uri(&uri).expect("zip321");
+            assert_eq!(request.to_uri(), uri);
+            let payment = request.payments().get(&0).expect("payment");
+            assert_eq!(payment.amount().map(u64::from), Some(50_000));
+            let bytes = payment.memo().expect("memo").as_slice().to_vec();
+            let decoded = match encoding {
+                MemoEncoding::Text => ZeekMemo::decode_text(&bytes, true),
+                MemoEncoding::Binary => ZeekMemo::decode(&bytes, true),
+            }
+            .expect("decode");
+            assert_eq!(decoded, ZeekMemo::Shout(shout.clone()));
+        }
     }
 
     #[test]

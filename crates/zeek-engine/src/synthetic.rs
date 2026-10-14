@@ -434,4 +434,12 @@ impl ChainSource for SyntheticChain {
             .cloned()
             .ok_or_else(|| EngineError::Server("unknown synthetic transaction".into()))
     }
+
+    async fn transaction_height(&mut self, txid: &[u8; 32]) -> Result<u32, EngineError> {
+        Ok(self
+            .blocks
+            .iter()
+            .find(|(_, b)| b.vtx.iter().any(|t| t.txid == txid[..]))
+            .map_or(0, |(h, _)| *h))
+    }
 }

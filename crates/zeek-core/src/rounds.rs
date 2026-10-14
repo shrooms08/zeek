@@ -51,12 +51,15 @@ pub fn round_for_height(params: &GameParams, height: u32) -> Option<u32> {
         .map(|offset| offset / params.blocks_per_round)
 }
 
-/// The rules version `round` is played under: 3 once any block of its window
-/// is at or above the text-memo activation height, otherwise the fee rules
-/// version of the parameters (1 or 2). Earlier rounds keep their versions.
+/// The rules version `round` is played under: 4 once any block of its window
+/// is at or above the Campfire activation height, 3 once any block is at or
+/// above the text-memo activation height, otherwise the fee rules version of
+/// the parameters (1 or 2). Earlier rounds keep their versions.
 pub fn rules_version(params: &GameParams, round: u32) -> Result<u32, RoundError> {
     let window = round_window(params, round)?;
-    Ok(if params.text_memo_active(window.last()) {
+    Ok(if params.campfire_active(window.last()) {
+        4
+    } else if params.text_memo_active(window.last()) {
         3
     } else {
         params.rules_version()

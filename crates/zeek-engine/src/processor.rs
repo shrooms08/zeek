@@ -336,9 +336,13 @@ impl Processor {
         if row.rules_version < 3 {
             params.text_memo_activation_height = None;
         }
-        debug_assert!(row.rules_version <= PROOF_VERSION);
+        if row.rules_version < 4 {
+            params.campfire = None;
+        }
         Ok(ProofBundle {
-            version: row.rules_version,
+            version: PROOF_VERSION,
+            rules_version: Some(row.rules_version),
+            payout_openings: db.payout_openings(row.round)?,
             params,
             round: row.round,
             window,

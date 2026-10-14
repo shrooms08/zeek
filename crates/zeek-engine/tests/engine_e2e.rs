@@ -510,7 +510,9 @@ async fn text_memo_digs_count_from_the_activation_height() {
         let bundle = proof_response(&processor, &db, 0)
             .expect("proof")
             .expect("settled");
-        assert_eq!(bundle.version, expected_version);
+        assert_eq!(bundle.version, proof::PROOF_VERSION);
+        assert_eq!(bundle.rules_version, Some(expected_version));
+        assert_eq!(bundle.claimed_rules_version(), Some(expected_version));
         assert_eq!(
             bundle.params.text_memo_activation_height.is_some(),
             expected_version == 3

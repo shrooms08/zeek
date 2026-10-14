@@ -83,6 +83,18 @@ pub struct DigRequest {
     pub blocks_remaining: u32,
     /// The chain tip the relay reports; the wallet must be scanned to it.
     pub chain_tip: u32,
+    /// Campfire message carried by every dig of this transaction (rules v4).
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// A shout request (rules v4).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShoutRequest {
+    pub message: String,
+    pub amount_zat: u64,
+    pub chain_tip: u32,
 }
 
 /// A send request.
@@ -213,6 +225,22 @@ impl Wallet {
         }
         self.require_synced(request.chain_tip)?;
         let vault = parse_address(&config.vault_address)?;
+        let message = request.message.as_deref().filter(|m| !m.is_empty());
+        if let Some(message) = message {
+            if !config
+                .params
+                .campfire_active(request.chain_tip.saturating_add(1))
+            {
+                return Err(PocketError::InvalidRequest(
+                    "Campfire messages are not active yet in this game".into(),
+                ));
+            }
+            zeek_core::memo::validate_message(
+                message.as_bytes(),
+                zeek_core::memo::MAX_DIG_MESSAGE_LEN,
+            )
+            .map_err(|e| PocketError::InvalidRequest(format!("message: {e}")))?;
+        }
 
         let mut seed = [0u8; 32];
         OsRng.fill_bytes(&mut seed);
@@ -236,6 +264,12 @@ impl Wallet {
                 &mut rng,
             )
             .map_err(|e| PocketError::Build(format!("sealing the payout receiver: {e}")))?;
+            let memo = match message {
+                Some(m) => memo
+                    .with_message(m)
+                    .map_err(|e| PocketError::InvalidRequest(format!("message: {e}")))?,
+                None => memo,
+            };
             outputs.push(Output {
                 recipient: vault,
                 value: request.amount_each_zat,
@@ -258,6 +292,79 @@ impl Wallet {
             .checked_add(indices.len() as u64)
             .ok_or(PocketError::Overflow("diversifier index"))?;
         Ok(built)
+    }
+
+    /// Builds, proves and signs a Campfire shout (rules v4): one payment to
+    /// the vault carrying only a message. Its value goes to the Deep Cache.
+    pub fn build_shout(
+        &mut self,
+        config: &EngineConfig,
+        request: &ShoutRequest,
+    ) -> Result<BuiltTransaction, PocketError> {
+        let campfire = config
+            .params
+            .campfire
+            .as_ref()
+            .filter(|_| {
+                config
+                    .params
+                    .campfire_active(request.chain_tip.saturating_add(1))
+            })
+            .ok_or_else(|| {
+                PocketError::InvalidRequest("Campfire is not active yet in this game".into())
+            })?;
+        if request.amount_zat < campfire.min_shout_zat {
+            return Err(PocketError::InvalidAmount(format!(
+                "a shout must be at least {} zatoshis",
+                campfire.min_shout_zat
+            )));
+        }
+        self.require_synced(request.chain_tip)?;
+        let memo = zeek_core::memo::ShoutMemo::new(&request.message)
+            .map_err(|e| PocketError::InvalidRequest(format!("message: {e}")))?;
+        let vault = parse_address(&config.vault_address)?;
+        self.build(
+            vec![Output {
+                recipient: vault,
+                value: request.amount_zat,
+                memo: MemoBytes::from_bytes(&memo.encode_unpadded())
+                    .map_err(|e| PocketError::Build(format!("memo: {e}")))?,
+                scope: Scope::External,
+            }],
+            OutgoingKind::Shout {
+                amount_zat: request.amount_zat,
+                message: request.message.clone(),
+            },
+        )
+    }
+
+    /// Builds a win proof (see `zeek_verify::win`) for treasure payout
+    /// `payout_index` of the round described by `bundle`, which must have
+    /// been paid to one of this wallet's addresses.
+    pub fn create_win_proof(
+        &self,
+        bundle: &zeek_core::proof::ProofBundle,
+        payout_index: u32,
+    ) -> Result<(String, Vec<u8>), PocketError> {
+        let mut rng = OsRng;
+        let proof = zeek_verify::win::create(
+            bundle,
+            payout_index,
+            self.keys.fvk(),
+            &self.keys.ask(),
+            &circuit_keys().0,
+            &mut rng,
+        )
+        .map_err(|e| match e {
+            zeek_verify::win::WinProofError::NotOurAddress => {
+                PocketError::InvalidRequest("that payout was not received by this wallet".into())
+            }
+            other => PocketError::Build(other.to_string()),
+        })?;
+        let encoded = proof
+            .encode()
+            .map_err(|e| PocketError::Build(e.to_string()))?;
+        Ok((zeek_verify::win::WinProof::id(&encoded), encoded))
     }
 
     /// Builds, proves and signs a payment to any address with an

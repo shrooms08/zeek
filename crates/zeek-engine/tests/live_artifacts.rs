@@ -56,10 +56,11 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         let text = fs::read_to_string(&path).expect("read bundle");
         let bundle: ProofBundle = serde_json::from_str(&text).expect("parse bundle");
         versions_seen.insert(bundle.version);
+        let rules = bundle.claimed_rules_version().expect("rules version");
         assert_eq!(
             zeek_core::rounds::rules_version(&bundle.params, bundle.round).expect("version"),
-            bundle.version,
-            "{}: the bundle version is the rules version",
+            rules,
+            "{}: the parameters give the round the rules version the bundle states",
             path.display()
         );
         let recomputed = proof::recompute(&bundle).expect("recompute with zeek-core");
@@ -113,7 +114,7 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         assert_eq!(settled.new_cache, bundle.settlement.new_cache);
         assert_eq!(settled.drand_round, bundle.drand_round);
         assert_eq!(settled.dig_fees, bundle.settlement.dig_fees);
-        assert_eq!(settled.rules_version, bundle.version);
+        assert_eq!(settled.rules_version, rules);
     }
     assert!(
         versions_seen.contains(&1),

@@ -190,6 +190,127 @@ impl Coordinator {
         })
     }
 
+    /// Records the payout openings (proof bundle format 4) of every round
+    /// whose payout transaction is mined: each output is recovered with the
+    /// vault's outgoing viewing keys and matched to its settlement payout by
+    /// the opened receiver and the net amount. Returns the rounds recorded.
+    pub async fn record_openings(
+        &self,
+        db: &mut Db,
+        source: &mut dyn crate::chain::ChainSource,
+        game: &GameConfig,
+    ) -> Result<Vec<u32>, EngineError> {
+        let mut recorded = Vec::new();
+        for (round, txid) in db.rounds_missing_openings()? {
+            let Some(row) = db.settlement(round)? else {
+                continue;
+            };
+            let mut internal = hex::decode(&txid)
+                .map_err(|_| EngineError::Corrupt(format!("payout txid {txid} is not hex")))?;
+            internal.reverse();
+            let internal: [u8; 32] = internal
+                .try_into()
+                .map_err(|_| EngineError::Corrupt(format!("payout txid {txid} is not 32 bytes")))?;
+            let Some(height) = crate::chain::confirmed_height(source, &internal).await? else {
+                continue;
+            };
+            let raw = source.transaction(&internal).await?;
+            let openings = self.openings_of(game, &row.settlement, &txid, height, &raw)?;
+            db.set_payout_openings(round, &openings)?;
+            tracing::info!(round, %txid, height, outputs = openings.outputs.len(), "payout openings recorded");
+            recorded.push(round);
+        }
+        Ok(recorded)
+    }
+
+    fn openings_of(
+        &self,
+        game: &GameConfig,
+        settlement: &settle::Settlement,
+        txid: &str,
+        height: u32,
+        raw: &[u8],
+    ) -> Result<zeek_core::proof::PayoutOpenings, EngineError> {
+        use orchard::note_encryption::IronwoodDomain;
+        use zcash_note_encryption::try_output_recovery_with_ovk;
+        let branch = crate::chain::branch_for(game.params.network, height);
+        let tx = zcash_primitives::transaction::Transaction::read(raw, branch)
+            .map_err(|e| EngineError::Corrupt(format!("payout transaction {txid}: {e}")))?;
+        let bundle = tx.ironwood_bundle().ok_or_else(|| {
+            EngineError::Corrupt(format!("payout transaction {txid} has no Ironwood bundle"))
+        })?;
+        let ovks = [
+            self.fvk.to_ovk(Scope::External),
+            self.fvk.to_ovk(Scope::Internal),
+        ];
+        // (action index, recipient, value, rseed, note version) of every
+        // recoverable output.
+        let mut recovered = Vec::new();
+        for (index, action) in bundle.actions().iter().enumerate() {
+            for ovk in &ovks {
+                if let Some((note, _, _)) = try_output_recovery_with_ovk(
+                    &IronwoodDomain::for_action(action),
+                    ovk,
+                    action,
+                    action.cv_net(),
+                    &action.encrypted_note().out_ciphertext,
+                ) {
+                    recovered.push((
+                        index,
+                        note.recipient().to_raw_address_bytes(),
+                        note.value().inner(),
+                        *note.rseed().as_bytes(),
+                        match note.version() {
+                            orchard::note::NoteVersion::V2 => 2u8,
+                            orchard::note::NoteVersion::V3 => 3u8,
+                        },
+                    ));
+                    break;
+                }
+            }
+        }
+        let mut outputs = Vec::with_capacity(settlement.payouts.len());
+        let mut used = vec![false; recovered.len()];
+        for (payout_index, payout) in settlement.payouts.iter().enumerate() {
+            let memo = DigMemo {
+                round: payout.memo_round,
+                tile: payout.memo_tile,
+                sealed_receiver: payout.sealed_receiver.clone(),
+                message: None,
+            };
+            let receiver = memo.open(game.params.network, &self.sealing).map_err(|e| {
+                EngineError::Corrupt(format!(
+                    "payout {payout_index}: receiver does not open: {e}"
+                ))
+            })?;
+            let found = recovered
+                .iter()
+                .enumerate()
+                .find(|(i, r)| !used[*i] && r.1 == receiver.orchard && r.2 == payout.net);
+            let Some((i, (action_index, recipient, value, rseed, version))) = found else {
+                return Err(EngineError::Corrupt(format!(
+                    "payout {payout_index} of {txid} has no matching output"
+                )));
+            };
+            used[i] = true;
+            outputs.push(zeek_core::proof::PayoutOpening {
+                payout_index: u32::try_from(payout_index)
+                    .map_err(|_| EngineError::Overflow("payout index"))?,
+                action_index: u32::try_from(*action_index)
+                    .map_err(|_| EngineError::Overflow("action index"))?,
+                recipient: hex::encode(recipient),
+                value: *value,
+                rseed: hex::encode(rseed),
+                note_version: *version,
+            });
+        }
+        Ok(zeek_core::proof::PayoutOpenings {
+            txid: txid.to_owned(),
+            mined_height: height,
+            outputs,
+        })
+    }
+
     /// The vault's address.
     pub fn vault_address(&self) -> &str {
         &self.vault.address
@@ -260,6 +381,7 @@ impl Coordinator {
                 round: payout.memo_round,
                 tile: payout.memo_tile,
                 sealed_receiver: payout.sealed_receiver.clone(),
+                message: None,
             };
             // Opened only here, in memory; never stored or logged.
             let receiver = memo.open(game.params.network, &self.sealing).map_err(|e| {

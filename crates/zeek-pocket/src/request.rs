@@ -27,6 +27,68 @@ pub struct AnyWalletRequest {
     /// The chain tip now; the request is refused while text memos are not
     /// yet active (they would be forfeited).
     pub chain_tip: u32,
+    /// Campfire message for every dig (rules v4), at most 275 bytes.
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// An any-wallet shout (rules v4).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnyWalletShoutRequest {
+    pub config: EngineConfig,
+    pub message: String,
+    pub amount_zat: u64,
+    pub chain_tip: u32,
+}
+
+/// A shout request to show as a QR code.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnyWalletShout {
+    pub uri: String,
+    pub amount_zat: u64,
+    pub memo: String,
+    pub notice: String,
+}
+
+/// What to tell a shouter.
+pub const SHOUT_NOTICE: &str = "A shout is a public message on the Campfire. Its amount goes to \
+the Deep Cache and is never refunded. Anyone can read the message; nobody can tell who sent it.";
+
+/// Builds a ZIP 321 request for a shout with a text memo.
+pub fn build_shout(request: &AnyWalletShoutRequest) -> Result<AnyWalletShout, PocketError> {
+    let params = &request.config.params;
+    let next = request.chain_tip.saturating_add(1);
+    let campfire = params
+        .campfire
+        .as_ref()
+        .filter(|_| params.campfire_active(next))
+        .ok_or_else(|| {
+            PocketError::InvalidRequest("Campfire is not active yet in this game".into())
+        })?;
+    if request.amount_zat < campfire.min_shout_zat {
+        return Err(PocketError::InvalidAmount(format!(
+            "a shout must be at least {} zatoshis",
+            campfire.min_shout_zat
+        )));
+    }
+    let memo = zeek_core::memo::ShoutMemo::new(&request.message)
+        .map_err(|e| PocketError::InvalidRequest(format!("message: {e}")))?;
+    let uri = zeek_core::payment::shout_request_uri(
+        Network::Test,
+        &request.config.vault_address,
+        request.amount_zat,
+        &memo,
+        MemoEncoding::Text,
+    )
+    .map_err(|e| PocketError::InvalidRequest(e.to_string()))?;
+    Ok(AnyWalletShout {
+        uri,
+        amount_zat: request.amount_zat,
+        memo: memo.encode_text(),
+        notice: SHOUT_NOTICE.to_owned(),
+    })
 }
 
 /// The request to show as a QR code.
@@ -85,6 +147,12 @@ pub fn build(request: &AnyWalletRequest) -> Result<AnyWalletDig, PocketError> {
     // Sapling-only addresses are rejected here.
     let receiver = PayoutReceiver::from_unified_address(Network::Test, &request.payout_address)
         .map_err(|e| PocketError::InvalidAddress(e.to_string()))?;
+    let message = request.message.as_deref().filter(|m| !m.is_empty());
+    if message.is_some() && !params.campfire_active(request.chain_tip.saturating_add(1)) {
+        return Err(PocketError::InvalidRequest(
+            "Campfire messages are not active yet in this game".into(),
+        ));
+    }
     let mut seed = [0u8; 32];
     OsRng.fill_bytes(&mut seed);
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -100,6 +168,12 @@ pub fn build(request: &AnyWalletRequest) -> Result<AnyWalletDig, PocketError> {
                 &mut rng,
             )
             .map_err(|e| PocketError::Build(e.to_string()))
+            .and_then(|memo| match message {
+                Some(m) => memo
+                    .with_message(m)
+                    .map_err(|e| PocketError::InvalidRequest(format!("message: {e}"))),
+                None => Ok(memo),
+            })
         })
         .collect::<Result<_, _>>()?;
     let digs: Vec<(u64, &DigMemo)> = memos.iter().map(|m| (request.amount_each_zat, m)).collect();
@@ -157,6 +231,7 @@ mod tests {
                 amount_each_zat: 100_000,
                 round: 4,
                 chain_tip: 1_200,
+                message: None,
             },
             sk,
         )

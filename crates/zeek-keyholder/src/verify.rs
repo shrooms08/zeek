@@ -198,6 +198,7 @@ pub fn verify_payout(
                 round: payout.memo_round,
                 tile: payout.memo_tile,
                 sealed_receiver: payout.sealed_receiver.clone(),
+                message: None,
             };
             let receiver = memo
                 .open(params.network, ctx.sealing)

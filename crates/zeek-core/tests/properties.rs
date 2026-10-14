@@ -6,7 +6,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use zeek_core::beacon::Randomness;
 use zeek_core::digs::{
-    ClassifiedDigs, Forfeit, ForfeitReason, ReceivedNote, RefundDig, RefundReason, ValidDig,
+    ClassifiedDigs, Forfeit, ForfeitReason, ReceivedNote, RefundDig, RefundReason, Shout, ValidDig,
 };
 use zeek_core::memo::{
     DigMemo, PayoutReceiver, SealedReceiver, ORCHARD_RECEIVER_LEN, SEALED_RECEIVER_LEN,
@@ -36,8 +36,9 @@ fn arb_digs() -> impl Strategy<Value = ClassifiedDigs> {
         vec((0u8..25, 100_000u64..50_000_000_000), 0..12),
         vec(1u64..50_000_000_000, 0..4),
         vec(1u64..100_000, 0..4),
+        vec(50_000u64..10_000_000_000, 0..4),
     )
-        .prop_map(|(valid, refunds, forfeits)| ClassifiedDigs {
+        .prop_map(|(valid, refunds, forfeits, shouts)| ClassifiedDigs {
             valid: valid
                 .into_iter()
                 .enumerate()
@@ -55,6 +56,7 @@ fn arb_digs() -> impl Strategy<Value = ClassifiedDigs> {
                         round: 0,
                         tile: 0,
                         sealed_receiver: sealed(200),
+                        message: None,
                     },
                     reason: RefundReason::WrongRound { memo_round: 0 },
                 })
@@ -64,6 +66,13 @@ fn arb_digs() -> impl Strategy<Value = ClassifiedDigs> {
                 .map(|value| Forfeit {
                     note: note(value),
                     reason: ForfeitReason::BelowMinimum { minimum: 100_000 },
+                })
+                .collect(),
+            shouts: shouts
+                .into_iter()
+                .map(|value| Shout {
+                    note: note(value),
+                    message: Some("shout".to_owned()),
                 })
                 .collect(),
         })
@@ -94,22 +103,27 @@ proptest! {
         let pot = digs.pot().expect("pot");
         let refunded = digs.refunded_value().expect("refunded");
         let forfeited = digs.forfeited_value().expect("forfeited");
+        let shouted = digs.shouted_value().expect("shouts");
         // Conservation (also checked inside `settle`, re-derived here independently).
         prop_assert_eq!(
-            pot + refunded + forfeited + previous_cache,
-            s.total_paid + s.total_fees + s.new_cache
+            pot + refunded + forfeited + shouted + previous_cache,
+            s.total_paid + s.total_fees + s.shout_fees + s.new_cache
         );
+        // Shouts (rules v4): never paid out, each reserves exactly one dig fee
+        // and the rest reaches the Cache.
+        prop_assert_eq!(s.shouts, shouted);
+        prop_assert_eq!(s.shout_fees, p.dig_fee_zat * digs.shouts.len() as u64);
         // Winnings never exceed the pot plus everything the Cache could hold
-        // (its previous balance plus this round's forfeits); no single output
+        // (its previous balance plus this round's forfeits and shouts); no single output
         // exceeds the round's total inflow.
         let win_gross: u64 = s.payouts.iter().filter_map(|o| match o.reason {
             zeek_core::settle::PayoutReason::Win { .. } => Some(o.gross),
             _ => None,
         }).sum();
-        prop_assert!(win_gross <= pot + previous_cache + forfeited);
-        prop_assert!(s.cache_paid <= previous_cache + s.rake + forfeited + s.distributable);
+        prop_assert!(win_gross <= pot + previous_cache + forfeited + shouted);
+        prop_assert!(s.cache_paid <= previous_cache + s.rake + forfeited + shouted + s.distributable);
         for o in &s.payouts {
-            prop_assert!(o.gross <= pot + previous_cache + refunded + forfeited);
+            prop_assert!(o.gross <= pot + previous_cache + refunded + forfeited + shouted);
             prop_assert_eq!(o.net + o.fee, o.gross);
             prop_assert!(o.net > 0);
         }
@@ -202,6 +216,40 @@ proptest! {
         }
     }
 
+    /// Rules v4: any valid message survives both encodings of a dig and of a
+    /// shout, and every encoding fits the 512-byte memo.
+    #[test]
+    fn campfire_messages_round_trip_in_both_encodings(
+        round in any::<u32>(), tile in 0u8..25, seed in any::<u64>(),
+        message in "[a-zA-Z0-9 é🔥!?.,]{1,70}",
+    ) {
+        use zeek_core::memo::{ShoutMemo, ZeekMemo, MAX_DIG_MESSAGE_LEN, MAX_MESSAGE_LEN};
+        let mut rng = StdRng::seed_from_u64(seed);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let receiver = PayoutReceiver { network: Network::Test, orchard: [tile; ORCHARD_RECEIVER_LEN] };
+        let dig_text: String = message.chars().take_while({
+            let mut used = 0usize;
+            move |c| { used += c.len_utf8(); used <= MAX_DIG_MESSAGE_LEN }
+        }).collect();
+        let dig = DigMemo::seal(round, tile, &receiver, &pk, &mut rng).expect("seal")
+            .with_message(&dig_text).expect("message");
+        let shout_text: String = message.chars().take_while({
+            let mut used = 0usize;
+            move |c| { used += c.len_utf8(); used <= MAX_MESSAGE_LEN }
+        }).collect();
+        let shout = ShoutMemo::new(&shout_text).expect("shout");
+        for memo in [ZeekMemo::Dig(dig.clone()), ZeekMemo::Shout(shout.clone())] {
+            let (binary, text) = match &memo {
+                ZeekMemo::Dig(d) => (d.encode_unpadded(), d.encode_text()),
+                ZeekMemo::Shout(s) => (s.encode_unpadded(), s.encode_text()),
+            };
+            prop_assert!(binary.len() <= 512);
+            prop_assert!(text.len() <= 512);
+            prop_assert_eq!(ZeekMemo::decode(&binary, true).expect("binary"), memo.clone());
+            prop_assert_eq!(ZeekMemo::decode_text(text.as_bytes(), true).expect("text"), memo.clone());
+        }
+    }
+
     #[test]
     fn sealed_receiver_rejects_wrong_key_and_wrong_aad(
         round in any::<u32>(), tile in 0u8..25, other_round in any::<u32>(), other_tile in 0u8..25, seed in any::<u64>()
@@ -213,7 +261,7 @@ proptest! {
         let receiver = PayoutReceiver { network: Network::Test, orchard: [3; ORCHARD_RECEIVER_LEN] };
         let memo = DigMemo::seal(round, tile, &receiver, &pk, &mut rng).expect("seal");
         prop_assert!(memo.open(Network::Test, &wrong_sk).is_err());
-        let moved = DigMemo { round: other_round, tile: other_tile, sealed_receiver: memo.sealed_receiver.clone() };
+        let moved = DigMemo { round: other_round, tile: other_tile, sealed_receiver: memo.sealed_receiver.clone(), message: None };
         prop_assert!(moved.open(Network::Test, &sk).is_err());
     }
 

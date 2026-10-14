@@ -140,6 +140,11 @@ pub struct GameParams {
     /// undecodable memo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_memo_activation_height: Option<u32>,
+    /// Campfire (rules v4): from its activation height, dig memos may carry
+    /// a message and shout memos (message only) are accepted. Absent in
+    /// configs and proof bundles of earlier rules versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub campfire: Option<CampfireParams>,
     /// drand chain that supplies the treasure randomness.
     pub drand: DrandChain,
     /// Seconds after the *expected* window close at which the round's beacon
@@ -150,6 +155,20 @@ pub struct GameParams {
     pub mtp_window: u32,
     /// Assumed bound on honest miners' clock error, seconds.
     pub honest_clock_skew_secs: u64,
+}
+
+/// Smallest shout: 0.0005 ZEC.
+pub const MIN_SHOUT_ZAT: u64 = 50_000;
+
+/// Campfire parameters (rules v4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CampfireParams {
+    /// First block at which messages and shouts are recognised. Must not be
+    /// below the text-memo activation height (rules v4 includes v3).
+    pub activation_height: u32,
+    /// Smallest shout that counts as a shout; smaller ones are forfeited
+    /// whole to the Cache, like an undersized dig.
+    pub min_shout_zat: u64,
 }
 
 /// Errors from validating [`GameParams`].
@@ -177,6 +196,10 @@ pub enum ParamsError {
     DigFeeNotBelowMinimum { min_dig: u64, dig_fee: u64 },
     #[error("text_memo_activation_height {activation} is below genesis_height {genesis}")]
     TextMemoBeforeGenesis { activation: u32, genesis: u32 },
+    #[error("campfire (rules v4) needs text memos (rules v3) active no later than its activation height")]
+    CampfireBeforeTextMemos,
+    #[error("min_shout_zat {min_shout} must exceed the dig fee {dig_fee}")]
+    ShoutNotAboveDigFee { min_shout: u64, dig_fee: u64 },
     #[error("text memos (rules v3) require the dig fee of rules v2")]
     TextMemoWithoutDigFee,
     #[error("arithmetic overflow in parameters")]
@@ -221,6 +244,7 @@ impl GameParams {
             marginal_fee_zat: ZIP317_MARGINAL_FEE_ZAT,
             dig_fee_zat: DIG_FEE_ZAT,
             text_memo_activation_height: None,
+            campfire: None,
             drand: DrandChain::quicknet(),
             reveal_delay_secs: Self::minimum_reveal_delay(
                 target_spacing_secs,
@@ -283,6 +307,18 @@ impl GameParams {
                 return Err(ParamsError::TextMemoWithoutDigFee);
             }
         }
+        if let Some(campfire) = &self.campfire {
+            match self.text_memo_activation_height {
+                Some(text) if text <= campfire.activation_height => {}
+                _ => return Err(ParamsError::CampfireBeforeTextMemos),
+            }
+            if campfire.min_shout_zat <= self.dig_fee_zat {
+                return Err(ParamsError::ShoutNotAboveDigFee {
+                    min_shout: campfire.min_shout_zat,
+                    dig_fee: self.dig_fee_zat,
+                });
+            }
+        }
         match hex::decode(&self.drand.public_key) {
             Ok(bytes) if bytes.len() == 96 => {}
             _ => return Err(ParamsError::BadDrandPublicKey),
@@ -317,6 +353,14 @@ impl GameParams {
     pub fn text_memo_active(&self, height: u32) -> bool {
         self.text_memo_activation_height
             .is_some_and(|activation| height >= activation)
+    }
+
+    /// Whether a note mined at `height` may carry a Campfire message or be a
+    /// shout (rules v4).
+    pub fn campfire_active(&self, height: u32) -> bool {
+        self.campfire
+            .as_ref()
+            .is_some_and(|c| height >= c.activation_height)
     }
 
     /// Expected wall-clock length of a round.
@@ -411,6 +455,38 @@ mod tests {
         p.text_memo_activation_height = Some(150);
         p.dig_fee_zat = 0;
         assert_eq!(p.validate(), Err(ParamsError::TextMemoWithoutDigFee));
+    }
+
+    #[test]
+    fn campfire_is_optional_and_validated() {
+        let mut p = GameParams::testnet(100);
+        assert!(!p.campfire_active(u32::MAX));
+        assert!(!serde_json::to_string(&p)
+            .expect("json")
+            .contains("campfire"));
+        p.campfire = Some(CampfireParams {
+            activation_height: 200,
+            min_shout_zat: MIN_SHOUT_ZAT,
+        });
+        assert_eq!(p.validate(), Err(ParamsError::CampfireBeforeTextMemos));
+        p.text_memo_activation_height = Some(150);
+        p.validate().expect("valid");
+        assert!(!p.campfire_active(199));
+        assert!(p.campfire_active(200));
+        p.text_memo_activation_height = Some(201);
+        assert_eq!(p.validate(), Err(ParamsError::CampfireBeforeTextMemos));
+        p.text_memo_activation_height = Some(150);
+        p.campfire = Some(CampfireParams {
+            activation_height: 200,
+            min_shout_zat: 5_000,
+        });
+        assert_eq!(
+            p.validate(),
+            Err(ParamsError::ShoutNotAboveDigFee {
+                min_shout: 5_000,
+                dig_fee: 5_000
+            })
+        );
     }
 
     #[test]

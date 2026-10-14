@@ -17,12 +17,19 @@
 //! binary or the `zeek1:` text encoding (see [`crate::memo`]); below it a
 //! text memo is undecodable, as it always was.
 //!
+//! From the Campfire activation height (rules v4) a memo may also be a
+//! **shout** (a message, no tile, no receiver). A shout of at least
+//! `min_shout_zat` is never refunded, whatever its round or window: its
+//! value goes to the Deep Cache minus the dig fee reserved for spending its
+//! note later. A smaller shout is forfeited whole. Dig messages never affect
+//! classification.
+//!
 //! Classification never looks inside the sealed receiver, so it runs without
 //! the vault's private sealing key.
 
 use serde::{Deserialize, Serialize};
 
-use crate::memo::{DigMemo, SealedReceiver};
+use crate::memo::{DigMemo, SealedReceiver, ZeekMemo};
 use crate::params::GameParams;
 use crate::rounds::{round_window, RoundError};
 
@@ -73,8 +80,17 @@ pub enum RefundReason {
 pub enum ForfeitReason {
     /// The memo is not a decodable dig memo.
     UndecodableMemo { error: String },
-    /// The value is below `min_dig_zat`.
+    /// The value is below `min_dig_zat` (or `min_shout_zat` for a shout).
     BelowMinimum { minimum: u64 },
+}
+
+/// A shout (rules v4): its value feeds the Deep Cache.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Shout {
+    /// Source note.
+    pub note: ReceivedNote,
+    /// The message, when valid.
+    pub message: Option<String>,
 }
 
 /// A dig that takes part in the draw.
@@ -116,6 +132,7 @@ pub enum Classified {
     Valid(ValidDig),
     Refund(RefundDig),
     Forfeit(Forfeit),
+    Shout(Shout),
 }
 
 /// Every note of a round, classified.
@@ -124,6 +141,9 @@ pub struct ClassifiedDigs {
     pub valid: Vec<ValidDig>,
     pub refunds: Vec<RefundDig>,
     pub forfeits: Vec<Forfeit>,
+    /// Shouts (rules v4); empty before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shouts: Vec<Shout>,
 }
 
 impl ClassifiedDigs {
@@ -137,6 +157,13 @@ impl ClassifiedDigs {
     /// Sum of the refunded digs.
     pub fn refunded_value(&self) -> Option<u64> {
         self.refunds
+            .iter()
+            .try_fold(0u64, |acc, d| acc.checked_add(d.note.value))
+    }
+
+    /// Sum of the shouts.
+    pub fn shouted_value(&self) -> Option<u64> {
+        self.shouts
             .iter()
             .try_fold(0u64, |acc, d| acc.checked_add(d.note.value))
     }
@@ -157,8 +184,25 @@ pub fn classify(
     note: ReceivedNote,
 ) -> Result<Classified, RoundError> {
     let window = round_window(params, round)?;
-    let memo = match DigMemo::decode_at(params, note.height, &note.memo) {
-        Ok(memo) => memo,
+    let memo = match ZeekMemo::decode_at(params, note.height, &note.memo) {
+        Ok(ZeekMemo::Dig(memo)) => memo,
+        Ok(ZeekMemo::Shout(shout)) => {
+            let minimum = params
+                .campfire
+                .as_ref()
+                .map_or(u64::MAX, |c| c.min_shout_zat);
+            return Ok(if note.value < minimum {
+                Classified::Forfeit(Forfeit {
+                    note,
+                    reason: ForfeitReason::BelowMinimum { minimum },
+                })
+            } else {
+                Classified::Shout(Shout {
+                    note,
+                    message: shout.message,
+                })
+            });
+        }
         Err(error) => {
             return Ok(Classified::Forfeit(Forfeit {
                 note,
@@ -210,6 +254,7 @@ pub fn classify_round(
             Classified::Valid(d) => out.valid.push(d),
             Classified::Refund(d) => out.refunds.push(d),
             Classified::Forfeit(d) => out.forfeits.push(d),
+            Classified::Shout(d) => out.shouts.push(d),
         }
     }
     Ok(out)
@@ -372,6 +417,43 @@ mod tests {
             }
             other => panic!("expected two valid digs, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn shouts_are_classified_from_campfire_activation() {
+        use crate::memo::ShoutMemo;
+        use crate::params::{CampfireParams, MIN_SHOUT_ZAT};
+        let mut p = params();
+        let w = round_window(&p, 3).expect("window");
+        p.text_memo_activation_height = Some(w.start);
+        p.campfire = Some(CampfireParams {
+            activation_height: w.start + 2,
+            min_shout_zat: MIN_SHOUT_ZAT,
+        });
+        let shout = ShoutMemo::new("hello").expect("shout").encode().to_vec();
+        // Before activation: undecodable, forfeited (as under rules v3).
+        assert!(matches!(
+            classify(&p, 3, false, note(w.start + 1, 60_000, shout.clone())).expect("c"),
+            Classified::Forfeit(Forfeit {
+                reason: ForfeitReason::UndecodableMemo { .. },
+                ..
+            })
+        ));
+        // From activation: a shout, in a voided round too; below the minimum
+        // it is forfeited whole.
+        for voided in [false, true] {
+            match classify(&p, 3, voided, note(w.start + 2, 60_000, shout.clone())).expect("c") {
+                Classified::Shout(s) => assert_eq!(s.message.as_deref(), Some("hello")),
+                other => panic!("expected a shout, got {other:?}"),
+            }
+        }
+        assert!(matches!(
+            classify(&p, 3, false, note(w.start + 2, 49_999, shout)).expect("c"),
+            Classified::Forfeit(Forfeit {
+                reason: ForfeitReason::BelowMinimum { minimum: 50_000 },
+                ..
+            })
+        ));
     }
 
     #[test]

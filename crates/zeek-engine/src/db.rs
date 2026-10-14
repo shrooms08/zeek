@@ -250,6 +250,16 @@ impl Db {
                  settlement TEXT NOT NULL,
                  status TEXT NOT NULL,
                  rules_version INTEGER NOT NULL DEFAULT 1
+             );
+             CREATE TABLE IF NOT EXISTS payout_openings (
+                 round INTEGER PRIMARY KEY,
+                 openings TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS win_proofs (
+                 id TEXT PRIMARY KEY,
+                 round INTEGER NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 proof BLOB NOT NULL
              );",
         )?;
         conn.execute(
@@ -276,6 +286,89 @@ impl Db {
             )));
         }
         Ok(Db { conn })
+    }
+
+    // ---- payout openings (proof bundle format 4) ----
+
+    /// Stores the openings of a round's mined payout transaction.
+    pub fn set_payout_openings(
+        &self,
+        round: u32,
+        openings: &zeek_core::proof::PayoutOpenings,
+    ) -> Result<(), EngineError> {
+        let json =
+            serde_json::to_string(openings).map_err(|e| EngineError::Corrupt(e.to_string()))?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO payout_openings (round, openings) VALUES (?1, ?2)",
+            params![round, json],
+        )?;
+        Ok(())
+    }
+
+    /// The openings of a round's payout transaction, once recorded.
+    pub fn payout_openings(
+        &self,
+        round: u32,
+    ) -> Result<Option<zeek_core::proof::PayoutOpenings>, EngineError> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT openings FROM payout_openings WHERE round = ?1",
+                params![round],
+                |r| r.get(0),
+            )
+            .optional()?;
+        json.map(|j| serde_json::from_str(&j).map_err(|e| EngineError::Corrupt(e.to_string())))
+            .transpose()
+    }
+
+    /// Rounds whose payout was broadcast but whose openings are not recorded.
+    pub fn rounds_missing_openings(&self) -> Result<Vec<(u32, String)>, EngineError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.round, p.txid FROM payouts p
+             LEFT JOIN payout_openings o ON o.round = p.round
+             WHERE p.state = 'broadcast' AND p.txid IS NOT NULL AND o.round IS NULL
+             ORDER BY p.round",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- win proofs ----
+
+    /// Stores a validated win proof under `id` (idempotent).
+    pub fn insert_win_proof(
+        &self,
+        id: &str,
+        round: u32,
+        created_at: u64,
+        proof: &[u8],
+    ) -> Result<(), EngineError> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO win_proofs (id, round, created_at, proof) VALUES (?1, ?2, ?3, ?4)",
+            params![id, round, i64::try_from(created_at).unwrap_or(i64::MAX), proof],
+        )?;
+        Ok(())
+    }
+
+    /// A stored win proof.
+    pub fn win_proof(&self, id: &str) -> Result<Option<(u32, u64, Vec<u8>)>, EngineError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT round, created_at, proof FROM win_proofs WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok((
+                        r.get::<_, u32>(0)?,
+                        u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                        r.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()?)
     }
 
     // ---- meta ----

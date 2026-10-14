@@ -15,6 +15,25 @@
 //! representable: this is the receiver the Ironwood pool pays to, and
 //! transparent payouts are not supported.
 //!
+//! # Campfire (rules v4)
+//!
+//! From the Campfire activation height two more layouts are accepted
+//! (both padded with zeros to 512 bytes, ZIP 302 arbitrary data):
+//!
+//! ```text
+//! dig with message:  0xFF | "ZEEK" | 2 | round (u32 BE) | tile | sealed receiver (92)
+//!                    | message length (u16 BE) | message (UTF-8)
+//! shout:             0xFF | "ZEEK" | 3 | message length (u16 BE) | message (UTF-8)
+//! ```
+//!
+//! A message is valid UTF-8 without control characters, at most
+//! [`MAX_DIG_MESSAGE_LEN`] bytes on a dig and [`MAX_MESSAGE_LEN`] on a shout.
+//! The dig limit is the real one: a dig's text encoding (below) must fit the
+//! 512-byte memo, which leaves `floor(506 · 3 / 4) − 104 = 275` bytes. An
+//! invalid message is dropped and the memo still decodes, so a dig with a bad
+//! message stays a valid dig. The sealed receiver and its AAD are unchanged
+//! (the AAD keeps version byte 1 whatever the layout).
+//!
 //! # Text encoding (rules v3)
 //!
 //! Some wallets can only send UTF-8 text memos. The same payload may
@@ -72,6 +91,30 @@ pub const TEXT_PREFIX: &str = "zeek1:";
 pub const TEXT_PAYLOAD_LEN: usize = DIG_MEMO_LEN - 1;
 /// Length of the text encoding: prefix plus unpadded base64url of the payload.
 pub const TEXT_MEMO_LEN: usize = TEXT_PREFIX.len() + TEXT_PAYLOAD_LEN.div_ceil(3) * 4;
+/// Memo version of a dig that carries a Campfire message (rules v4).
+pub const DIG_MESSAGE_VERSION: u8 = 2;
+/// Memo version of a shout: a message only, no tile and no receiver (rules v4).
+pub const SHOUT_VERSION: u8 = 3;
+/// Bytes of the message length field.
+pub const MESSAGE_LEN_BYTES: usize = 2;
+/// Campfire message limit (bytes of UTF-8).
+pub const MAX_MESSAGE_LEN: usize = 280;
+/// Payload bytes a text memo can carry: the base64url of `n` bytes is
+/// `ceil(4n/3)` characters, and `"zeek1:"` plus that must fit 512 bytes.
+pub const TEXT_PAYLOAD_CAPACITY: usize = (MEMO_LEN - TEXT_PREFIX.len()) * 3 / 4;
+/// Longest message on a dig: the text encoding of a dig with message
+/// carries `DIG_MEMO_LEN - 1 + 2 + m` payload bytes, so `m` is at most
+/// `TEXT_PAYLOAD_CAPACITY - 104 = 275` (below the 280-byte Campfire limit).
+pub const MAX_DIG_MESSAGE_LEN: usize = {
+    let fit = TEXT_PAYLOAD_CAPACITY - (DIG_MEMO_LEN - 1) - MESSAGE_LEN_BYTES;
+    if fit < MAX_MESSAGE_LEN {
+        fit
+    } else {
+        MAX_MESSAGE_LEN
+    }
+};
+/// Header of a shout: lead byte, magic, version, length.
+pub const SHOUT_HEADER_LEN: usize = 1 + 4 + 1 + MESSAGE_LEN_BYTES;
 /// Length of the AAD: `magic | version | round | tile`.
 pub const AAD_LEN: usize = 4 + 1 + 4 + 1;
 
@@ -92,6 +135,12 @@ pub enum MemoError {
     TileOutOfRange(u8),
     #[error("memo bytes after the dig memo are not all zero")]
     NonZeroPadding,
+    #[error("message length runs past the end of the memo")]
+    MessageOverrun,
+    #[error("the memo is a shout, not a dig")]
+    NotADig,
+    #[error(transparent)]
+    Message(#[from] MessageError),
     #[error("text memo is not a well-formed `zeek1:` dig memo: {0}")]
     BadText(&'static str),
     #[error("sealed receiver must be {SEALED_RECEIVER_LEN} bytes, got {0}")]
@@ -262,6 +311,39 @@ impl<'de> Deserialize<'de> for SealedReceiver {
     }
 }
 
+/// Why a Campfire message is not accepted.
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+pub enum MessageError {
+    #[error("the message is empty")]
+    Empty,
+    #[error("the message is {len} bytes, more than the {max}-byte limit")]
+    TooLong { len: usize, max: usize },
+    #[error("the message is not valid UTF-8")]
+    NotUtf8,
+    #[error("the message contains the control character U+{0:04X}")]
+    ControlCharacter(u32),
+}
+
+/// Checks a Campfire message: non-empty, valid UTF-8, at most `max` bytes,
+/// no control characters (Unicode general category Cc, which includes
+/// newlines and tabs).
+pub fn validate_message(bytes: &[u8], max: usize) -> Result<String, MessageError> {
+    if bytes.is_empty() {
+        return Err(MessageError::Empty);
+    }
+    if bytes.len() > max {
+        return Err(MessageError::TooLong {
+            len: bytes.len(),
+            max,
+        });
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| MessageError::NotUtf8)?;
+    if let Some(c) = text.chars().find(|c| c.is_control()) {
+        return Err(MessageError::ControlCharacter(u32::from(c)));
+    }
+    Ok(text.to_owned())
+}
+
 /// A decoded dig memo.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigMemo {
@@ -271,6 +353,207 @@ pub struct DigMemo {
     pub tile: u8,
     /// The digger's sealed payout receiver.
     pub sealed_receiver: SealedReceiver,
+    /// Campfire message (rules v4). Encoders write it only when it passes
+    /// [`validate_message`] with [`MAX_DIG_MESSAGE_LEN`]; decoders keep it
+    /// only then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// A decoded shout memo (rules v4): a message and nothing else. Its note's
+/// value goes to the Deep Cache.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShoutMemo {
+    /// The message, when valid (at most [`MAX_MESSAGE_LEN`] bytes).
+    pub message: Option<String>,
+}
+
+/// Any Zeek memo.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ZeekMemo {
+    Dig(DigMemo),
+    Shout(ShoutMemo),
+}
+
+fn checked_message(message: Option<&str>, max: usize) -> Option<&str> {
+    message.filter(|m| validate_message(m.as_bytes(), max).is_ok())
+}
+
+fn push_message(out: &mut Vec<u8>, message: &str) {
+    // `checked_message` bounds the length far below u16::MAX.
+    let len = u16::try_from(message.len()).unwrap_or(u16::MAX);
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(message.as_bytes());
+}
+
+fn text_of(binary: &[u8]) -> String {
+    let mut out = String::with_capacity(TEXT_PREFIX.len() + binary.len().div_ceil(3) * 4);
+    out.push_str(TEXT_PREFIX);
+    URL_SAFE_NO_PAD.encode_string(&binary[1..], &mut out);
+    out
+}
+
+fn padded(binary: &[u8]) -> [u8; MEMO_LEN] {
+    let mut out = [0u8; MEMO_LEN];
+    let len = binary.len().min(MEMO_LEN);
+    out[..len].copy_from_slice(&binary[..len]);
+    out
+}
+
+impl ShoutMemo {
+    /// A shout with `message`, which must be valid.
+    pub fn new(message: &str) -> Result<Self, MemoError> {
+        validate_message(message.as_bytes(), MAX_MESSAGE_LEN)?;
+        Ok(ShoutMemo {
+            message: Some(message.to_owned()),
+        })
+    }
+
+    /// The memo bytes without padding.
+    pub fn encode_unpadded(&self) -> Vec<u8> {
+        let message = checked_message(self.message.as_deref(), MAX_MESSAGE_LEN).unwrap_or("");
+        let mut out = Vec::with_capacity(SHOUT_HEADER_LEN + message.len());
+        out.push(ARBITRARY_DATA_LEAD);
+        out.extend_from_slice(&MAGIC);
+        out.push(SHOUT_VERSION);
+        push_message(&mut out, message);
+        out
+    }
+
+    /// The full 512-byte memo field.
+    pub fn encode(&self) -> [u8; MEMO_LEN] {
+        padded(&self.encode_unpadded())
+    }
+
+    /// The text encoding: `zeek1:` + base64url of the binary memo without
+    /// its lead byte.
+    pub fn encode_text(&self) -> String {
+        text_of(&self.encode_unpadded())
+    }
+}
+
+/// Parses `memo` (without padding beyond `end` being checked here) and
+/// returns the memo and the index just past its last byte.
+fn decode_structure(memo: &[u8], campfire: bool) -> Result<(ZeekMemo, usize), MemoError> {
+    if !campfire {
+        return DigMemo::decode(memo).map(|d| (ZeekMemo::Dig(d), DIG_MEMO_LEN));
+    }
+    if memo.len() > MEMO_LEN {
+        return Err(MemoError::TooLong(memo.len()));
+    }
+    if memo.len() < SHOUT_HEADER_LEN {
+        return Err(MemoError::TooShort(memo.len()));
+    }
+    if memo[0] != ARBITRARY_DATA_LEAD {
+        return Err(MemoError::NotArbitraryData(memo[0]));
+    }
+    if memo[1..5] != MAGIC {
+        return Err(MemoError::BadMagic);
+    }
+    let message_at = |start: usize, max: usize| -> Result<(Option<String>, usize), MemoError> {
+        let len_bytes = memo
+            .get(start..start + MESSAGE_LEN_BYTES)
+            .ok_or(MemoError::TooShort(memo.len()))?;
+        let len = usize::from(u16::from_be_bytes([len_bytes[0], len_bytes[1]]));
+        let body_start = start + MESSAGE_LEN_BYTES;
+        let end = body_start + len;
+        let body = memo.get(body_start..end).ok_or(MemoError::MessageOverrun)?;
+        Ok((validate_message(body, max).ok(), end))
+    };
+    match memo[5] {
+        VERSION => {
+            if memo.len() < DIG_MEMO_LEN {
+                return Err(MemoError::TooShort(memo.len()));
+            }
+            let mut dig = DigMemo::decode_fields(memo)?;
+            dig.message = None;
+            Ok((ZeekMemo::Dig(dig), DIG_MEMO_LEN))
+        }
+        DIG_MESSAGE_VERSION => {
+            if memo.len() < DIG_MEMO_LEN {
+                return Err(MemoError::TooShort(memo.len()));
+            }
+            let mut dig = DigMemo::decode_fields(memo)?;
+            let (message, end) = message_at(DIG_MEMO_LEN, MAX_DIG_MESSAGE_LEN)?;
+            dig.message = message;
+            Ok((ZeekMemo::Dig(dig), end))
+        }
+        SHOUT_VERSION => {
+            let (message, end) = message_at(SHOUT_HEADER_LEN - MESSAGE_LEN_BYTES, MAX_MESSAGE_LEN)?;
+            Ok((ZeekMemo::Shout(ShoutMemo { message }), end))
+        }
+        other => Err(MemoError::UnsupportedVersion(other)),
+    }
+}
+
+impl ZeekMemo {
+    /// Strictly parses a binary memo field (padded or not). Versions 2 and
+    /// 3 are accepted only when `campfire` is set; otherwise this is exactly
+    /// [`DigMemo::decode`].
+    pub fn decode(memo: &[u8], campfire: bool) -> Result<Self, MemoError> {
+        let (decoded, end) = decode_structure(memo, campfire)?;
+        if memo[end.min(memo.len())..].iter().any(|b| *b != 0) {
+            return Err(MemoError::NonZeroPadding);
+        }
+        Ok(decoded)
+    }
+
+    /// Strictly parses the text encoding (followed by zero padding): the
+    /// prefix and the canonical unpadded base64url of exactly one memo.
+    pub fn decode_text(memo: &[u8], campfire: bool) -> Result<Self, MemoError> {
+        if !campfire {
+            return DigMemo::decode_text(memo).map(ZeekMemo::Dig);
+        }
+        if memo.len() > MEMO_LEN {
+            return Err(MemoError::TooLong(memo.len()));
+        }
+        let end = memo.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        let encoded = memo[..end]
+            .strip_prefix(TEXT_PREFIX.as_bytes())
+            .ok_or(MemoError::BadText("missing the zeek1: prefix"))?;
+        let payload = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| MemoError::BadText("payload is not canonical base64url"))?;
+        let mut binary = Vec::with_capacity(payload.len() + 1);
+        binary.push(ARBITRARY_DATA_LEAD);
+        binary.extend_from_slice(&payload);
+        let (decoded, used) = decode_structure(&binary, true)?;
+        if used != binary.len() {
+            return Err(MemoError::BadText("payload has bytes after the memo"));
+        }
+        Ok(decoded)
+    }
+
+    /// Decodes a memo mined at `height` under `params`: the binary encoding
+    /// always; the text encoding from the text-memo activation height; dig
+    /// messages and shouts from the Campfire activation height. Below an
+    /// activation height a memo is classified exactly as before it.
+    pub fn decode_at(
+        params: &crate::params::GameParams,
+        height: u32,
+        memo: &[u8],
+    ) -> Result<Self, MemoError> {
+        let campfire = params.campfire_active(height);
+        match Self::decode(memo, campfire) {
+            Ok(decoded) => Ok(decoded),
+            Err(binary_error) => {
+                if params.text_memo_active(height) && memo.starts_with(TEXT_PREFIX.as_bytes()) {
+                    Self::decode_text(memo, campfire)
+                } else {
+                    Err(binary_error)
+                }
+            }
+        }
+    }
+
+    /// The message, if any.
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            ZeekMemo::Dig(d) => d.message.as_deref(),
+            ZeekMemo::Shout(s) => s.message.as_deref(),
+        }
+    }
 }
 
 /// The AAD binding a sealed receiver to its round and tile.
@@ -305,7 +588,16 @@ impl DigMemo {
             round,
             tile,
             sealed_receiver: SealedReceiver::from_bytes(&sealed)?,
+            message: None,
         })
+    }
+
+    /// Attaches a Campfire message (rules v4) after checking it against the
+    /// dig limit [`MAX_DIG_MESSAGE_LEN`].
+    pub fn with_message(mut self, message: &str) -> Result<Self, MemoError> {
+        validate_message(message.as_bytes(), MAX_DIG_MESSAGE_LEN)?;
+        self.message = Some(message.to_owned());
+        Ok(self)
     }
 
     /// Opens the sealed receiver with the vault's private sealing key.
@@ -322,35 +614,38 @@ impl DigMemo {
         PayoutReceiver::from_plaintext(network, &plaintext)
     }
 
-    /// The memo bytes without padding (`DIG_MEMO_LEN` bytes).
-    pub fn encode_unpadded(&self) -> [u8; DIG_MEMO_LEN] {
-        let mut out = [0u8; DIG_MEMO_LEN];
-        out[0] = ARBITRARY_DATA_LEAD;
-        out[1..5].copy_from_slice(&MAGIC);
-        out[5] = VERSION;
-        out[6..10].copy_from_slice(&self.round.to_be_bytes());
-        out[10] = self.tile;
-        out[HEADER_LEN..].copy_from_slice(self.sealed_receiver.as_bytes());
+    /// The memo bytes without padding: `DIG_MEMO_LEN` bytes (version 1),
+    /// or version 2 with the message when it carries a valid one.
+    pub fn encode_unpadded(&self) -> Vec<u8> {
+        let message = checked_message(self.message.as_deref(), MAX_DIG_MESSAGE_LEN);
+        let mut out = Vec::with_capacity(DIG_MEMO_LEN + MESSAGE_LEN_BYTES + MAX_DIG_MESSAGE_LEN);
+        out.push(ARBITRARY_DATA_LEAD);
+        out.extend_from_slice(&MAGIC);
+        out.push(if message.is_some() {
+            DIG_MESSAGE_VERSION
+        } else {
+            VERSION
+        });
+        out.extend_from_slice(&self.round.to_be_bytes());
+        out.push(self.tile);
+        out.extend_from_slice(self.sealed_receiver.as_bytes());
+        if let Some(message) = message {
+            push_message(&mut out, message);
+        }
         out
     }
 
     /// The full 512-byte memo field.
     pub fn encode(&self) -> [u8; MEMO_LEN] {
-        let mut out = [0u8; MEMO_LEN];
-        out[..DIG_MEMO_LEN].copy_from_slice(&self.encode_unpadded());
-        out
+        padded(&self.encode_unpadded())
     }
 
     /// Strictly parses a memo field (padded to 512 bytes or unpadded).
     /// The text encoding: `zeek1:` + base64url (no padding) of the binary
-    /// memo without its `0xFF` lead byte. Always [`TEXT_MEMO_LEN`] ASCII
-    /// characters.
+    /// memo without its `0xFF` lead byte: [`TEXT_MEMO_LEN`] ASCII characters
+    /// without a message, at most 512 with one.
     pub fn encode_text(&self) -> String {
-        let binary = self.encode_unpadded();
-        let mut out = String::with_capacity(TEXT_MEMO_LEN);
-        out.push_str(TEXT_PREFIX);
-        URL_SAFE_NO_PAD.encode_string(&binary[1..], &mut out);
-        out
+        text_of(&self.encode_unpadded())
     }
 
     /// Decodes the text encoding from a memo field (the text followed by
@@ -388,18 +683,30 @@ impl DigMemo {
         height: u32,
         memo: &[u8],
     ) -> Result<Self, MemoError> {
-        match Self::decode(memo) {
-            Ok(decoded) => Ok(decoded),
-            Err(binary_error) => {
-                if params.text_memo_active(height) && memo.starts_with(TEXT_PREFIX.as_bytes()) {
-                    Self::decode_text(memo)
-                } else {
-                    Err(binary_error)
-                }
-            }
+        match ZeekMemo::decode_at(params, height, memo)? {
+            ZeekMemo::Dig(dig) => Ok(dig),
+            ZeekMemo::Shout(_) => Err(MemoError::NotADig),
         }
     }
 
+    /// Round, tile and sealed receiver of a dig memo whose lead byte, magic
+    /// and length were checked (the version byte is the caller's).
+    fn decode_fields(memo: &[u8]) -> Result<Self, MemoError> {
+        let round = u32::from_be_bytes([memo[6], memo[7], memo[8], memo[9]]);
+        let tile = memo[10];
+        if tile >= TILE_COUNT {
+            return Err(MemoError::TileOutOfRange(tile));
+        }
+        Ok(DigMemo {
+            round,
+            tile,
+            sealed_receiver: SealedReceiver::from_bytes(&memo[HEADER_LEN..DIG_MEMO_LEN])?,
+            message: None,
+        })
+    }
+
+    /// Strictly parses a version 1 dig memo (padded to 512 bytes or not):
+    /// the only layout before rules v4.
     pub fn decode(memo: &[u8]) -> Result<Self, MemoError> {
         if memo.len() > MEMO_LEN {
             return Err(MemoError::TooLong(memo.len()));
@@ -428,6 +735,7 @@ impl DigMemo {
             round,
             tile,
             sealed_receiver: SealedReceiver::from_bytes(&memo[HEADER_LEN..DIG_MEMO_LEN])?,
+            message: None,
         })
     }
 }
@@ -508,6 +816,150 @@ mod tests {
             DigMemo::decode_at(&p, 3_000, &memo.encode()).expect("binary"),
             memo
         );
+    }
+
+    fn campfire_params() -> crate::params::GameParams {
+        let mut p = crate::params::GameParams::testnet(1_000);
+        p.text_memo_activation_height = Some(2_000);
+        p.campfire = Some(crate::params::CampfireParams {
+            activation_height: 3_000,
+            min_shout_zat: crate::params::MIN_SHOUT_ZAT,
+        });
+        p
+    }
+
+    #[test]
+    fn message_limits_are_the_real_ones() {
+        assert_eq!(TEXT_PAYLOAD_CAPACITY, 379);
+        assert_eq!(MAX_DIG_MESSAGE_LEN, 275);
+        let mut rng = StdRng::seed_from_u64(40);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let longest = "é".repeat(137) + "x"; // 275 bytes
+        assert_eq!(longest.len(), 275);
+        let dig = DigMemo::seal(9, 4, &receiver(1), &pk, &mut rng)
+            .expect("seal")
+            .with_message(&longest)
+            .expect("fits");
+        assert!(dig.encode_unpadded().len() <= MEMO_LEN);
+        assert_eq!(
+            dig.encode_text().len(),
+            512,
+            "the text encoding fills the memo exactly"
+        );
+        assert_eq!(
+            DigMemo::seal(9, 4, &receiver(1), &pk, &mut rng)
+                .expect("seal")
+                .with_message(&(longest.clone() + "x")),
+            Err(MemoError::Message(MessageError::TooLong {
+                len: 276,
+                max: 275
+            }))
+        );
+        let shout = ShoutMemo::new(&"s".repeat(MAX_MESSAGE_LEN)).expect("280 bytes");
+        assert!(shout.encode_text().len() <= MEMO_LEN);
+        assert!(ShoutMemo::new(&"s".repeat(281)).is_err());
+        assert_eq!(validate_message(b"", 10), Err(MessageError::Empty));
+        assert_eq!(
+            validate_message(b"a\nb", 10),
+            Err(MessageError::ControlCharacter(10))
+        );
+        assert_eq!(validate_message(&[0xC3], 10), Err(MessageError::NotUtf8));
+        assert_eq!(
+            validate_message("ok 🔥".as_bytes(), 10).expect("valid"),
+            "ok 🔥"
+        );
+    }
+
+    #[test]
+    fn campfire_memos_decode_only_from_activation() {
+        let p = campfire_params();
+        let mut rng = StdRng::seed_from_u64(41);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let dig = DigMemo::seal(9, 4, &receiver(1), &pk, &mut rng)
+            .expect("seal")
+            .with_message("hello from tile 4")
+            .expect("message");
+        let shout = ShoutMemo::new("the fire is warm").expect("shout");
+        for (binary, text, expected) in [
+            (dig.encode(), dig.encode_text(), ZeekMemo::Dig(dig.clone())),
+            (
+                shout.encode(),
+                shout.encode_text(),
+                ZeekMemo::Shout(shout.clone()),
+            ),
+        ] {
+            let mut text_field = [0u8; MEMO_LEN];
+            text_field[..text.len()].copy_from_slice(text.as_bytes());
+            assert_eq!(
+                ZeekMemo::decode_at(&p, 3_000, &binary).expect("binary"),
+                expected
+            );
+            assert_eq!(
+                ZeekMemo::decode_at(&p, 3_000, &text_field).expect("text"),
+                expected
+            );
+            // Before activation: exactly the v3 behaviour (version unsupported).
+            assert_eq!(
+                ZeekMemo::decode_at(&p, 2_999, &binary),
+                Err(DigMemo::decode(&binary).expect_err("v1 decoder rejects"))
+            );
+            assert!(ZeekMemo::decode_at(&p, 2_999, &text_field).is_err());
+        }
+        // A version 1 dig is still a dig, without a message.
+        let plain = DigMemo::seal(9, 5, &receiver(2), &pk, &mut rng).expect("seal");
+        assert_eq!(plain.encode()[5], VERSION);
+        assert_eq!(
+            ZeekMemo::decode_at(&p, 3_000, &plain.encode()).expect("v1"),
+            ZeekMemo::Dig(plain)
+        );
+        assert_eq!(
+            DigMemo::decode_at(&p, 3_000, &shout.encode()),
+            Err(MemoError::NotADig)
+        );
+    }
+
+    #[test]
+    fn invalid_messages_are_dropped_not_fatal() {
+        let p = campfire_params();
+        let mut rng = StdRng::seed_from_u64(42);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let dig = DigMemo::seal(9, 4, &receiver(1), &pk, &mut rng).expect("seal");
+        // Hand-built version 2 memos with a bad message: control character,
+        // invalid UTF-8, empty.
+        for body in [&b"bad\x07bell"[..], &[0xFF, 0xFE][..], &b""[..]] {
+            let mut memo = dig.encode_unpadded();
+            memo[5] = DIG_MESSAGE_VERSION;
+            memo.extend_from_slice(&(body.len() as u16).to_be_bytes());
+            memo.extend_from_slice(body);
+            match ZeekMemo::decode_at(&p, 3_000, &memo).expect("still a dig") {
+                ZeekMemo::Dig(d) => {
+                    assert_eq!(d.message, None);
+                    assert_eq!((d.round, d.tile), (9, 4));
+                }
+                other => panic!("expected a dig, got {other:?}"),
+            }
+        }
+        // A length that runs past the memo makes it undecodable.
+        let mut memo = dig.encode_unpadded();
+        memo[5] = DIG_MESSAGE_VERSION;
+        memo.extend_from_slice(&500u16.to_be_bytes());
+        assert_eq!(
+            ZeekMemo::decode(&memo, true),
+            Err(MemoError::MessageOverrun)
+        );
+        // Bytes after the message must be zero.
+        let mut memo = ShoutMemo::new("hi").expect("shout").encode();
+        memo[20] = 1;
+        assert_eq!(
+            ZeekMemo::decode(&memo, true),
+            Err(MemoError::NonZeroPadding)
+        );
+        // Encoders never write an invalid message.
+        let sneaky = DigMemo {
+            message: Some("tab\there".to_owned()),
+            ..dig.clone()
+        };
+        assert_eq!(sneaky.encode_unpadded(), dig.encode_unpadded());
     }
 
     #[test]
