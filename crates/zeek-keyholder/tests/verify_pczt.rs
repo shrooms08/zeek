@@ -701,3 +701,76 @@ fn rounds_settled_under_rules_v1_are_not_signed() {
         "round 0 was settled under rules version 1; this node only signs payouts of rules version 2 or later"
     );
 }
+
+#[test]
+fn rules_v4_payouts_never_spend_shouts() {
+    let v = vault(4);
+    let mut processor_v4 = processor(&v);
+    {
+        // Rules v4 from genesis: text memos and Campfire both active.
+        let mut config = processor_v4.config().clone();
+        config.params.text_memo_activation_height = Some(GENESIS);
+        config.params.campfire = Some(zeek_core::params::CampfireParams {
+            activation_height: GENESIS,
+            min_shout_zat: zeek_core::params::MIN_SHOUT_ZAT,
+        });
+        config.validate().expect("valid v4 config");
+        processor_v4 = Processor::new(config);
+    }
+    let (alice, alice_memo) = player(&v, 21, 0, 3);
+    let alice_memo = alice_memo.with_message("for the fire").expect("message");
+    let shout = zeek_core::memo::ShoutMemo::new("the night is long").expect("shout");
+    let (notes, anchor) = vault_notes(
+        &v.fvk,
+        &[
+            (Scope::External, 100_000, alice_memo.encode()),
+            (Scope::External, 60_000, shout.encode()),
+        ],
+    );
+    let (dig, shout_note) = (&notes[0], &notes[1]);
+    let chain = Db::open_in_memory().expect("db");
+    let node = NodeDb::open_in_memory().expect("node db");
+    let settlement = settle_round(
+        &chain,
+        &processor_v4,
+        &[
+            Dig {
+                value: 100_000,
+                memo: alice_memo.encode(),
+                note: dig,
+                height: GENESIS + 1,
+            },
+            Dig {
+                value: 60_000,
+                memo: shout.encode(),
+                note: shout_note,
+                height: GENESIS + 2,
+            },
+        ],
+        drawn(3, false),
+        0,
+        4,
+    );
+    assert_eq!(settlement.shouts, 60_000);
+    assert_eq!(settlement.shout_fees, 5_000);
+    assert_eq!(settlement.payouts.len(), 1);
+    let net = settlement.payouts[0].net;
+    let ctx = VerifyContext {
+        processor: &processor_v4,
+        fvk: &v.fvk,
+        sealing: &v.sealing,
+        chain: &chain,
+        node: &node,
+    };
+    // The honest payout spends only the dig.
+    let honest = payout_pczt(&v, &[dig], anchor, &[(alice, net)]);
+    verify_payout(&ctx, &honest.serialize().expect("ser"), &[0]).expect("approved");
+    // Spending the shout note too is refused: shouts are not payout inputs.
+    let with_shout = payout_pczt(&v, &[dig, shout_note], anchor, &[(alice, net)]);
+    let reason = refusal(verify_payout(
+        &ctx,
+        &with_shout.serialize().expect("ser"),
+        &[0],
+    ));
+    assert!(reason.starts_with("input "), "{reason}");
+}
