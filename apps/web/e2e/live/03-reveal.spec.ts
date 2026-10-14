@@ -2,7 +2,7 @@
  * Live 3: wait for the dug round's reveal; the result card matches the
  * engine's settlement (outcome and treasure tile).
  */
-import { engine, expect, loadState, shot, test, unlock, until } from "./support";
+import { go, engine, expect, loadState, shot, test, unlock, until } from "./support";
 
 interface Settled {
   outcome:
@@ -17,7 +17,7 @@ test("the reveal's result card matches the settlement", async ({ page }) => {
     throw new Error("run step 02 first");
   const { round, tiles } = state.dig;
   await unlock(page, state.passphrase);
-  await page.goto(`/reveal/${round}`);
+  await go(page, `/reveal/${round}`);
   await expect(page.getByTestId("reveal-screen")).toBeVisible();
   await shot(page, "reveal-waiting-1440");
   const settled = await until(

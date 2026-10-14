@@ -110,6 +110,17 @@ export const test = base.extend<{ context: BrowserContext; page: Page }>({
 
 export { expect };
 
+/**
+ * Navigates inside the app without reloading. A reload restarts the Pocket
+ * worker, which locks the wallet (by design: the key lives in its memory).
+ */
+export async function go(page: Page, route: string): Promise<void> {
+  await page.evaluate((to) => {
+    window.history.pushState({}, "", to);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, route);
+}
+
 /** Unlocks the Pocket if it's locked, then waits for the wallet home. */
 export async function unlock(page: Page, passphrase: string): Promise<void> {
   await page.goto("/wallet");

@@ -8,6 +8,7 @@
 import {
   ENGINE,
   engine,
+  go,
   expect,
   loadState,
   saveState,
@@ -38,7 +39,7 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
       30 * 60_000,
       5_000,
     );
-    await page.goto("/");
+    await go(page, "/");
     await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
     for (let t = 0; t < 25; t++) await page.locator(`[data-tile="${t}"]`).click();
     await page.getByTestId("amount-input").fill("0.001");
@@ -69,7 +70,7 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
   }
 
   // The reveal: a win (all 25 tiles are ours).
-  await page.goto(`/reveal/${round}`);
+  await go(page, `/reveal/${round}`);
   await until(
     `round ${round} to settle`,
     async () => (await engine<{ settled: unknown }>(`/v1/rounds/${round}`)).settled ?? undefined,
@@ -110,7 +111,7 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
 
   let id = state.proofId;
   if (id === undefined) {
-    await page.goto(`/prove/${round}`);
+    await go(page, `/prove/${round}`);
     await page.getByTestId("prove-create").click();
     await expect(page.getByTestId("prove-done")).toBeVisible({ timeout: 15 * 60_000 });
     const img = page.getByTestId("prove-card");

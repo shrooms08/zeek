@@ -2,12 +2,12 @@
 
 import { toPocketError } from "@zeek/pocket";
 import { useQueryClient } from "@tanstack/react-query";
-import { useReducer } from "react";
+import { useEffect, useReducer } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance } from "../api/pocketQueries";
 import { useBoard, useConfig } from "../api/queries";
-import { BatchProgress, Modal, StepList } from "../components/ui";
+import { BatchProgress, Loading, Modal, StepList } from "../components/ui";
 import { digTotal, MARGINAL_FEE, planPayments, paymentFee } from "../lib/digPlan";
 import { formatZec, toNumber, zat } from "../lib/money";
 import { digReducer, SEAL_STEPS } from "../machines/dig";
@@ -33,13 +33,18 @@ export default function DigPocketScreen() {
   const draft = useDraft();
   const board = useBoard();
   const config = useConfig();
-  const { pocket, wallet } = usePocket();
+  const { pocket, wallet, refresh } = usePocket();
   const balance = usePocketBalance();
   const navigate = useNavigate();
   const client = useQueryClient();
   const [state, dispatch] = useReducer(digReducer, { kind: "confirm" });
   const close = () => void navigate("/");
+  // Opened directly (or after a reload): ask the Pocket where it stands.
+  useEffect(() => {
+    if (wallet.kind === "unknown") void refresh();
+  }, [wallet.kind, refresh]);
 
+  if (wallet.kind === "unknown") return <Loading text="Opening your Pocket…" />;
   if (wallet.kind !== "unlocked" && wallet.kind !== "syncing") {
     return (
       <Modal title="Unlock your Pocket first" onClose={close}>

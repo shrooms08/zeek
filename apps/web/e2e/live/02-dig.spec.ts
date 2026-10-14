@@ -2,7 +2,7 @@
  * Live 1b + 2: dig 2 tiles with a message from the Pocket, then see the
  * depth change on the field and the message at the Campfire.
  */
-import { engine, expect, loadState, saveState, shot, test, unlock, until } from "./support";
+import { go, engine, expect, loadState, saveState, shot, test, unlock, until } from "./support";
 
 const TILES = [6, 18]; // engine indices (UI tiles 7 and 19)
 
@@ -22,7 +22,7 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
     },
     30 * 60_000,
   );
-  await page.goto("/");
+  await go(page, "/");
   await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
   const before = await Promise.all(
     TILES.map(async (t) =>
@@ -55,7 +55,7 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
   await done.getByRole("button").first().click();
 
   // The field shows the new depth once the dig is mined and ingested.
-  await page.goto("/");
+  await go(page, "/");
   for (const [i, t] of TILES.entries()) {
     await expect
       .poll(
@@ -66,7 +66,7 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
   }
   await shot(page, "field-dug-1440");
 
-  await page.goto("/campfire");
+  await go(page, "/campfire");
   await expect(page.getByTestId("campfire-feed")).toContainText(message, { timeout: 10 * 60_000 });
   const row = page.getByTestId("campfire-message").filter({ hasText: message });
   await expect(row).toContainText(`R${round}`);
