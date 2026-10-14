@@ -4,6 +4,18 @@
 //! through the same Ironwood PCZT pipeline as the vault (propose, prove,
 //! sign, extract, broadcast), signed with the player's own spend authorizing
 //! key instead of FROST.
+//!
+//! # Payout receivers
+//!
+//! Every dig seals a **fresh diversified address** of the player's wallet:
+//! one new diversifier index per tile, taken from the wallet's own
+//! next-address allocator, which persists each index as an exposed address
+//! in its database. No receiver is ever reused across digs, so the
+//! keyholders, who open the sealed receivers of the payouts they sign,
+//! cannot link one player's digs to each other. Detection of the payouts
+//! does not depend on the recorded indices: the wallet trial-decrypts every
+//! output with its incoming viewing key, which covers all diversifiers, and
+//! recovers the index from the recipient when a note arrives.
 
 use orchard::circuit::{ProvingKey, VerifyingKey};
 use orchard::keys::SpendAuthorizingKey;
@@ -12,7 +24,8 @@ use pczt::roles::signer::Signer;
 use pczt::Pczt;
 use rand_09::TryRngCore;
 use serde::Deserialize;
-use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_client_backend::data_api::WalletWrite;
+use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
 use zcash_protocol::consensus::BlockHeight;
 use zeek_core::memo::{DigMemo, PayoutReceiver};
 use zeek_core::params::{GameParams, Network};
@@ -22,6 +35,7 @@ use zeek_vault::lightwalletd::Client;
 use zeek_vault::send::{self, PreparedPczt};
 use zeek_vault::wallet::{self, Db};
 use zeek_vault::VaultError;
+use zeek_vault::NETWORK;
 
 use crate::wallet::{DigError, Player};
 
@@ -123,6 +137,9 @@ pub struct DigOutcome {
     pub amount_zat: u64,
     pub fee_zat: u64,
     pub target_height: u32,
+    /// Diversifier index of the fresh payout receiver sealed for each tile
+    /// (player-local bookkeeping; the receivers themselves are never shown).
+    pub diversifier_indices: Vec<u128>,
 }
 
 /// Builds, signs and broadcasts a dig from `player`.
@@ -149,14 +166,37 @@ pub async fn dig(
         )));
     }
 
-    // The payout receiver is the player's own address, sealed to the vault's key.
-    let receiver = PayoutReceiver::from_unified_address(Network::Test, &player.address()?)
-        .map_err(|e| DigError::Game(e.to_string()))?;
+    let usk = player.spending_key()?;
+    let account = player
+        .find_account(db)?
+        .ok_or_else(|| DigError::PlayerMissing(player.name().to_owned()))?;
+    wallet::sync(db, client).await?;
+    let report = wallet::balance(db, account)?;
+
+    // One fresh diversified payout receiver per tile, sealed to the vault's key.
     let mut rng = rand_09::rngs::OsRng.unwrap_err();
     let vault = zcash_address::ZcashAddress::try_from_encoded(&config.vault_address)
         .map_err(|e| DigError::Game(format!("vault address: {e}")))?;
     let mut payments = Vec::with_capacity(request.tiles.len());
+    let mut diversifier_indices = Vec::with_capacity(request.tiles.len());
+    let mut used = std::collections::BTreeSet::new();
     for tile in &request.tiles {
+        let (address, index) = db
+            .get_next_available_address(account, UnifiedAddressRequest::ORCHARD)
+            .map_err(|e| DigError::Keys(format!("next payout address: {e}")))?
+            .ok_or_else(|| DigError::Keys("the wallet has no account for this player".into()))?;
+        let mut index_bytes = [0u8; 16];
+        index_bytes[..11].copy_from_slice(index.as_bytes());
+        let index_value = u128::from_le_bytes(index_bytes);
+        if !used.insert(index_value) {
+            return Err(DigError::Keys(
+                "the wallet handed out the same diversifier index twice".into(),
+            ));
+        }
+        diversifier_indices.push(index_value);
+        let receiver =
+            PayoutReceiver::from_unified_address(Network::Test, &address.encode(&NETWORK))
+                .map_err(|e| DigError::Game(e.to_string()))?;
         let memo = DigMemo::seal(
             memo_round,
             *tile,
@@ -193,13 +233,6 @@ pub async fn dig(
     let request_tx = zip321::TransactionRequest::new(payments)
         .map_err(|e| DigError::Game(format!("payment request: {e}")))?;
 
-    let usk = player.spending_key()?;
-    let account = player
-        .find_account(db)?
-        .ok_or_else(|| DigError::PlayerMissing(player.name().to_owned()))?;
-    wallet::sync(db, client).await?;
-    let report = wallet::balance(db, account)?;
-
     let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
     let circuit = send::circuit_version_for(expected_target)?;
     tracing::info!("building Orchard proving key for {circuit:?}");
@@ -229,6 +262,7 @@ pub async fn dig(
         amount_zat: amount.into_u64(),
         fee_zat: fee.into_u64(),
         target_height: target_height.into(),
+        diversifier_indices,
     })
 }
 

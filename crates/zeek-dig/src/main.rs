@@ -198,6 +198,11 @@ fn main() -> anyhow::Result<()> {
                 outcome.target_height
             );
             println!("txid: {}", outcome.txid);
+            println!(
+                "Sealed {} distinct fresh payout receivers (diversifier indices {:?})",
+                outcome.diversifier_indices.len(),
+                outcome.diversifier_indices
+            );
             Ok(())
         }),
     }
