@@ -1,0 +1,21 @@
+{
+  "name": "harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DEV HARNESS for Zeek Pocket and the any-wallet dig request (not the product UI)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zeek/pocket": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}

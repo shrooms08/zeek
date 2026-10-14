@@ -1,0 +1,26 @@
+{
+  "name": "@zeek/pocket",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeek Pocket: a shielded Zcash testnet wallet that runs in the browser, plus the any-wallet ZIP 321 dig request builder",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:wasm": "sh ../../scripts/build-wasm.sh",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "idb": "^8.0.3",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "fake-indexeddb": "^6.2.4",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}

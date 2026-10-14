@@ -19,3 +19,4 @@
 /crates/zeek-pocket/pkg/
 node_modules/
 dist/
+/packages/zeek-pocket/wasm/

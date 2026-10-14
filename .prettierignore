@@ -1,0 +1,11 @@
+target
+vendor
+crates
+docs
+config
+data
+dist
+node_modules
+packages/zeek-pocket/wasm
+pnpm-lock.yaml
+*.md
