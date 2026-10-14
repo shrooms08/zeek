@@ -164,6 +164,23 @@ pub fn verify_round(
     to_js(&report)
 }
 
+/// Heights and hashes (display hex) of relay-encoded compact blocks, for
+/// cross-checking one chain source against another.
+#[wasm_bindgen(js_name = blockHashes)]
+pub fn block_hashes(blocks: &[u8]) -> Result<JsValue, JsValue> {
+    let blocks =
+        zeek_verify::chain::decode_relay_blocks(blocks).map_err(|e| verify_err(e.to_string()))?;
+    let hashes: Vec<serde_json::Value> = blocks
+        .iter()
+        .map(|b| {
+            let mut hash = b.hash.clone();
+            hash.reverse();
+            serde_json::json!({ "height": b.height, "hash": hex::encode(hash) })
+        })
+        .collect();
+    to_js(&hashes)
+}
+
 /// Decodes a base64url win proof into its claim fields (round, payout).
 #[wasm_bindgen(js_name = decodeWinProof)]
 pub fn decode_win_proof(encoded: &str) -> Result<JsValue, JsValue> {

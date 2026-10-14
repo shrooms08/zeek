@@ -23,6 +23,7 @@ export type PocketErrorCode =
   | "relay"
   | "broadcast_rejected"
   | "not_isolated"
+  | "partial_dig"
   | "internal";
 
 const CODES: ReadonlySet<string> = new Set<PocketErrorCode>([
@@ -47,36 +48,54 @@ const CODES: ReadonlySet<string> = new Set<PocketErrorCode>([
   "relay",
   "broadcast_rejected",
   "not_isolated",
+  "partial_dig",
   "internal",
 ]);
+
+/** What a batched dig sent before a later batch failed. */
+export interface PartialDig {
+  /** Batches broadcast (never resent). */
+  sent: { txid: string; tiles: number[] }[];
+  /** Tiles not dug. */
+  unsent: number[];
+}
 
 /** Plain data form, as it crosses the worker boundary. */
 export interface PocketErrorData {
   code: PocketErrorCode;
   message: string;
   height?: number;
+  partial?: PartialDig;
 }
 
 export class PocketError extends Error {
   readonly code: PocketErrorCode;
   /** Fork height for `reorg`. */
   readonly height: number | undefined;
+  /** For `partial_dig`: what was sent and what was not. */
+  readonly partial: PartialDig | undefined;
 
-  constructor(code: PocketErrorCode, message: string, height?: number) {
+  constructor(code: PocketErrorCode, message: string, height?: number, partial?: PartialDig) {
     super(message);
     this.name = "PocketError";
     this.code = code;
     this.height = height;
+    this.partial = partial;
   }
 
   toData(): PocketErrorData {
-    return this.height === undefined
-      ? { code: this.code, message: this.message }
-      : { code: this.code, message: this.message, height: this.height };
+    const data: PocketErrorData = { code: this.code, message: this.message };
+    if (this.height !== undefined) {
+      data.height = this.height;
+    }
+    if (this.partial !== undefined) {
+      data.partial = this.partial;
+    }
+    return data;
   }
 
   static fromData(data: PocketErrorData): PocketError {
-    return new PocketError(data.code, data.message, data.height);
+    return new PocketError(data.code, data.message, data.height, data.partial);
   }
 }
 

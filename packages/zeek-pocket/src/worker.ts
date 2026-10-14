@@ -6,10 +6,19 @@
  */
 
 import init, {
+  blockHashes,
   buildDigRequest as coreBuildDigRequest,
+  buildShoutRequest as coreBuildShoutRequest,
+  decodeWinProof,
   initThreadPool,
   PocketCore,
+  verifyPlan,
+  verifyRound as coreVerifyRound,
+  verifyScan,
+  verifyWinProof as coreVerifyWinProof,
 } from "../wasm/zeek_pocket.js";
+import { describePartial, planBatches } from "./batching.js";
+import { blockchairHash, compareHashes, sourceName, type BlockHash } from "./crosscheck.js";
 import { cryptoRandom, planTransactionFetches, type TxRef } from "./decoys.js";
 import { PocketError, toPocketError } from "./errors.js";
 import type { Methods, MethodName, RequestMessage, ResponseMessage } from "./protocol.js";
@@ -17,11 +26,18 @@ import { hexToBytes, MAX_BLOCK_RANGE, RelayClient } from "./relay.js";
 import { WalletStorage } from "./storage.js";
 import type {
   AnyWalletDig,
+  AnyWalletShout,
   Balance,
   BuiltTransaction,
+  CrossCheck,
+  DigBatch,
+  DigProgress,
   HistoryEntry,
+  RoundReport,
   ScanReport,
   SyncProgress,
+  VerifyProgress,
+  WinVerdict,
 } from "./types.js";
 
 /** Blocks fetched per relay request while syncing. */
@@ -38,6 +54,8 @@ const storage = new WalletStorage();
 let relay: RelayClient | undefined;
 let core: PocketCore | undefined;
 let ready: Promise<number> | undefined;
+/** The wasm module's linear memory (shared with the rayon threads). */
+let wasmMemory: WebAssembly.Memory | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 
 function post(message: ResponseMessage): void {
@@ -51,7 +69,8 @@ async function loadWasm(): Promise<number> {
       "the page is not cross-origin isolated (COOP/COEP headers), so the wallet cannot use threads",
     );
   }
-  await init();
+  const output = await init();
+  wasmMemory = output.memory;
   const threads = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8));
   await initThreadPool(threads);
   return threads;
@@ -187,6 +206,85 @@ async function broadcastBuilt(c: PocketCore, built: BuiltTransaction): Promise<v
   await persist();
 }
 
+function digProgress(id: number, progress: DigProgress): void {
+  post({ id, type: "dig-progress", progress });
+}
+
+function verifyProgress(id: number, step: VerifyProgress["step"], detail: string): void {
+  post({ id, type: "verify-progress", progress: { step, detail } });
+}
+
+/** Fetches relay-encoded compact blocks `start..=end` in chunks. */
+async function fetchBlocks(client: RelayClient, start: number, end: number): Promise<Uint8Array> {
+  const parts: Uint8Array[] = [];
+  for (let from = start; from <= end; from += MAX_BLOCK_RANGE) {
+    parts.push(await client.blocks(from, Math.min(end, from + MAX_BLOCK_RANGE - 1)));
+  }
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+async function crossCheck(
+  blocks: Uint8Array,
+  options: {
+    secondSource?: { kind: "relay"; url: string } | { kind: "blockchair"; network: "main" };
+  },
+): Promise<CrossCheck> {
+  const ours = blockHashes(blocks) as BlockHash[];
+  const source = options.secondSource;
+  if (source === undefined) {
+    return {
+      status: "unavailable",
+      source: "none",
+      detail:
+        "no second source configured: block hashes were not cross-checked (no browser-reachable public source exists for testnet; run `zeek-verify relay` against any lightwalletd and configure it)",
+    };
+  }
+  try {
+    let theirs: BlockHash[] = [];
+    if (source.kind === "relay") {
+      const second = new RelayClient(source.url);
+      const heights = ours.map((b) => b.height);
+      const lo = Math.min(...heights);
+      const hi = Math.max(...heights);
+      // The payout block may be far from the window: fetch both ranges.
+      const windowEnd = heights
+        .filter((h) => h - lo < MAX_BLOCK_RANGE)
+        .reduce((m, h) => Math.max(m, h), lo);
+      let bytes = await fetchBlocks(second, lo, windowEnd);
+      if (hi > windowEnd) {
+        bytes = concat(bytes, await fetchBlocks(second, hi, hi));
+      }
+      theirs = blockHashes(bytes) as BlockHash[];
+    } else {
+      for (const block of ours) {
+        const hash = await blockchairHash(block.height);
+        if (hash !== undefined) theirs.push(hash);
+      }
+    }
+    return compareHashes(ours, theirs, sourceName(source));
+  } catch (error) {
+    return {
+      status: "unavailable",
+      source: sourceName(source),
+      detail: `the second source could not be reached: ${toPocketError(error).message}`,
+    };
+  }
+}
+
 type Handler<M extends MethodName> = (arg: Methods[M][0], id: number) => Promise<Methods[M][1]>;
 
 const handlers: { [M in MethodName]: Handler<M> } = {
@@ -256,30 +354,187 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   async sync(_arg, id) {
     return sync(id);
   },
-  async dig({ tiles, amountEachZat }, id) {
+  async dig({ tiles, amountEachZat, message, maxTilesPerTx, separate }, id) {
     const c = needCore();
     const client = needRelay();
+    const batches = planBatches(tiles, maxTilesPerTx, separate === true);
+    const sent: DigBatch[] = [];
+    let round = -1;
+    for (const [index, batchTiles] of batches.entries()) {
+      const progress = (phase: DigProgress["phase"], txid?: string): void => {
+        digProgress(id, {
+          phase,
+          batch: index + 1,
+          batches: batches.length,
+          tiles: batchTiles,
+          ...(txid === undefined ? {} : { txid }),
+        });
+      };
+      try {
+        progress("sync");
+        const chainTip = await syncToTip(id);
+        const [{ json }, board] = await Promise.all([client.config(), client.board()]);
+        if (round === -1) {
+          round = board.round;
+        } else if (board.round !== round) {
+          throw new PocketError(
+            "closing_too_soon",
+            `round ${round} closed before batch ${index + 1}; the rest would land in round ${board.round}`,
+          );
+        }
+        progress("proving");
+        const built = c.buildDig(
+          json,
+          JSON.stringify({
+            tiles: batchTiles,
+            amountEachZat,
+            round: board.round,
+            blocksRemaining: board.blocks_remaining,
+            chainTip,
+            message: message ?? null,
+          }),
+        ) as BuiltTransaction;
+        progress("broadcast", built.txid);
+        await broadcastBuilt(c, built);
+        sent.push({
+          txid: built.txid,
+          tiles: batchTiles,
+          feeZat: built.feeZat,
+          provingMs: built.provingMs,
+          wasmMemoryBytes: wasmMemory?.buffer.byteLength ?? 0,
+        });
+        progress("sent", built.txid);
+      } catch (error) {
+        if (sent.length === 0) {
+          throw error;
+        }
+        const unsent = batches.slice(index).flat();
+        throw new PocketError(
+          "partial_dig",
+          describePartial(sent, unsent, toPocketError(error).message),
+          undefined,
+          { sent: sent.map((b) => ({ txid: b.txid, tiles: b.tiles })), unsent },
+        );
+      }
+    }
+    return { round, tiles, amountEachZat, batches: sent };
+  },
+  async shout({ message, amountZat }, id) {
+    const c = needCore();
     const chainTip = await syncToTip(id);
-    const [{ json }, board] = await Promise.all([client.config(), client.board()]);
-    const built = c.buildDig(
+    const { json } = await needRelay().config();
+    const built = c.buildShout(
       json,
-      JSON.stringify({
-        tiles,
-        amountEachZat,
-        round: board.round,
-        blocksRemaining: board.blocks_remaining,
-        chainTip,
-      }),
+      JSON.stringify({ message, amountZat, chainTip }),
     ) as BuiltTransaction;
     await broadcastBuilt(c, built);
-    return {
-      txid: built.txid,
-      round: board.round,
-      tiles,
-      amountEachZat,
-      feeZat: built.feeZat,
-      provingMs: built.provingMs,
+    return { txid: built.txid, amountZat, feeZat: built.feeZat, provingMs: built.provingMs };
+  },
+  async buildShoutRequest({ message, amountZat }) {
+    await wasm();
+    const client = needRelay();
+    const [{ config }, tip] = await Promise.all([client.config(), client.tip()]);
+    return coreBuildShoutRequest(
+      JSON.stringify({ config, message, amountZat, chainTip: tip.height }),
+    ) as Omit<AnyWalletShout, "qrSvg">;
+  },
+  async createWinProof({ round }) {
+    const c = needCore();
+    const client = needRelay();
+    const bundle = await client.roundBundle(round);
+    const parsed = JSON.parse(bundle) as {
+      payout_openings?: { outputs: { payout_index: number }[] };
     };
+    const outputs = parsed.payout_openings?.outputs ?? [];
+    if (outputs.length === 0) {
+      throw new PocketError(
+        "invalid_request",
+        `round ${round} has no payout openings yet (no payout, or not mined yet)`,
+      );
+    }
+    let lastError: PocketError | undefined;
+    for (const output of outputs) {
+      try {
+        const made = c.createWinProof(bundle, output.payout_index) as {
+          id: string;
+          proof: string;
+          round: number;
+          payoutIndex: number;
+        };
+        const submitted = await client.submitProof(made.proof);
+        return {
+          id: made.id,
+          round: made.round,
+          payoutIndex: made.payoutIndex,
+          proof: made.proof,
+          verdict: submitted.body.verdict,
+          stored: submitted.stored,
+        };
+      } catch (error) {
+        lastError = toPocketError(error);
+        if (lastError.code !== "invalid_request") {
+          throw lastError;
+        }
+      }
+    }
+    throw (
+      lastError ??
+      new PocketError("invalid_request", `no payout of round ${round} went to this wallet`)
+    );
+  },
+  async verifyRound({ round, secondSource }, id) {
+    await wasm();
+    const client = needRelay();
+    verifyProgress(id, "bundle", `fetching round ${round}'s proof bundle and the public config`);
+    const [bundle, { json: config }] = await Promise.all([
+      client.roundBundle(round),
+      client.config(),
+    ]);
+    const plan = verifyPlan(bundle) as { start: number; end: number; payoutHeight: number | null };
+    verifyProgress(id, "blocks", `fetching compact blocks ${plan.start}..${plan.end}`);
+    let blocks = await fetchBlocks(client, plan.start, plan.end);
+    if (
+      plan.payoutHeight !== null &&
+      (plan.payoutHeight < plan.start || plan.payoutHeight > plan.end)
+    ) {
+      blocks = concat(blocks, await fetchBlocks(client, plan.payoutHeight, plan.payoutHeight));
+    }
+    verifyProgress(id, "scan", "trial-decrypting the window with the public viewing key");
+    const txids = verifyScan(bundle, config, blocks) as string[];
+    verifyProgress(id, "transactions", `fetching ${txids.length} transactions`);
+    const txs: Uint8Array[] = [];
+    for (const txid of txids) {
+      txs.push(await client.transaction(txid));
+    }
+    verifyProgress(
+      id,
+      "checks",
+      "running the five checks (proof verification takes a few seconds)",
+    );
+    const report = coreVerifyRound(bundle, config, blocks, txs) as RoundReport;
+    verifyProgress(id, "cross-check", "comparing block hashes with the second source");
+    const check = await crossCheck(blocks, secondSource === undefined ? {} : { secondSource });
+    verifyProgress(id, "done", "done");
+    return { report, crossCheck: check, source: `Zeek relay ${client.baseUrl}` };
+  },
+  async verifyWinProof({ idOrProof }) {
+    await wasm();
+    const client = needRelay();
+    const trimmed = idOrProof.trim();
+    const encoded = /^[0-9a-f]{32}$/.test(trimmed) ? (await client.proof(trimmed)).proof : trimmed;
+    const summary = decodeWinProof(encoded) as { id: string; round: number; payoutTxid: string };
+    const bundle = await client.roundBundle(summary.round);
+    const parsed = JSON.parse(bundle) as { payout_openings?: { mined_height: number } };
+    const height = parsed.payout_openings?.mined_height;
+    if (height === undefined) {
+      throw new PocketError("invalid_request", `round ${summary.round} has no payout openings`);
+    }
+    const [tx, block] = await Promise.all([
+      client.transaction(summary.payoutTxid),
+      client.blocks(height, height),
+    ]);
+    const verdict = coreVerifyWinProof(encoded, bundle, tx, block) as WinVerdict;
+    return { ...verdict, id: summary.id, round: summary.round };
   },
   async send({ to, amountZat, memo }, id) {
     const c = needCore();
@@ -300,7 +555,7 @@ const handlers: { [M in MethodName]: Handler<M> } = {
     }
     return needCore().exportPhrase(stored.seedEnvelope, passphrase);
   },
-  async buildDigRequest({ payoutAddress, tiles, amountEachZat, round }) {
+  async buildDigRequest({ payoutAddress, tiles, amountEachZat, round, message }) {
     await wasm();
     const client = needRelay();
     const [{ config }, board, tip] = await Promise.all([
@@ -316,6 +571,7 @@ const handlers: { [M in MethodName]: Handler<M> } = {
         amountEachZat,
         round: round ?? board.round,
         chainTip: tip.height,
+        message: message ?? null,
       }),
     ) as Omit<AnyWalletDig, "qrSvg">;
     return built;

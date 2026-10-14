@@ -13,22 +13,37 @@ import type {
   RequestMessage,
   ResponseMessage,
   SendOptions,
+  ShoutOptions,
+  ShoutRequestOptions,
+  VerifyOptions,
   WalletStatus,
 } from "./protocol.js";
 import { qrSvg } from "./qr.js";
 import type {
   AnyWalletDig,
+  AnyWalletShout,
   Balance,
+  DigProgress,
   DigResult,
   HistoryEntry,
+  RoundVerification,
   SendResult,
   SyncProgress,
+  VerifyProgress,
+  WinProofResult,
+  WinVerdict,
 } from "./types.js";
 
-interface Pending {
+/** Progress callbacks of one call. */
+interface Listeners {
+  onProgress?: ((progress: SyncProgress) => void) | undefined;
+  onDig?: ((progress: DigProgress) => void) | undefined;
+  onVerify?: ((progress: VerifyProgress) => void) | undefined;
+}
+
+interface Pending extends Listeners {
   resolve: (value: unknown) => void;
   reject: (error: PocketError) => void;
-  onProgress: ((progress: SyncProgress) => void) | undefined;
 }
 
 export class Pocket {
@@ -63,6 +78,12 @@ export class Pocket {
       case "progress":
         pending.onProgress?.(message.progress);
         return;
+      case "dig-progress":
+        pending.onDig?.(message.progress);
+        return;
+      case "verify-progress":
+        pending.onVerify?.(message.progress);
+        return;
       case "result":
         this.pending.delete(message.id);
         pending.resolve(message.value);
@@ -77,17 +98,18 @@ export class Pocket {
   private call<M extends MethodName>(
     method: M,
     arg: Methods[M][0],
-    onProgress?: (progress: SyncProgress) => void,
+    listeners: Listeners | ((progress: SyncProgress) => void) = {},
   ): Promise<Methods[M][1]> {
     const id = this.nextId;
     this.nextId += 1;
+    const l: Listeners = typeof listeners === "function" ? { onProgress: listeners } : listeners;
     return new Promise<Methods[M][1]>((resolve, reject) => {
       this.pending.set(id, {
         resolve: (value) => {
           resolve(value as Methods[M][1]);
         },
         reject,
-        onProgress,
+        ...l,
       });
       const message: RequestMessage<M> = { id, method, arg };
       this.worker.postMessage(message);
@@ -140,9 +162,59 @@ export class Pocket {
     return this.call("sync", undefined, onProgress);
   }
 
-  /** Digs `tiles` in the current round, one sealed fresh payout address per tile. */
-  dig(options: DigOptions, onProgress?: (progress: SyncProgress) => void): Promise<DigResult> {
-    return this.call("dig", options, onProgress);
+  /**
+   * Digs `tiles` in the current round, one sealed fresh payout address per
+   * tile. Selections larger than `maxTilesPerTx` (default 6) are split into
+   * sequential transactions, each proven and broadcast in turn; `onBatch`
+   * reports each step. If a later batch fails the error has code
+   * `partial_dig` and `partial` lists exactly what was sent (never resent)
+   * and which tiles were not.
+   */
+  dig(
+    options: DigOptions,
+    onBatch?: (progress: DigProgress) => void,
+    onProgress?: (progress: SyncProgress) => void,
+  ): Promise<DigResult> {
+    return this.call("dig", options, { onDig: onBatch, onProgress });
+  }
+
+  /** Shouts a Campfire message (rules v4); the amount goes to the Deep Cache. */
+  shout(options: ShoutOptions, onProgress?: (progress: SyncProgress) => void): Promise<SendResult> {
+    return this.call("shout", options, onProgress);
+  }
+
+  /**
+   * Proves (in the worker) that a treasure payout of `round` reached this
+   * wallet, submits the proof to the engine (which verifies it before
+   * storing) and returns it with a share URL built on `shareBase`.
+   */
+  async createWinProof(
+    round: number,
+    shareBase: string,
+  ): Promise<WinProofResult & { shareUrl: string }> {
+    const result = await this.call("createWinProof", { round });
+    const url = new URL(shareBase);
+    url.searchParams.set("winproof", result.id);
+    return { ...result, shareUrl: url.toString() };
+  }
+
+  /** Runs the five round checks in the browser. */
+  verifyRound(
+    options: VerifyOptions,
+    onVerify?: (progress: VerifyProgress) => void,
+  ): Promise<RoundVerification> {
+    return this.call("verifyRound", options, { onVerify });
+  }
+
+  /** Verifies a win proof given its engine id or the base64url proof itself. */
+  verifyWinProof(idOrProof: string): Promise<WinVerdict & { id: string; round: number }> {
+    return this.call("verifyWinProof", { idOrProof });
+  }
+
+  /** The any-wallet shout request (ZIP 321 with a text memo) and its QR code. */
+  async buildShoutRequest(options: ShoutRequestOptions): Promise<AnyWalletShout> {
+    const built = await this.call("buildShoutRequest", options);
+    return { ...built, qrSvg: await qrSvg(built.uri) };
   }
 
   /** Sends to any address with an Orchard-protocol receiver. */

@@ -1,7 +1,16 @@
 /** HTTP client for the engine's chain relay and game API. */
 
 import { PocketError } from "./errors.js";
-import type { BoardState, EngineConfig, PendingRound } from "./types.js";
+import type { BoardState, CampfirePage, EngineConfig, PendingRound, WinVerdict } from "./types.js";
+
+/** The engine's stored win proof. */
+export interface StoredProof {
+  id: string;
+  round: number;
+  created_at: number;
+  proof: string;
+  verdict: WinVerdict;
+}
 
 export interface ChainTip {
   height: number;
@@ -92,6 +101,55 @@ export class RelayClient {
 
   async board(): Promise<BoardState> {
     return (await (await this.request("/v1/board")).json()) as BoardState;
+  }
+
+  /** A round's proof bundle as JSON text (handed to the verifier unchanged). */
+  async roundBundle(round: number): Promise<string> {
+    return (await this.request(`/v1/rounds/${round}/proof`)).text();
+  }
+
+  async campfire(
+    options: { before?: number; limit?: number; includeHidden?: boolean } = {},
+  ): Promise<CampfirePage> {
+    const query = new URLSearchParams();
+    if (options.before !== undefined) query.set("before", String(options.before));
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.includeHidden === true) query.set("include_hidden", "1");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return (await (await this.request(`/v1/campfire${suffix}`)).json()) as CampfirePage;
+  }
+
+  /** Submits a win proof; the engine verifies it fully before storing. */
+  async submitProof(proof: string): Promise<{ stored: boolean; body: StoredProof }> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/v1/proofs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proof }),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new PocketError("network", `cannot reach the engine at ${this.baseUrl}: ${detail}`);
+    }
+    if (response.status === 201 || response.status === 422) {
+      return { stored: response.status === 201, body: (await response.json()) as StoredProof };
+    }
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === "string") message = body.error;
+    } catch {
+      // Not JSON.
+    }
+    throw new PocketError("relay", message);
+  }
+
+  async proof(id: string): Promise<StoredProof> {
+    if (!/^[0-9a-f]{32}$/.test(id)) {
+      throw new PocketError("invalid_request", `not a proof id: ${id}`);
+    }
+    return (await (await this.request(`/v1/proofs/${id}`)).json()) as StoredProof;
   }
 
   async pendingRounds(): Promise<PendingRound[]> {

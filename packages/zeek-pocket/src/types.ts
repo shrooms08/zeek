@@ -39,7 +39,8 @@ export type OutgoingKind =
         memo_encoding: string;
       };
     }
-  | { send: { to: string; amount_zat: number; memo: string | null } };
+  | { send: { to: string; amount_zat: number; memo: string | null } }
+  | { shout: { amount_zat: number; message: string } };
 
 export interface Outgoing {
   txid: string;
@@ -78,12 +79,11 @@ export interface BuiltTransaction {
 }
 
 export interface DigResult {
-  txid: string;
   round: number;
   tiles: number[];
   amountEachZat: number;
-  feeZat: number;
-  provingMs: number;
+  /** One per transaction, in the order they were sent. */
+  batches: DigBatch[];
 }
 
 export interface SendResult {
@@ -141,10 +141,118 @@ export interface EngineConfig {
     min_dig_zat: number;
     dig_fee_zat?: number;
     text_memo_activation_height?: number;
+    campfire?: { activation_height: number; min_shout_zat: number };
     blocks_per_round: number;
     genesis_height: number;
   };
   vault_address: string;
   sealing_public_key: string;
   genesis_height: number;
+}
+
+/** One transaction of a (possibly batched) dig. */
+export interface DigBatch {
+  txid: string;
+  tiles: number[];
+  feeZat: number;
+  provingMs: number;
+  /** Wasm linear memory after this batch (bytes; it only grows, so this is the peak so far). */
+  wasmMemoryBytes: number;
+}
+
+/** Progress of a batched dig. */
+export interface DigProgress {
+  phase: "sync" | "proving" | "broadcast" | "sent";
+  batch: number;
+  batches: number;
+  tiles: number[];
+  txid?: string;
+}
+
+/** A Campfire message as the engine serves it. */
+export interface CampfireMessage {
+  id: string;
+  round: number;
+  kind: "dig" | "shout";
+  tile?: number;
+  height: number;
+  time: number;
+  value_zat: number;
+  nickname?: string;
+  text?: string;
+  hidden: boolean;
+  reason?: string;
+}
+
+export interface CampfirePage {
+  messages: CampfireMessage[];
+  next_before: number | null;
+}
+
+/** The any-wallet shout request. */
+export interface AnyWalletShout {
+  uri: string;
+  amountZat: number;
+  memo: string;
+  notice: string;
+  qrSvg: string;
+}
+
+/** A round check, as `zeek-verify` reports it. */
+export interface CheckResult {
+  id: "beacon" | "digs" | "timing" | "settlement" | "payout";
+  title: string;
+  status: "pass" | "fail" | "not_available";
+  summary: string;
+  detail: string[];
+}
+
+export interface RoundReport {
+  round: number;
+  bundle_version: number;
+  rules_version: number | null;
+  checks: CheckResult[];
+}
+
+/** Result of comparing block hashes with an independent second source. */
+export interface CrossCheck {
+  status: "pass" | "fail" | "unavailable";
+  source: string;
+  detail: string;
+}
+
+export interface VerifyProgress {
+  step: "bundle" | "blocks" | "scan" | "transactions" | "checks" | "cross-check" | "done";
+  detail: string;
+}
+
+export interface RoundVerification {
+  report: RoundReport;
+  crossCheck: CrossCheck;
+  /** Where blocks and transactions came from. */
+  source: string;
+}
+
+export interface WinStep {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface WinVerdict {
+  valid: boolean;
+  claim: string;
+  reason: string | null;
+  steps: WinStep[];
+}
+
+export interface WinProofResult {
+  id: string;
+  round: number;
+  payoutIndex: number;
+  /** The proof, base64url. */
+  proof: string;
+  verdict: WinVerdict;
+  /** Engine's response status: 201 stored, 422 rejected. */
+  stored: boolean;
 }

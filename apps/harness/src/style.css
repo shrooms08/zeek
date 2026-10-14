@@ -120,3 +120,25 @@ th {
   vertical-align: top;
   word-break: break-all;
 }
+.feed {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+}
+.feed li {
+  padding: 3px 0;
+  border-bottom: 1px solid #ecece6;
+  word-break: break-word;
+}
+li[data-status="pass"] {
+  color: #155d27;
+}
+li[data-status="fail"] {
+  color: #a10f0f;
+}
+li[data-status="not_available"] {
+  color: #6b6b62;
+}

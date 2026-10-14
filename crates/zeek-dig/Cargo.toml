@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 zeek-core = { path = "../zeek-core" }
 zeek-vault = { path = "../zeek-vault" }
+zeek-verify = { path = "../zeek-verify" }
+base64.workspace = true
 
 orchard.workspace = true
 zcash_note_encryption = "0.4.1"

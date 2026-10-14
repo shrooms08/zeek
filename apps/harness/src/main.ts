@@ -16,6 +16,7 @@ import {
 } from "@zeek/pocket";
 import { formatZec, parseTiles, parseZec } from "./amounts.js";
 import { button, el, input, output } from "./dom.js";
+import { campfireSection, verifierSection, winProofSection } from "./phase6.js";
 
 const engineUrl: string = import.meta.env.VITE_ZEEK_ENGINE_URL ?? "http://127.0.0.1:8787";
 
@@ -69,7 +70,9 @@ function historyRow(entry: HistoryEntry): HTMLTableRowElement {
   const what =
     "dig" in entry.kind
       ? `dig round ${entry.kind.dig.round} tiles ${entry.kind.dig.tiles.join(",")} x ${formatZec(entry.kind.dig.amount_each_zat)}`
-      : `send ${formatZec(entry.kind.send.amount_zat)} to ${entry.kind.send.to.slice(0, 18)}…`;
+      : "shout" in entry.kind
+        ? `shout ${formatZec(entry.kind.shout.amount_zat)}: ${entry.kind.shout.message}`
+        : `send ${formatZec(entry.kind.send.amount_zat)} to ${entry.kind.send.to.slice(0, 18)}…`;
   return el(
     "tr",
     { "data-testid": "history-sent" },
@@ -96,6 +99,9 @@ function pocketSection(): HTMLElement {
   const tiles = input("dig-tiles", "tiles, e.g. 3,17 or 0-24");
   const amount = input("dig-amount", "ZEC per tile, e.g. 0.001");
   const digResult = output("dig-result");
+  const digMessage = input("dig-message", "Campfire message (optional, 275 bytes)");
+  const maxPerTx = input("dig-max-per-tx", "tiles per transaction (default 6)");
+  const separate = el("input", { type: "checkbox", "data-testid": "dig-separate" });
   const sendTo = input("send-to", "destination address");
   const sendAmount = input("send-amount", "ZEC");
   const sendMemo = input("send-memo", "memo (optional)");
@@ -193,19 +199,46 @@ function pocketSection(): HTMLElement {
     balance,
     el("h2", {}, "Dig"),
     el("div", { class: "row" }, tiles, amount),
+    el("div", { class: "row" }, digMessage, maxPerTx, el("label", {}, separate, " dig separately")),
     el(
       "div",
       { class: "row" },
       button("dig", "Dig", () =>
         guarded(digResult, async () => {
           show(digResult, "syncing, proving and broadcasting…");
-          const result = await (
-            await wallet()
-          ).dig({ tiles: parseTiles(tiles.value), amountEachZat: parseZec(amount.value) }, (p) => {
-            show(digResult, progressText(p));
-          });
-          show(digResult, result);
-          await refresh();
+          const message = digMessage.value.trim();
+          const perTx = maxPerTx.value.trim();
+          const started = performance.now();
+          const log: string[] = [];
+          try {
+            const result = await (
+              await wallet()
+            ).dig(
+              {
+                tiles: parseTiles(tiles.value),
+                amountEachZat: parseZec(amount.value),
+                ...(message.length > 0 ? { message } : {}),
+                ...(perTx.length > 0 ? { maxTilesPerTx: Number(perTx) } : {}),
+                separate: separate.checked,
+              },
+              (b) => {
+                log.push(
+                  `${((performance.now() - started) / 1000).toFixed(1)}s batch ${b.batch}/${b.batches} [${b.tiles.join(",")}] ${b.phase}${b.txid === undefined ? "" : ` ${b.txid}`}`,
+                );
+                show(digResult, log.join("\n"));
+              },
+              (p) => {
+                show(digResult, [...log, progressText(p)].join("\n"));
+              },
+            );
+            show(digResult, {
+              elapsedSeconds: Math.round((performance.now() - started) / 1000),
+              log,
+              result,
+            });
+          } finally {
+            await refresh();
+          }
         }),
       ),
     ),
@@ -265,6 +298,7 @@ function anyWalletSection(): HTMLElement {
   const tiles = input("aw-tiles", "tiles, e.g. 4 or 2,9");
   const amount = input("aw-amount", "ZEC per tile, e.g. 0.001");
   const round = input("aw-round", "round (empty = current)");
+  const awMessage = input("aw-message", "Campfire message (optional)");
   const result = output("aw-result");
   const uri = el("textarea", { "data-testid": "aw-uri", rows: "6", readonly: "" });
   const qr = el("div", { class: "qr", "data-testid": "aw-qr" });
@@ -279,16 +313,19 @@ function anyWalletSection(): HTMLElement {
     ),
     payout,
     el("div", { class: "row" }, tiles, amount, round),
+    awMessage,
     el(
       "div",
       { class: "row" },
       button("aw-build", "Build request", () =>
         guarded(result, async () => {
           const roundText = round.value.trim();
+          const message = awMessage.value.trim();
           const options = {
             payoutAddress: payout.value.trim(),
             tiles: parseTiles(tiles.value),
             amountEachZat: parseZec(amount.value),
+            ...(message.length > 0 ? { message } : {}),
           };
           const built = await (
             await wallet()
@@ -374,5 +411,14 @@ app.append(
     { class: "banner", "data-testid": "banner" },
     `DEV HARNESS (not the product UI). Engine: ${engineUrl}. Cross-origin isolated: ${String(globalThis.crossOriginIsolated)}`,
   ),
-  el("main", {}, pocketSection(), anyWalletSection(), boardSection()),
+  el(
+    "main",
+    {},
+    pocketSection(),
+    anyWalletSection(),
+    boardSection(),
+    campfireSection(engineUrl, wallet),
+    verifierSection(wallet),
+    winProofSection(wallet),
+  ),
 );

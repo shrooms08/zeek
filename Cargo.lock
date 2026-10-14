@@ -4677,6 +4677,7 @@ name = "zeek-dig"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "dotenvy",
  "hex",
@@ -4702,6 +4703,7 @@ dependencies = [
  "zcash_protocol",
  "zeek-core",
  "zeek-vault",
+ "zeek-verify",
  "zip32",
  "zip321",
 ]

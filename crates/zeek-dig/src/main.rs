@@ -57,6 +57,18 @@ enum Command {
         #[arg(long)]
         memo: Option<String>,
     },
+    /// Build a win proof (prove-a-win) for the treasure payout this player
+    /// received in a round, print it, and optionally submit it to the engine.
+    ProveWin {
+        name: String,
+        #[arg(long)]
+        round: u32,
+        #[arg(long, default_value = "http://127.0.0.1:8787")]
+        engine: String,
+        /// Submit the proof to the engine's /v1/proofs.
+        #[arg(long)]
+        submit: bool,
+    },
     /// Pay a ZIP 321 payment request URI exactly as an external wallet
     /// would (every payment, amounts and memo bytes as given).
     PayUri { name: String, uri: String },
@@ -204,6 +216,60 @@ fn main() -> anyhow::Result<()> {
                 outcome.total_zat, outcome.fee_zat
             );
             println!("txid: {}", outcome.txid);
+            Ok(())
+        }),
+        Command::ProveWin {
+            name,
+            round,
+            engine,
+            submit,
+        } => runtime.block_on(async {
+            use base64::Engine;
+            let player = Player::new(secrets.path(), &name)?;
+            let usk = player.spending_key()?;
+            let sk = usk.orchard();
+            let fvk = orchard::keys::FullViewingKey::from(sk);
+            let ask = orchard::keys::SpendAuthorizingKey::from(sk);
+            let url = format!("{}/v1/rounds/{round}/proof", engine.trim_end_matches('/'));
+            let bundle: zeek_core::proof::ProofBundle =
+                reqwest::get(&url).await?.error_for_status()?.json().await?;
+            let openings = bundle.payout_openings.as_ref().context(
+                "the round's bundle has no payout openings yet (not mined, or an old engine)",
+            )?;
+            let index = openings
+                .outputs
+                .iter()
+                .find(|o| {
+                    hex::decode(&o.recipient)
+                        .ok()
+                        .and_then(|b| <[u8; 43]>::try_from(b).ok())
+                        .and_then(|b| Option::from(orchard::Address::from_raw_address_bytes(&b)))
+                        .is_some_and(|a: orchard::Address| fvk.scope_for_address(&a).is_some())
+                })
+                .map(|o| o.payout_index)
+                .context("none of this round's payouts went to this player")?;
+            eprintln!("building the proving key and proving (a few seconds)...");
+            let pk = orchard::circuit::ProvingKey::build(
+                orchard::circuit::OrchardCircuitVersion::PostNu6_3,
+            );
+            let proof =
+                zeek_verify::win::create(&bundle, index, &fvk, &ask, &pk, &mut rand_core::OsRng)?;
+            let encoded = proof.encode()?;
+            let text = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&encoded);
+            println!(
+                "round {round}, payout {index}, id {}",
+                zeek_verify::win::WinProof::id(&encoded)
+            );
+            println!("{text}");
+            if submit {
+                let response = reqwest::Client::new()
+                    .post(format!("{}/v1/proofs", engine.trim_end_matches('/')))
+                    .json(&serde_json::json!({ "proof": text }))
+                    .send()
+                    .await?;
+                let status = response.status();
+                println!("submitted: {status} {}", response.text().await?);
+            }
             Ok(())
         }),
         Command::PayUri { name, uri } => runtime.block_on(async {
