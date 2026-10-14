@@ -23,7 +23,8 @@ zcash_address.workspace = true
 zip32.workspace = true
 # Compact-block scanning and shard serialization only: no gRPC, no sqlite.
 zcash_client_backend = { version = "0.24.0", default-features = false, features = ["orchard", "unstable-serialization"] }
-zcash_keys = { version = "0.16.1", default-features = false, features = ["orchard"] }
+# `unstable-frost` exposes `UnifiedFullViewingKey::from_orchard_fvk` (Orchard-only UFVK).
+zcash_keys = { version = "0.16.1", default-features = false, features = ["orchard", "unstable-frost"] }
 zcash_note_encryption = "0.4.1"
 incrementalmerkletree = "0.8.2"
 shardtree = "0.7"
