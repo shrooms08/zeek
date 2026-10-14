@@ -1,0 +1,2 @@
+Paid 1 payment(s) totalling 100000 zatoshis (fee 10000)
+txid: 872847ccb91938c58a8623785c1e13786fe75f944fbe386a3b55f5fe0adc0807

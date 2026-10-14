@@ -1,0 +1,25 @@
+DEV HARNESS (not the product UI). Engine: http://127.0.0.1:8787. Cross-origin isolated: true
+dig finished in 18 s
+{
+  "txid": "6a505dfd67099a9c31906e3d5913df6d4117590c2f06f6e845dee81b9e42bf57",
+  "round": 58,
+  "tiles": [
+    5,
+    12
+  ],
+  "amountEachZat": 100000,
+  "feeZat": 15000,
+  "provingMs": 5392
+}
+{
+  "status": "unlocked, scanned to 4500740",
+  "address": "utest190k48sysfa4hehec7yl6hvyapfq0mwn252k8ce4q8m5qfm7ayxm66lhaylxqvpf22f5uvfv07k6tsja222egzc788xzaem9aryj4d6kp",
+  "balance": "spendable 0.01000000 ZEC, pending 0.01785000, total 0.02785000 (scanned 4500740)",
+  "progress": "",
+  "history": [
+    "sent (broadcast)4500741fee 0.00015000dig round 58 tiles 5,12 x 0.001000006a505dfd67099a9c31906e3d5913df6d4117590c2f06f6e845dee81b9e42bf57",
+    "received45001160.02000000Pocket funding for the 25-tile round825c23ae7bb723ff638ba7048433cf4c6abe0f3eb0103aa3726bfe860216aafe",
+    "received45000980.01000000Pocket funding from alice450035e3afa14925809cdd015d83374b3e1e8098a20b79cb0969bf70691fbbd4"
+  ]
+}
+screenshot /Users/minos/Projects/zeek/docs/examples/phase5/03-pocket-dig.png

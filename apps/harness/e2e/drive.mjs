@@ -45,7 +45,11 @@ async function waitFor(id, done, timeoutMs) {
     await page.waitForTimeout(1_000);
   }
 }
-const notBusy = (v) => v.length > 0 && !v.startsWith("syncing") && !/^(blocks|memos):/.test(v);
+// A dig or send is finished when its output shows the JSON result or an
+// error line (`code: message`); sync progress lines (`blocks:`, `memos:`,
+// `done:`) and the "syncing…" placeholder are not results.
+const notBusy = (v) =>
+  v.startsWith("{") || (/^[a-z_]+: /.test(v) && !/^(blocks|memos|done):/.test(v));
 async function shot(name) {
   const file = path.join(shots, `${name}.png`);
   await page.screenshot({ path: file, fullPage: true });
