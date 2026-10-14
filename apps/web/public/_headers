@@ -1,0 +1,5 @@
+# Production hosting (Netlify / Cloudflare Pages format): Zeek Pocket needs a
+# cross-origin isolated page for its WebAssembly threads.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

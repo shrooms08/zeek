@@ -1,0 +1,158 @@
+/*
+ * Zeek Mono tokens, from design/mono/Zeek Design System.html (the source of
+ * truth). Tailwind 4 reads them from @theme, and every one is also a CSS
+ * variable, so Phase 7b restyles by changing values here, not components.
+ */
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource/archivo-black/400.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/700.css";
+@import "tailwindcss";
+
+@theme {
+  --color-*: initial;
+  --color-ink: #0a0a0a;
+  --color-night: #0d0d0d;
+  --color-coal: #1c1c1c;
+  --color-slate: #3a3a3a;
+  --color-ash: #6b6b6b;
+  --color-fog: #a6a6a6;
+  --color-mist: #d6d6d6;
+  --color-bone: #ecebe6;
+  --color-white: #ffffff;
+  /* Treasure only: prize number, chest, reveal light, treasure tile, win, eruption. */
+  --color-gold: #e8b54a;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --font-sans: "Archivo Variable", "Archivo", system-ui, sans-serif;
+  --font-display: "Archivo Black", "Archivo Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --text-num-xl: 160px;
+  --text-num-xl--line-height: 0.9;
+  --text-num-l: 96px;
+  --text-num-l--line-height: 0.95;
+  --text-num-m: 56px;
+  --text-num-m--line-height: 1;
+  --text-title: 40px;
+  --text-title--line-height: 1.05;
+  --text-heading: 24px;
+  --text-heading--line-height: 1.2;
+  --text-body: 18px;
+  --text-body--line-height: 1.5;
+  --text-label: 13px;
+  --text-label--letter-spacing: 0.14em;
+  --text-mono: 14px;
+  --text-mono--line-height: 1.4;
+
+  --spacing: 4px;
+
+  --radius-*: initial;
+  --radius-none: 0;
+
+  --shadow-lift: 6px 6px 0 #6b6b6b;
+
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.2, 1);
+  --ease-heave: cubic-bezier(0.6, 0, 0.2, 1);
+}
+
+:root {
+  --border-hair: 1.5px;
+  --border-panel: 3px;
+  --border-strong: 5px;
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-night);
+  color: var(--color-mist);
+  font-family: var(--font-sans);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numerals: wide, heavy, tabular. */
+.numeral {
+  font-family: var(--font-sans);
+  font-weight: 900;
+  font-stretch: 115%;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-white);
+}
+
+.label {
+  font-size: var(--text-label);
+  letter-spacing: var(--text-label--letter-spacing);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-white);
+}
+
+.panel {
+  border: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+}
+
+.hair {
+  border-color: var(--color-slate);
+  border-width: var(--border-hair);
+}
+
+/* Focus: 3px White outline + 3px offset on controls; never removed. */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-white);
+  outline-offset: 3px;
+}
+
+.btn {
+  border: var(--border-panel) solid var(--color-white);
+  padding: 10px 16px;
+  font-weight: 800;
+  color: var(--color-white);
+  background: var(--color-night);
+  min-height: 44px;
+  cursor: pointer;
+}
+.btn:disabled {
+  border-color: var(--color-ash);
+  color: var(--color-ash);
+  background: var(--color-coal);
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-white);
+  color: var(--color-ink);
+}
+.btn-primary:disabled {
+  background: var(--color-coal);
+}
+
+.field-input {
+  border: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+  color: var(--color-white);
+  padding: 10px 12px;
+  min-height: 44px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 150ms !important;
+  }
+}

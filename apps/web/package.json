@@ -1,0 +1,38 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeek web app (Phase 7a foundation: every flow, minimal Mono styling)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo": "5.3.0",
+    "@fontsource/archivo-black": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@tanstack/react-query": "5.104.2",
+    "@zeek/pocket": "workspace:*",
+    "framer-motion": "14.2.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "7.18.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "jsdom": "30.1.2",
+    "tailwindcss": "4.3.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}

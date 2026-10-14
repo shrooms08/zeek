@@ -1,0 +1,93 @@
+/**
+ * The one WebSocket to the engine (`/v1/stream`), with reconnection and
+ * exponential backoff (1 s doubling to 30 s, with jitter). Events are handed
+ * to a listener (which merges them into the query cache); connection state
+ * is published so the UI can say "Reconnecting…" instead of showing stale
+ * numbers silently.
+ */
+
+import type { LiveEvent } from "./types";
+
+export type LiveState = "connecting" | "open" | "reconnecting";
+
+export interface LiveOptions {
+  url: string;
+  onEvent: (event: LiveEvent) => void;
+  onState: (state: LiveState) => void;
+  /** Injected for tests. */
+  createSocket?: (url: string) => WebSocket;
+  random?: () => number;
+}
+
+/** Delay before reconnect attempt `attempt` (0-based), in ms. */
+export function backoffMs(attempt: number, random: () => number): number {
+  const base = Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5));
+  return Math.round(base * (0.75 + random() * 0.5));
+}
+
+function parse(data: unknown): LiveEvent | undefined {
+  if (typeof data !== "string") return undefined;
+  try {
+    const value = JSON.parse(data) as { event?: unknown };
+    return typeof value.event === "string" ? (value as LiveEvent) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export class LiveClient {
+  private socket: WebSocket | undefined;
+  private attempt = 0;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private stopped = false;
+  private readonly options: LiveOptions;
+
+  constructor(options: LiveOptions) {
+    this.options = options;
+  }
+
+  start(): void {
+    this.stopped = false;
+    this.connect();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.socket?.close();
+  }
+
+  private connect(): void {
+    const create = this.options.createSocket ?? ((url: string) => new WebSocket(url));
+    this.options.onState(this.attempt === 0 ? "connecting" : "reconnecting");
+    const socket = create(this.options.url);
+    this.socket = socket;
+    socket.onopen = () => {
+      this.attempt = 0;
+      this.options.onState("open");
+    };
+    socket.onmessage = (message: MessageEvent<unknown>) => {
+      const event = parse(message.data);
+      if (event !== undefined) this.options.onEvent(event);
+    };
+    socket.onclose = () => {
+      if (this.stopped) return;
+      this.options.onState("reconnecting");
+      const delay = backoffMs(this.attempt, this.options.random ?? Math.random);
+      this.attempt += 1;
+      this.timer = setTimeout(() => {
+        this.connect();
+      }, delay);
+    };
+    socket.onerror = () => {
+      socket.close();
+    };
+  }
+}
+
+/** `ws://…/v1/stream` for an engine base URL. */
+export function streamUrl(engineUrl: string): string {
+  const url = new URL("/v1/stream", engineUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}

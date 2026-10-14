@@ -573,7 +573,12 @@ const handlers: { [M in MethodName]: Handler<M> } = {
     const client = needRelay();
     const trimmed = idOrProof.trim();
     const encoded = /^[0-9a-f]{32}$/.test(trimmed) ? (await client.proof(trimmed)).proof : trimmed;
-    const summary = decodeWinProof(encoded) as { id: string; round: number; payoutTxid: string };
+    const summary = decodeWinProof(encoded) as {
+      id: string;
+      round: number;
+      payoutIndex: number;
+      payoutTxid: string;
+    };
     const bundle = await client.roundBundle(summary.round);
     const parsed = JSON.parse(bundle) as { payout_openings?: { mined_height: number } };
     const height = parsed.payout_openings?.mined_height;
@@ -585,7 +590,7 @@ const handlers: { [M in MethodName]: Handler<M> } = {
       client.blocks(height, height),
     ]);
     const verdict = coreVerifyWinProof(encoded, bundle, tx, block) as WinVerdict;
-    return { ...verdict, id: summary.id, round: summary.round };
+    return { ...verdict, id: summary.id, round: summary.round, payoutIndex: summary.payoutIndex };
   },
   async send({ to, amountZat, memo }, id) {
     const c = needCore();

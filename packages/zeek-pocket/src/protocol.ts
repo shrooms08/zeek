@@ -94,7 +94,7 @@ export interface Methods {
   buildShoutRequest: [ShoutRequestOptions, Omit<AnyWalletShout, "qrSvg">];
   createWinProof: [{ round: number }, WinProofResult];
   verifyRound: [VerifyOptions, RoundVerification];
-  verifyWinProof: [{ idOrProof: string }, WinVerdict & { id: string; round: number }];
+  verifyWinProof: [{ idOrProof: string }, WinVerdict & { id: string; round: number; payoutIndex: number }];
 }
 
 export type MethodName = keyof Methods;

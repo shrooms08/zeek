@@ -207,7 +207,7 @@ export class Pocket {
   }
 
   /** Verifies a win proof given its engine id or the base64url proof itself. */
-  verifyWinProof(idOrProof: string): Promise<WinVerdict & { id: string; round: number }> {
+  verifyWinProof(idOrProof: string): Promise<WinVerdict & { id: string; round: number; payoutIndex: number }> {
     return this.call("verifyWinProof", { idOrProof });
   }
 

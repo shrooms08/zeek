@@ -1,0 +1,85 @@
+/**
+ * The reveal sequence, driven by the real round result: closed (waiting
+ * for the draw) → draw → shake → burst → result. With reduced motion the
+ * sequence goes straight from closed to result (cross-fade).
+ */
+
+export type RevealStage = "closed" | "draw" | "shake" | "burst" | "result";
+
+export interface RevealResult {
+  round: number;
+  treasureTile: number | null;
+  cacheTriggered: boolean;
+  voided: boolean;
+}
+
+export type RevealState = {
+  stage: RevealStage;
+  result: RevealResult | null;
+  reducedMotion: boolean;
+};
+
+export type RevealEvent =
+  { type: "settled"; result: RevealResult } | { type: "advance" } | { type: "skip" };
+
+/** How long each stage plays before advancing (ms; design motion table). */
+export const STAGE_MS: Record<Exclude<RevealStage, "closed" | "result">, number> = {
+  draw: 1_400,
+  shake: 700,
+  burst: 900,
+};
+
+export function initialReveal(reducedMotion: boolean): RevealState {
+  return { stage: "closed", result: null, reducedMotion };
+}
+
+const NEXT: Record<RevealStage, RevealStage> = {
+  closed: "draw",
+  draw: "shake",
+  shake: "burst",
+  burst: "result",
+  result: "result",
+};
+
+export function revealReducer(state: RevealState, event: RevealEvent): RevealState {
+  switch (event.type) {
+    case "settled":
+      if (state.result !== null) return state;
+      // A voided round has no draw to show.
+      if (state.reducedMotion || event.result.voided)
+        return { ...state, stage: "result", result: event.result };
+      return { ...state, stage: "draw", result: event.result };
+    case "advance":
+      if (state.result === null) return state;
+      return { ...state, stage: NEXT[state.stage] };
+    case "skip":
+      return state.result === null ? state : { ...state, stage: "result" };
+  }
+}
+
+/** What the result card says for a player who dug `myTiles` (0-based). */
+export type Outcome = "win" | "cache-win" | "not-this-time" | "watched" | "voided";
+
+export function outcomeFor(result: RevealResult, myTiles: readonly number[]): Outcome {
+  if (result.voided) return "voided";
+  if (myTiles.length === 0) return "watched";
+  if (result.treasureTile !== null && myTiles.includes(result.treasureTile)) {
+    return result.cacheTriggered ? "cache-win" : "win";
+  }
+  return "not-this-time";
+}
+
+/**
+ * The player's share of a drawn round: their amount on the treasure tile
+ * over the tile's total, of the distributable prize plus the Cache paid
+ * (truncated, as the rules do). Zatoshis.
+ */
+export function estimatedShare(
+  myOnTreasure: bigint,
+  tileTotal: bigint,
+  distributable: bigint,
+  cachePaid: bigint,
+): bigint {
+  if (tileTotal === 0n || myOnTreasure === 0n) return 0n;
+  return ((distributable + cachePaid) * myOnTreasure) / tileTotal;
+}
