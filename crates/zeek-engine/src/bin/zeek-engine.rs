@@ -17,6 +17,7 @@ use zeek_engine::coordinator::{Coordinator, CoordinatorSettings};
 use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::{Event, Processor};
+use zeek_engine::relay::{LightwalletdBackend, RelayState};
 
 #[derive(Parser)]
 #[command(
@@ -228,6 +229,12 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         events: events.clone(),
         started: Instant::now(),
         coordinator: coordinator.clone(),
+        relay: Some(Arc::new(RelayState::new(
+            Box::new(LightwalletdBackend::new(
+                zeek_vault::lightwalletd::connect(&settings.lightwalletd_url).await?,
+            )),
+            RelayState::rate_from_env(),
+        ))),
     });
 
     let listener = tokio::net::TcpListener::bind(&settings.bind)
@@ -236,11 +243,14 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
     tracing::info!(bind = %settings.bind, "API listening");
     let app = router(state.clone(), &settings.cors_origins);
     let server = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
     });
 
     let mut processor = Processor::new(config.clone());

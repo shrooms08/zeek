@@ -38,6 +38,8 @@ pub struct AppState {
     pub started: Instant,
     /// Present when this engine also coordinates payouts.
     pub coordinator: Option<Arc<Mutex<Coordinator>>>,
+    /// Present when this engine relays chain data to browser wallets.
+    pub relay: Option<Arc<crate::relay::RelayState>>,
 }
 
 /// `GET /v1/config`.
@@ -164,7 +166,10 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/vault/ledger", get(vault_ledger))
         .route("/v1/stream", get(stream))
-        .with_state(state);
+        .with_state(state.clone());
+    if let Some(relay) = &state.relay {
+        router = router.merge(crate::relay::router(relay.clone()));
+    }
     if !cors_origins.is_empty() {
         let origins: Vec<HeaderValue> = cors_origins
             .iter()
@@ -173,7 +178,8 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         router = router.layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::list(origins))
-                .allow_methods([Method::GET]),
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers([axum::http::header::CONTENT_TYPE]),
         );
     }
     router

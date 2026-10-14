@@ -389,6 +389,7 @@ async fn http_api_serves_the_round() {
         events,
         started: std::time::Instant::now(),
         coordinator: None,
+        relay: None,
     });
     let app = router(state, &["http://localhost:5173".to_owned()]);
 
@@ -548,4 +549,224 @@ async fn board_reports_prize_pool_and_gross_total() {
     let json = serde_json::to_string(&board).expect("json");
     assert!(json.contains("\"prize_pool_zat\":180500"));
     assert!(json.contains("\"gross_dug_zat\":200000"));
+}
+
+/// The relay serves tip, length-prefixed compact blocks, transactions and
+/// broadcasts over HTTP, caps the block range and the body size, and rate
+/// limits.
+#[tokio::test]
+async fn relay_serves_chain_data_with_limits() {
+    use async_trait::async_trait;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use prost::Message;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use tower::ServiceExt;
+    use zcash_client_backend::proto::compact_formats::CompactBlock;
+    use zcash_client_backend::proto::service::{RawTransaction, TreeState};
+    use zeek_engine::chain::ChainSource;
+    use zeek_engine::relay::{
+        self, RelayBackend, RelayError, RelayState, RelayStatsResponse, TipResponse,
+        MAX_BLOCK_RANGE, MAX_TX_BYTES,
+    };
+
+    struct Synthetic {
+        chain: Mutex<SyntheticChain>,
+        sent: Mutex<Vec<Vec<u8>>>,
+    }
+
+    #[async_trait]
+    impl RelayBackend for Synthetic {
+        async fn tip(&self) -> Result<(u32, String), RelayError> {
+            let mut chain = self.chain.lock().await;
+            let height = chain
+                .latest_height()
+                .await
+                .map_err(|e| RelayError::Upstream(e.to_string()))?;
+            let hash = chain
+                .block(height)
+                .map(|b| b.hash.clone())
+                .unwrap_or_default();
+            Ok((height, hex::encode(hash)))
+        }
+        async fn blocks(&self, start: u32, end: u32) -> Result<Vec<CompactBlock>, RelayError> {
+            self.chain
+                .lock()
+                .await
+                .block_range(start, end)
+                .await
+                .map_err(|e| RelayError::Upstream(e.to_string()))
+        }
+        async fn tree_state(&self, height: u32) -> Result<TreeState, RelayError> {
+            Ok(TreeState {
+                height: u64::from(height),
+                ..TreeState::default()
+            })
+        }
+        async fn broadcast(&self, raw: Vec<u8>) -> Result<(), RelayError> {
+            if raw == b"bad" {
+                return Err(RelayError::Rejected("bad-txns".into()));
+            }
+            self.sent.lock().await.push(raw);
+            Ok(())
+        }
+        async fn transaction(&self, txid: [u8; 32]) -> Result<RawTransaction, RelayError> {
+            self.chain
+                .lock()
+                .await
+                .transaction(&txid[..])
+                .map(|data| RawTransaction { data, height: 7 })
+                .ok_or(RelayError::NotFound)
+        }
+    }
+
+    let vault = TestVault::new(5);
+    let mut chain = SyntheticChain::new(&vault, 100, 1_700_000_000);
+    chain.advance(3);
+    chain.push_block(vec![chain.payment(100_000, Pool::Ironwood, [0xF6; 512])]); // 103
+    chain.advance(2);
+    let txid_internal: [u8; 32] = chain.block(103).expect("block").vtx[0]
+        .txid
+        .clone()
+        .try_into()
+        .expect("32 bytes");
+    let mut display = txid_internal;
+    display.reverse();
+    let backend = Arc::new(Synthetic {
+        chain: Mutex::new(chain),
+        sent: Mutex::new(Vec::new()),
+    });
+    struct Shared(Arc<Synthetic>);
+    #[async_trait]
+    impl RelayBackend for Shared {
+        async fn tip(&self) -> Result<(u32, String), RelayError> {
+            self.0.tip().await
+        }
+        async fn blocks(&self, s: u32, e: u32) -> Result<Vec<CompactBlock>, RelayError> {
+            self.0.blocks(s, e).await
+        }
+        async fn tree_state(&self, h: u32) -> Result<TreeState, RelayError> {
+            self.0.tree_state(h).await
+        }
+        async fn broadcast(&self, raw: Vec<u8>) -> Result<(), RelayError> {
+            self.0.broadcast(raw).await
+        }
+        async fn transaction(&self, t: [u8; 32]) -> Result<RawTransaction, RelayError> {
+            self.0.transaction(t).await
+        }
+    }
+    let app = relay::router(Arc::new(RelayState::new(
+        Box::new(Shared(backend.clone())),
+        12,
+    )));
+
+    async fn call(app: &axum::Router, request: Request<Body>) -> (StatusCode, Vec<u8>) {
+        let response = app.clone().oneshot(request).await.expect("response");
+        let status = response.status();
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes()
+            .to_vec();
+        (status, body)
+    }
+    let get = |path: &str| {
+        Request::builder()
+            .uri(path)
+            .body(Body::empty())
+            .expect("request")
+    };
+    let post = |body: Vec<u8>| {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/tx/broadcast")
+            .body(Body::from(body))
+            .expect("request")
+    };
+
+    let (status, body) = call(&app, get("/v1/chain/tip")).await;
+    assert_eq!(status, StatusCode::OK);
+    let tip: TipResponse = serde_json::from_slice(&body).expect("json");
+    assert_eq!(tip.height, 105);
+
+    let (status, body) = call(&app, get("/v1/chain/blocks?start=102&end=104")).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut rest = body.as_slice();
+    let mut heights = Vec::new();
+    let mut outputs = 0;
+    while !rest.is_empty() {
+        let len = u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
+        let block = CompactBlock::decode(&rest[4..4 + len]).expect("decode");
+        heights.push(block.height);
+        outputs += block
+            .vtx
+            .iter()
+            .map(|t| t.ironwood_actions.len())
+            .sum::<usize>();
+        rest = &rest[4 + len..];
+    }
+    assert_eq!(heights, vec![102, 103, 104]);
+    assert!(
+        outputs >= 1,
+        "all compact outputs are relayed, not a filtered view"
+    );
+
+    let too_many = format!("/v1/chain/blocks?start=0&end={MAX_BLOCK_RANGE}");
+    assert_eq!(call(&app, get(&too_many)).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        call(&app, get("/v1/chain/blocks?start=5&end=4")).await.0,
+        StatusCode::BAD_REQUEST
+    );
+
+    let (status, body) = call(&app, get("/v1/chain/tree-state?height=103")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        TreeState::decode(body.as_slice()).expect("decode").height,
+        103
+    );
+
+    let (status, body) = call(&app, get(&format!("/v1/tx/{}", hex::encode(display)))).await;
+    assert_eq!(status, StatusCode::OK);
+    let raw = RawTransaction::decode(body.as_slice()).expect("decode");
+    assert_eq!(raw.height, 7);
+    assert!(!raw.data.is_empty());
+    assert_eq!(
+        call(&app, get(&format!("/v1/tx/{}", "00".repeat(32))))
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(&app, get("/v1/tx/nothex")).await.0,
+        StatusCode::BAD_REQUEST
+    );
+
+    assert_eq!(call(&app, post(vec![1, 2, 3])).await.0, StatusCode::OK);
+    assert_eq!(backend.sent.lock().await.as_slice(), &[vec![1, 2, 3]]);
+    assert_eq!(
+        call(&app, post(b"bad".to_vec())).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        call(&app, post(vec![0; MAX_TX_BYTES + 1])).await.0,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+
+    // 12 requests per minute: the bucket is empty by now.
+    let mut limited = 0;
+    for _ in 0..6 {
+        if call(&app, get("/v1/chain/tip")).await.0 == StatusCode::TOO_MANY_REQUESTS {
+            limited += 1;
+        }
+    }
+    assert!(limited >= 4, "rate limit engaged ({limited})");
+    let stats_app = relay::router(Arc::new(RelayState::new(Box::new(Shared(backend)), 600)));
+    let (_, body) = call(&stats_app, get("/v1/relay/stats")).await;
+    let stats: RelayStatsResponse = serde_json::from_slice(&body).expect("json");
+    assert_eq!(stats.rate_per_minute, 600);
+    assert_eq!(stats.max_block_range, MAX_BLOCK_RANGE);
 }

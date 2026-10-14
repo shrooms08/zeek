@@ -30,6 +30,7 @@ zcash_address.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "signal", "net"] }
 tonic.workspace = true
+prost = "0.14"
 async-trait.workspace = true
 axum.workspace = true
 tower-http.workspace = true
