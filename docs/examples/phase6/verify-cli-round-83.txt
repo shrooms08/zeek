@@ -1,0 +1,26 @@
+lightwalletd https://testnet.zec.rocks:443: chain test at height 4502194 (ECC LightWalletD v0.5.4)
+Round 83 (bundle format 4, rules v4)
+Chain source: https://testnet.zec.rocks:443 (blocks 4501339..=4501373, 4 transactions)
+
+1. [PASS] Randomness beacon
+   drand quicknet round 33059759 is genuine and is the one the rules bind; it puts the treasure on tile 4.
+   - round start block 4501339 nTime 1791981141
+   - BLS signature verified against the quicknet public key; cache triggered: false
+
+2. [PASS] Digs complete and correct
+   All 5 payments the vault received in blocks 4501339..4501362 are in the bundle, with the same amounts and memos; none is missing or made up.
+   - 24 blocks trial-decrypted with the public UIVK; 400000 zatoshis in total
+
+3. [PASS] Timing rule
+   The round closed safely before the beacon was published, so nobody could know the treasure tile while digging.
+   - median time past of blocks 4501363..4501373: 1791981839; beacon published at 1791982641; clock skew allowance 300 s
+
+4. [PASS] Settlement
+   Recomputing the round from its digs gives exactly the published result: 0 paid out to 0 winner(s), Deep Cache 2091250 → 2466250.
+   - pot 285000, rake 14250, fees 15000, forfeited 0, shouts 100000 (reserved 10000)
+   - byte-for-byte equal (360 bytes of JSON)
+
+5. [N/A ] Payout transaction
+   Nothing to pay this round, so there is no payout transaction.
+
+Result: every available check passed

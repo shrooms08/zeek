@@ -30,6 +30,7 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         dir.join("phase4"),
         dir.join("phase4b"),
         dir.join("phase5"),
+        dir.join("phase6"),
     ] {
         let Ok(entries) = fs::read_dir(&sub) else {
             continue;

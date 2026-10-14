@@ -1,0 +1,8 @@
+browser verification took 3 s
+round 83: every available check passed in 2.1 s (source: Zeek relay http://127.0.0.1:8787)
+beacon: pass: [PASS] Randomness beacon: drand quicknet round 33059759 is genuine and is the one the rules bind; it puts the treasure on tile 4.round start block
+digs: pass: [PASS] Digs complete and correct: All 5 payments the vault received in blocks 4501339..4501362 are in the bundle, with the same amounts and memos; n
+timing: pass: [PASS] Timing rule: The round closed safely before the beacon was published, so nobody could know the treasure tile while digging.median time past
+settlement: pass: [PASS] Settlement: Recomputing the round from its digs gives exactly the published result: 0 paid out to 0 winner(s), Deep Cache 2091250 → 246
+payout: not_available: [N/A] Payout transaction: Nothing to pay this round, so there is no payout transaction.
+cross-check PASS (relay http://127.0.0.1:8790): all 35 block hashes (heights 4501339..4501373) match
