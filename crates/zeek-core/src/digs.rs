@@ -13,6 +13,10 @@
 //!   the value is below `min_dig_zat` (a refund would cost more in fees than
 //!   it returns). The value is added to the Cache.
 //!
+//! From the text-memo activation height (rules v3) a memo may use either the
+//! binary or the `zeek1:` text encoding (see [`crate::memo`]); below it a
+//! text memo is undecodable, as it always was.
+//!
 //! Classification never looks inside the sealed receiver, so it runs without
 //! the vault's private sealing key.
 
@@ -153,7 +157,7 @@ pub fn classify(
     note: ReceivedNote,
 ) -> Result<Classified, RoundError> {
     let window = round_window(params, round)?;
-    let memo = match DigMemo::decode(&note.memo) {
+    let memo = match DigMemo::decode_at(params, note.height, &note.memo) {
         Ok(memo) => memo,
         Err(error) => {
             return Ok(Classified::Forfeit(Forfeit {
@@ -320,6 +324,54 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn text_memos_count_only_from_the_activation_height() {
+        let mut p = params();
+        let mut rng = StdRng::seed_from_u64(10);
+        let w = round_window(&p, 2).expect("window");
+        let memo = memo_for(2, 5, &mut rng);
+        let text = memo.encode_text().into_bytes();
+        // Rules v2: a text memo is undecodable and forfeited.
+        let before = classify(&p, 2, false, note(w.start + 3, 100_000, text.clone())).expect("c");
+        assert!(matches!(
+            before,
+            Classified::Forfeit(Forfeit {
+                reason: ForfeitReason::UndecodableMemo { .. },
+                ..
+            })
+        ));
+        // Rules v3 from w.start + 2: the note at w.start + 1 is still a
+        // forfeit, the one at w.start + 3 is the same dig as the binary memo.
+        p.text_memo_activation_height = Some(w.start + 2);
+        let early = classify(&p, 2, false, note(w.start + 1, 100_000, text.clone())).expect("c");
+        assert_eq!(
+            early,
+            classify(
+                &params(),
+                2,
+                false,
+                note(w.start + 1, 100_000, text.clone())
+            )
+            .expect("c"),
+            "classified exactly as before activation"
+        );
+        let active = classify(&p, 2, false, note(w.start + 3, 100_000, text)).expect("c");
+        let binary = classify(
+            &p,
+            2,
+            false,
+            note(w.start + 3, 100_000, memo.encode().to_vec()),
+        )
+        .expect("c");
+        match (active, binary) {
+            (Classified::Valid(a), Classified::Valid(b)) => {
+                assert_eq!(a.tile, b.tile);
+                assert_eq!(a.sealed_receiver, b.sealed_receiver);
+            }
+            other => panic!("expected two valid digs, got {other:?}"),
+        }
     }
 
     #[test]

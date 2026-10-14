@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use zeek_core::beacon;
-use zeek_core::board::{BoardView, TileTotals};
+use zeek_core::board::BoardView;
 use zeek_core::digs::{self, ClassifiedDigs};
 use zeek_core::rounds::{self, RoundContext, RoundStatus, RoundWindow};
 use zeek_core::settle::{self, RoundOutcome};
@@ -76,8 +76,14 @@ pub struct BoardState {
     /// Before genesis: `chain_tip_time + (genesis − chain_tip) · target_spacing`;
     /// `None` once the game has started.
     pub estimated_start_time: Option<u64>,
-    /// Sum of valid digs so far.
-    pub pot: u64,
+    /// What winners would split right now: valid digs minus dig fees, minus
+    /// the rake.
+    pub prize_pool_zat: u64,
+    /// Gross total dug so far (plain sum of the valid digs, before dig fees
+    /// and rake). Not what is paid out.
+    pub gross_dug_zat: u64,
+    /// Rules version of this round (3 once text memos are active).
+    pub rules_version: u32,
     /// Deep Cache balance carried into this round.
     pub cache: u64,
     /// Relative tile depths, `0..=100`.
@@ -223,14 +229,12 @@ impl Processor {
         let round = self.current_round(db)?;
         let (window, status, _) = self.status(db, round)?;
         let classified = self.classified(db, round, status == RoundStatus::Voided)?;
-        let totals =
-            TileTotals::from_digs(&classified).map_err(|e| EngineError::Corrupt(e.to_string()))?;
         let view = BoardView::new(
             params,
             round,
             status,
             chain_tip,
-            &totals,
+            &classified,
             self.cache_balance(db)?,
         )
         .map_err(|e| EngineError::Corrupt(e.to_string()))?;
@@ -265,7 +269,9 @@ impl Processor {
             blocks_remaining: view.blocks_remaining,
             estimated_close_time,
             estimated_start_time,
-            pot: view.pot,
+            prize_pool_zat: view.prize_pool_zat,
+            gross_dug_zat: view.gross_dug_zat,
+            rules_version: rounds::rules_version(params, round)?,
             cache: view.cache,
             depths: view.depths,
             digs: classified.valid.len(),
@@ -320,9 +326,20 @@ impl Processor {
                 (Some(b.beacon), Some(b.randomness))
             }
         };
+        // The bundle states the parameters the round was settled under: rounds
+        // of earlier rules versions predate the dig fee (v1) or the text-memo
+        // activation (v1, v2), whatever the current config says.
+        let mut params = self.config.params.clone();
+        if row.rules_version < 2 {
+            params.dig_fee_zat = 0;
+        }
+        if row.rules_version < 3 {
+            params.text_memo_activation_height = None;
+        }
+        debug_assert!(row.rules_version <= PROOF_VERSION);
         Ok(ProofBundle {
-            version: PROOF_VERSION,
-            params: self.config.params.clone(),
+            version: row.rules_version,
+            params,
             round: row.round,
             window,
             notes,
@@ -445,7 +462,7 @@ impl Processor {
                 outcome,
                 settlement: settlement.clone(),
                 status: PlanStatus::AwaitingSignatures,
-                rules_version: params.rules_version(),
+                rules_version: rounds::rules_version(&params, round)?,
             };
             db.insert_settlement(&row)?;
             tracing::info!(

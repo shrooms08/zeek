@@ -11,17 +11,18 @@ use zeek_core::rounds::{self, RoundWindow};
 use zeek_core::settle::{self, RoundOutcome, Settlement};
 use zeek_core::timing::{self, TimingVerdict};
 
-/// Bundle format version. Version 1 bundles were settled under rules v1 (no
-/// dig fee); version 2 bundles under rules v2. The bundle version is the
-/// rules version, and `params.dig_fee_zat` must agree with it.
-pub const PROOF_VERSION: u32 = 2;
+/// Newest bundle format version. The bundle version is the rules version of
+/// the round: 1 (no dig fee), 2 (dig fee), 3 (dig fee, and dig memos may use
+/// the text encoding from `params.text_memo_activation_height`). The
+/// parameters must agree with it.
+pub const PROOF_VERSION: u32 = 3;
 /// Oldest bundle version `recompute` still verifies.
 pub const OLDEST_SUPPORTED_PROOF_VERSION: u32 = 1;
 
 /// A self-contained description of one settled round.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofBundle {
-    /// Bundle format and rules version (1 or 2).
+    /// Bundle format and rules version (1, 2 or 3).
     pub version: u32,
     /// Game parameters the round was played under (including the dig fee
     /// from version 2 on).
@@ -59,7 +60,7 @@ pub struct ProofBundle {
 pub enum ProofError {
     #[error("unsupported proof bundle version {0}")]
     Version(u32),
-    #[error("bundle version {bundle} does not match the rules version {rules} its parameters encode (dig_fee_zat = {dig_fee})")]
+    #[error("bundle version {bundle} does not match the rules version {rules} its parameters give this round (dig_fee_zat = {dig_fee})")]
     RulesVersion {
         bundle: u32,
         rules: u32,
@@ -112,10 +113,11 @@ pub fn recompute(bundle: &ProofBundle) -> Result<Settlement, ProofError> {
         return Err(ProofError::Version(bundle.version));
     }
     let params = &bundle.params;
-    if params.rules_version() != bundle.version {
+    let rules = rounds::rules_version(params, bundle.round)?;
+    if rules != bundle.version {
         return Err(ProofError::RulesVersion {
             bundle: bundle.version,
-            rules: params.rules_version(),
+            rules,
             dig_fee: params.dig_fee_zat,
         });
     }

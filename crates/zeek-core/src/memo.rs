@@ -15,10 +15,27 @@
 //! representable: this is the receiver the Ironwood pool pays to, and
 //! transparent payouts are not supported.
 //!
+//! # Text encoding (rules v3)
+//!
+//! Some wallets can only send UTF-8 text memos. The same payload may
+//! therefore be sent as a ZIP 302 text memo:
+//!
+//! ```text
+//! "zeek1:" | base64url, no padding, of the 102 bytes after the 0xFF byte
+//! ```
+//!
+//! that is 142 ASCII characters, zero-padded to 512 bytes like any text
+//! memo. Both encodings decode to the same [`DigMemo`]; the sealed receiver
+//! and its AAD are identical. Text memos only count from the game's
+//! activation height ([`crate::params::GameParams::text_memo_activation_height`]);
+//! [`DigMemo::decode_at`] applies that rule.
+//!
 //! Decoding is strict: any deviation (wrong lead byte, magic, version, a tile
 //! above 24, a sealed receiver of the wrong size, non-zero padding) is an
 //! error, and such a memo is a forfeit (see [`crate::digs`]).
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use rand_core_09::{CryptoRng, RngCore};
 use serde::{Deserialize, Serialize};
 use zcash_address::unified::{self, Container, Encoding, Receiver};
@@ -49,6 +66,12 @@ pub const SEALED_RECEIVER_LEN: usize = ENCAPPED_KEY_LEN + RECEIVER_PLAINTEXT_LEN
 pub const HEADER_LEN: usize = 1 + 4 + 1 + 4 + 1;
 /// Length of an unpadded dig memo.
 pub const DIG_MEMO_LEN: usize = HEADER_LEN + SEALED_RECEIVER_LEN;
+/// Prefix of the text encoding of a dig memo.
+pub const TEXT_PREFIX: &str = "zeek1:";
+/// Length of the payload the text encoding carries (everything after `0xFF`).
+pub const TEXT_PAYLOAD_LEN: usize = DIG_MEMO_LEN - 1;
+/// Length of the text encoding: prefix plus unpadded base64url of the payload.
+pub const TEXT_MEMO_LEN: usize = TEXT_PREFIX.len() + TEXT_PAYLOAD_LEN.div_ceil(3) * 4;
 /// Length of the AAD: `magic | version | round | tile`.
 pub const AAD_LEN: usize = 4 + 1 + 4 + 1;
 
@@ -69,6 +92,8 @@ pub enum MemoError {
     TileOutOfRange(u8),
     #[error("memo bytes after the dig memo are not all zero")]
     NonZeroPadding,
+    #[error("text memo is not a well-formed `zeek1:` dig memo: {0}")]
+    BadText(&'static str),
     #[error("sealed receiver must be {SEALED_RECEIVER_LEN} bytes, got {0}")]
     BadSealedLength(usize),
     #[error("opened receiver has {0} bytes, expected {RECEIVER_PLAINTEXT_LEN}")]
@@ -317,6 +342,64 @@ impl DigMemo {
     }
 
     /// Strictly parses a memo field (padded to 512 bytes or unpadded).
+    /// The text encoding: `zeek1:` + base64url (no padding) of the binary
+    /// memo without its `0xFF` lead byte. Always [`TEXT_MEMO_LEN`] ASCII
+    /// characters.
+    pub fn encode_text(&self) -> String {
+        let binary = self.encode_unpadded();
+        let mut out = String::with_capacity(TEXT_MEMO_LEN);
+        out.push_str(TEXT_PREFIX);
+        URL_SAFE_NO_PAD.encode_string(&binary[1..], &mut out);
+        out
+    }
+
+    /// Decodes the text encoding from a memo field (the text followed by
+    /// zero padding). Strict: exactly the prefix and the canonical unpadded
+    /// base64url of a well-formed payload, nothing before or after.
+    pub fn decode_text(memo: &[u8]) -> Result<Self, MemoError> {
+        if memo.len() > MEMO_LEN {
+            return Err(MemoError::TooLong(memo.len()));
+        }
+        let end = memo.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        let text = &memo[..end];
+        let encoded = text
+            .strip_prefix(TEXT_PREFIX.as_bytes())
+            .ok_or(MemoError::BadText("missing the zeek1: prefix"))?;
+        if text.len() != TEXT_MEMO_LEN {
+            return Err(MemoError::BadText("wrong length"));
+        }
+        let payload = URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| MemoError::BadText("payload is not canonical base64url"))?;
+        if payload.len() != TEXT_PAYLOAD_LEN {
+            return Err(MemoError::BadText("wrong payload length"));
+        }
+        let mut binary = [0u8; DIG_MEMO_LEN];
+        binary[0] = ARBITRARY_DATA_LEAD;
+        binary[1..].copy_from_slice(&payload);
+        Self::decode(&binary)
+    }
+
+    /// Decodes a memo mined at `height` under `params`: the binary encoding
+    /// always, the text encoding only from the activation height on (below
+    /// it a text memo fails exactly as it did before rules v3).
+    pub fn decode_at(
+        params: &crate::params::GameParams,
+        height: u32,
+        memo: &[u8],
+    ) -> Result<Self, MemoError> {
+        match Self::decode(memo) {
+            Ok(decoded) => Ok(decoded),
+            Err(binary_error) => {
+                if params.text_memo_active(height) && memo.starts_with(TEXT_PREFIX.as_bytes()) {
+                    Self::decode_text(memo)
+                } else {
+                    Err(binary_error)
+                }
+            }
+        }
+    }
+
     pub fn decode(memo: &[u8]) -> Result<Self, MemoError> {
         if memo.len() > MEMO_LEN {
             return Err(MemoError::TooLong(memo.len()));
@@ -380,6 +463,91 @@ mod tests {
         assert_eq!(memo.open(Network::Main, &sk), Err(MemoError::WrongNetwork));
         let json = serde_json::to_string(&memo).expect("json");
         assert_eq!(serde_json::from_str::<DigMemo>(&json).expect("parse"), memo);
+    }
+
+    #[test]
+    fn text_encoding_decodes_to_the_same_memo() {
+        use crate::params::GameParams;
+        let mut rng = StdRng::seed_from_u64(31);
+        let (sk, pk) = generate_sealing_keypair(&mut rng);
+        let memo = DigMemo::seal(16, 7, &receiver(5), &pk, &mut rng).expect("seal");
+        let text = memo.encode_text();
+        assert_eq!(text.len(), TEXT_MEMO_LEN);
+        assert_eq!(TEXT_MEMO_LEN, 142);
+        assert!(text.starts_with("zeek1:"));
+        assert!(text.is_ascii());
+        assert_eq!(
+            text.as_bytes()[0],
+            b'z',
+            "a ZIP 302 text memo (lead byte <= 0xF4)"
+        );
+        // As the wallet stores it: the text zero-padded to 512 bytes.
+        let mut field = [0u8; MEMO_LEN];
+        field[..text.len()].copy_from_slice(text.as_bytes());
+        let decoded = DigMemo::decode_text(&field).expect("decode");
+        assert_eq!(decoded, memo);
+        assert_eq!(
+            DigMemo::decode_text(text.as_bytes()).expect("unpadded"),
+            memo
+        );
+        assert_eq!(decoded.open(Network::Test, &sk).expect("open"), receiver(5));
+
+        // Activation: below it the text memo fails exactly like before.
+        let mut p = GameParams::testnet(1_000);
+        let before = || DigMemo::decode(&field).expect_err("binary decode fails");
+        assert_eq!(DigMemo::decode_at(&p, 2_000, &field), Err(before()));
+        p.text_memo_activation_height = Some(2_000);
+        assert_eq!(DigMemo::decode_at(&p, 1_999, &field), Err(before()));
+        assert_eq!(DigMemo::decode_at(&p, 2_000, &field).expect("active"), memo);
+        // The binary encoding is accepted at every height.
+        assert_eq!(
+            DigMemo::decode_at(&p, 1_000, &memo.encode()).expect("binary"),
+            memo
+        );
+        assert_eq!(
+            DigMemo::decode_at(&p, 3_000, &memo.encode()).expect("binary"),
+            memo
+        );
+    }
+
+    #[test]
+    fn text_decoding_is_strict() {
+        let mut rng = StdRng::seed_from_u64(32);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let memo = DigMemo::seal(1, 3, &receiver(1), &pk, &mut rng).expect("seal");
+        let text = memo.encode_text();
+        let bad = |t: String| DigMemo::decode_text(t.as_bytes());
+        assert_eq!(
+            bad(text.replacen("zeek1:", "zeek2:", 1)),
+            Err(MemoError::BadText("missing the zeek1: prefix"))
+        );
+        assert_eq!(
+            bad(format!("{text} ")),
+            Err(MemoError::BadText("wrong length"))
+        );
+        assert_eq!(
+            bad(format!("{text}\n")),
+            Err(MemoError::BadText("wrong length"))
+        );
+        assert_eq!(
+            bad(text[..text.len() - 1].to_owned()),
+            Err(MemoError::BadText("wrong length"))
+        );
+        let mut standard = text.clone();
+        standard.replace_range(6..7, "+");
+        assert_eq!(
+            bad(standard),
+            Err(MemoError::BadText("payload is not canonical base64url"))
+        );
+        // A payload whose tile is out of range is rejected by the shared decoder.
+        let mut binary = memo.encode_unpadded();
+        binary[10] = 25;
+        let forged = format!("zeek1:{}", URL_SAFE_NO_PAD.encode(&binary[1..]));
+        assert_eq!(bad(forged), Err(MemoError::TileOutOfRange(25)));
+        assert_eq!(
+            DigMemo::decode_text(&[b'z'; 513]),
+            Err(MemoError::TooLong(513))
+        );
     }
 
     #[test]

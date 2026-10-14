@@ -172,6 +172,36 @@ proptest! {
         prop_assert_eq!(memo.open(Network::Test, &sk).expect("open"), receiver);
     }
 
+    /// Rules v3: the text and the binary encoding of any memo decode to the
+    /// same dig from the activation height on, and a text memo below it
+    /// fails exactly as the binary decoder fails on it.
+    #[test]
+    fn text_and_binary_memos_decode_identically(
+        round in any::<u32>(), tile in 0u8..25, seed in any::<u64>(),
+        receiver in any::<[u8; ORCHARD_RECEIVER_LEN]>(),
+        activation in 1u32..1_000_000, height in 1u32..1_000_000,
+    ) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let (sk, pk) = generate_sealing_keypair(&mut rng);
+        let receiver = PayoutReceiver { network: Network::Test, orchard: receiver };
+        let memo = DigMemo::seal(round, tile, &receiver, &pk, &mut rng).expect("seal");
+        let text = memo.encode_text();
+        prop_assert_eq!(text.len(), zeek_core::memo::TEXT_MEMO_LEN);
+        prop_assert_eq!(DigMemo::decode_text(text.as_bytes()).expect("text"), memo.clone());
+        let mut p = GameParams::testnet(1);
+        p.text_memo_activation_height = Some(activation);
+        prop_assert_eq!(DigMemo::decode_at(&p, height, &memo.encode()).expect("binary"), memo.clone());
+        let decoded = DigMemo::decode_at(&p, height, text.as_bytes());
+        if height >= activation {
+            let decoded = decoded.expect("active");
+            prop_assert_eq!(decoded.open(Network::Test, &sk).expect("open"), receiver);
+            prop_assert_eq!(decoded, memo);
+        } else {
+            prop_assert_eq!(decoded, DigMemo::decode(text.as_bytes()));
+            prop_assert!(DigMemo::decode(text.as_bytes()).is_err());
+        }
+    }
+
     #[test]
     fn sealed_receiver_rejects_wrong_key_and_wrong_aad(
         round in any::<u32>(), tile in 0u8..25, other_round in any::<u32>(), other_tile in 0u8..25, seed in any::<u64>()

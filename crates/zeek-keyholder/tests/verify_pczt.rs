@@ -698,6 +698,6 @@ fn rounds_settled_under_rules_v1_are_not_signed() {
     );
     assert_eq!(
         refusal(verify_payout(&ctx, &pczt.serialize().expect("ser"), &[0])),
-        "round 0 was settled under rules version 1; this node only signs rules version 2 payouts"
+        "round 0 was settled under rules version 1; this node only signs payouts of rules version 2 or later"
     );
 }

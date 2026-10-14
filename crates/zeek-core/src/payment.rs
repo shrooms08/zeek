@@ -24,6 +24,8 @@ pub enum PaymentError {
     ZeroAmount,
     #[error("amount {0} zatoshis exceeds the 21,000,000 ZEC supply")]
     AmountTooLarge(u64),
+    #[error("a payment request needs at least one dig")]
+    NoPayments,
     #[error("address cannot receive a memo (it has no shielded receiver)")]
     NoMemoReceiver,
     #[error(transparent)]
@@ -84,19 +86,61 @@ pub fn amount_param(zatoshis: u64) -> String {
     format!("{whole}.{}", digits.trim_end_matches('0'))
 }
 
+/// How the dig memo is carried in the payment request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoEncoding {
+    /// ZIP 302 arbitrary data (`0xFF` lead byte): for wallets that pass the
+    /// request's memo bytes through unchanged.
+    Binary,
+    /// ZIP 302 text (`zeek1:` + base64url): for wallets that only send text
+    /// memos. Valid from the game's text-memo activation height (rules v3).
+    Text,
+}
+
+fn memo_bytes(memo: &DigMemo, encoding: MemoEncoding) -> Vec<u8> {
+    match encoding {
+        MemoEncoding::Binary => memo.encode_unpadded().to_vec(),
+        MemoEncoding::Text => memo.encode_text().into_bytes(),
+    }
+}
+
 /// Builds the payment request a digger's wallet should pay: `amount` zatoshis
-/// to the vault's `address` on `network`, carrying `memo`.
+/// to the vault's `address` on `network`, carrying `memo` in the binary
+/// encoding.
 pub fn dig_payment_uri(
     network: Network,
     address: &str,
     amount_zat: u64,
     memo: &DigMemo,
 ) -> Result<String, PaymentError> {
-    if amount_zat == 0 {
-        return Err(PaymentError::ZeroAmount);
+    dig_request_uri(
+        network,
+        address,
+        &[(amount_zat, memo)],
+        MemoEncoding::Binary,
+    )
+}
+
+/// Builds one ZIP 321 request with one payment per dig, all to the vault's
+/// `address`. A single payment uses the short form
+/// `zcash:<address>?amount=..&memo=..`; several use the indexed form
+/// `zcash:?address=..&amount=..&memo=..&address.1=..` (ZIP 321 `paramindex`).
+pub fn dig_request_uri(
+    network: Network,
+    address: &str,
+    digs: &[(u64, &DigMemo)],
+    encoding: MemoEncoding,
+) -> Result<String, PaymentError> {
+    if digs.is_empty() {
+        return Err(PaymentError::NoPayments);
     }
-    if amount_zat > MAX_AMOUNT_ZAT {
-        return Err(PaymentError::AmountTooLarge(amount_zat));
+    for (amount_zat, _) in digs {
+        if *amount_zat == 0 {
+            return Err(PaymentError::ZeroAmount);
+        }
+        if *amount_zat > MAX_AMOUNT_ZAT {
+            return Err(PaymentError::AmountTooLarge(*amount_zat));
+        }
     }
     let parsed = ZcashAddress::try_from_encoded(address.trim())
         .map_err(|e| MemoError::InvalidAddress(e.to_string()))?;
@@ -111,13 +155,31 @@ pub fn dig_payment_uri(
     if !parsed.can_receive_memo() {
         return Err(PaymentError::NoMemoReceiver);
     }
-    let memo_b64 = URL_SAFE_NO_PAD.encode(memo.encode_unpadded());
-    Ok(format!(
-        "zcash:{}?amount={}&memo={}",
-        parsed.encode(),
-        amount_param(amount_zat),
-        memo_b64
-    ))
+    let address = parsed.encode();
+    if let [(amount_zat, memo)] = digs {
+        return Ok(format!(
+            "zcash:{address}?amount={}&memo={}",
+            amount_param(*amount_zat),
+            URL_SAFE_NO_PAD.encode(memo_bytes(memo, encoding))
+        ));
+    }
+    let mut uri = String::from("zcash:?");
+    for (index, (amount_zat, memo)) in digs.iter().enumerate() {
+        let suffix = if index == 0 {
+            String::new()
+        } else {
+            format!(".{index}")
+        };
+        if index > 0 {
+            uri.push('&');
+        }
+        uri.push_str(&format!(
+            "address{suffix}={address}&amount{suffix}={}&memo{suffix}={}",
+            amount_param(*amount_zat),
+            URL_SAFE_NO_PAD.encode(memo_bytes(memo, encoding))
+        ));
+    }
+    Ok(uri)
 }
 
 #[cfg(test)]
@@ -162,6 +224,61 @@ mod tests {
         assert_eq!(decoded, memo);
         assert_eq!(request.to_uri(), uri, "canonical form is stable");
         let _ = TEST_NETWORK;
+    }
+
+    #[test]
+    fn text_and_multi_payment_requests_are_accepted_by_the_reference_parser() {
+        let mut rng = StdRng::seed_from_u64(8);
+        let (_, pk) = generate_sealing_keypair(&mut rng);
+        let receiver = PayoutReceiver {
+            network: Network::Test,
+            orchard: [9; ORCHARD_RECEIVER_LEN],
+        };
+        let vault = receiver.to_unified_address().expect("ua");
+        let a = DigMemo::seal(20, 3, &receiver, &pk, &mut rng).expect("seal");
+        let b = DigMemo::seal(20, 4, &receiver, &pk, &mut rng).expect("seal");
+
+        // One payment, text memo.
+        let uri = dig_request_uri(Network::Test, &vault, &[(100_000, &a)], MemoEncoding::Text)
+            .expect("uri");
+        let request = zip321::TransactionRequest::from_uri(&uri).expect("zip321 parses it");
+        assert_eq!(request.to_uri(), uri, "canonical form is stable");
+        let payment = request.payments().get(&0).expect("payment");
+        let memo = payment.memo().expect("memo");
+        assert_eq!(memo.as_slice(), a.encode_text().as_bytes());
+        assert!(memo.as_slice()[0] <= 0xF4, "a ZIP 302 text memo");
+        assert_eq!(DigMemo::decode_text(memo.as_slice()).expect("decode"), a);
+
+        // Two payments: one per tile, each with its own memo.
+        for encoding in [MemoEncoding::Text, MemoEncoding::Binary] {
+            let uri = dig_request_uri(
+                Network::Test,
+                &vault,
+                &[(100_000, &a), (250_000, &b)],
+                encoding,
+            )
+            .expect("uri");
+            assert!(uri.starts_with("zcash:?address="), "{uri}");
+            let request = zip321::TransactionRequest::from_uri(&uri).expect("zip321 parses it");
+            assert_eq!(request.payments().len(), 2);
+            for (index, (amount, expected)) in [(100_000u64, &a), (250_000, &b)].iter().enumerate()
+            {
+                let payment = request.payments().get(&index).expect("payment");
+                assert_eq!(payment.amount().map(u64::from), Some(*amount));
+                assert_eq!(payment.recipient_address().encode(), vault);
+                let bytes = payment.memo().expect("memo").as_slice().to_vec();
+                let decoded = match encoding {
+                    MemoEncoding::Text => DigMemo::decode_text(&bytes),
+                    MemoEncoding::Binary => DigMemo::decode(&bytes),
+                }
+                .expect("decode");
+                assert_eq!(&decoded, *expected);
+            }
+        }
+        assert_eq!(
+            dig_request_uri(Network::Test, &vault, &[], MemoEncoding::Text),
+            Err(PaymentError::NoPayments)
+        );
     }
 
     #[test]

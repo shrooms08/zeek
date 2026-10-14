@@ -1,4 +1,4 @@
-# Zeek proof bundle (versions 1 and 2)
+# Zeek proof bundle (versions 1, 2 and 3)
 
 `GET /v1/rounds/{n}/proof` returns everything an independent verifier needs to
 recompute round `n`'s settlement with nothing but the `zeek-core` crate. The
@@ -14,15 +14,26 @@ The bundle version is the **rules version** the round was settled under:
   also charged `params.dig_fee_zat` (5000 zatoshis, the ZIP 317 marginal
   fee). `settlement.dig_fees` is the sum of those charges and
   `settlement.total_fees` includes them. Rounds settled before the change
-  keep their version 1 bundles and stay verifiable; `recompute` rejects a
-  bundle whose version disagrees with `params.rules_version()`.
+  keep their version 1 bundles and stay verifiable.
+* **Version 3** (rules v3): fees as in version 2, and `params` carries
+  `text_memo_activation_height`. A note mined at or above that height may
+  carry its dig memo as ZIP 302 text, `zeek1:` followed by the unpadded
+  base64url of the binary memo without its `0xFF` lead byte (142 ASCII
+  characters); both encodings decode to the same dig. A text memo mined below
+  the activation height is classified exactly as under version 2 (an
+  undecodable memo, forfeited). A round is version 3 once any block of its
+  window is at or above the activation height; earlier rounds keep their
+  versions and their bundles omit the field.
+
+`recompute` rejects a bundle whose version disagrees with
+`rounds::rules_version(params, round)`.
 
 ## Fields
 
 | Field | Type | Meaning |
 |---|---|---|
-| `version` | integer | Bundle format and rules version, `1` or `2`. |
-| `params` | `GameParams` | The game parameters the round was played under (network, genesis height, blocks per round, block spacing, rake, Cache odds, minimum dig, output fee, dig fee from version 2, drand chain, reveal delay, MTP window, clock skew). |
+| `version` | integer | Bundle format and rules version, `1`, `2` or `3`. |
+| `params` | `GameParams` | The game parameters the round was played under (network, genesis height, blocks per round, block spacing, rake, Cache odds, minimum dig, output fee, dig fee from version 2, text-memo activation height from version 3, drand chain, reveal delay, MTP window, clock skew). |
 | `round` | integer | Round number. |
 | `window` | `{start, end}` | Block heights `[start, end)` of the round. |
 | `notes` | array | Every note received at the vault's external address inside the window, in chain order: `txid` (display hex), `output_index` (action index), `height`, `value` (zatoshis), `memo` (hex of the 512-byte memo field). Sealed receivers are inside the memos; nothing is opened. |

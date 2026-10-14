@@ -133,6 +133,13 @@ pub struct GameParams {
     /// is zero: with no dig fee the v2 rules reduce exactly to v1.
     #[serde(default)]
     pub dig_fee_zat: u64,
+    /// Block height from which a dig memo may also be sent as ZIP 302 text
+    /// (`zeek1:` + base64url of the binary payload); rules v3. Absent (never)
+    /// in configs and proof bundles of earlier rules versions: a text memo
+    /// mined below this height is classified exactly as before, as an
+    /// undecodable memo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_memo_activation_height: Option<u32>,
     /// drand chain that supplies the treasure randomness.
     pub drand: DrandChain,
     /// Seconds after the *expected* window close at which the round's beacon
@@ -168,6 +175,10 @@ pub enum ParamsError {
     RevealDelayTooShort { minimum: u64, actual: u64 },
     #[error("min_dig_zat {min_dig} must exceed dig_fee_zat {dig_fee} so that every valid dig contributes to the pot")]
     DigFeeNotBelowMinimum { min_dig: u64, dig_fee: u64 },
+    #[error("text_memo_activation_height {activation} is below genesis_height {genesis}")]
+    TextMemoBeforeGenesis { activation: u32, genesis: u32 },
+    #[error("text memos (rules v3) require the dig fee of rules v2")]
+    TextMemoWithoutDigFee,
     #[error("arithmetic overflow in parameters")]
     Overflow,
 }
@@ -209,6 +220,7 @@ impl GameParams {
             min_dig_zat: MIN_DIG_ZAT,
             marginal_fee_zat: ZIP317_MARGINAL_FEE_ZAT,
             dig_fee_zat: DIG_FEE_ZAT,
+            text_memo_activation_height: None,
             drand: DrandChain::quicknet(),
             reveal_delay_secs: Self::minimum_reveal_delay(
                 target_spacing_secs,
@@ -260,6 +272,17 @@ impl GameParams {
                 self.drand.scheme.clone(),
             ));
         }
+        if let Some(activation) = self.text_memo_activation_height {
+            if activation < self.genesis_height {
+                return Err(ParamsError::TextMemoBeforeGenesis {
+                    activation,
+                    genesis: self.genesis_height,
+                });
+            }
+            if self.dig_fee_zat == 0 {
+                return Err(ParamsError::TextMemoWithoutDigFee);
+            }
+        }
         match hex::decode(&self.drand.public_key) {
             Ok(bytes) if bytes.len() == 96 => {}
             _ => return Err(ParamsError::BadDrandPublicKey),
@@ -279,13 +302,21 @@ impl GameParams {
         Ok(())
     }
 
-    /// Rules version the parameters encode: 1 without a dig fee, 2 with one.
+    /// Fee rules version the parameters encode: 1 without a dig fee, 2 with
+    /// one. Whether a given round is additionally under rules v3 (text memos)
+    /// depends on its window; see [`crate::rounds::rules_version`].
     pub fn rules_version(&self) -> u32 {
         if self.dig_fee_zat == 0 {
             1
         } else {
             2
         }
+    }
+
+    /// Whether a note mined at `height` may carry the text encoding of a dig memo.
+    pub fn text_memo_active(&self, height: u32) -> bool {
+        self.text_memo_activation_height
+            .is_some_and(|activation| height >= activation)
     }
 
     /// Expected wall-clock length of a round.
@@ -351,6 +382,35 @@ mod tests {
                 dig_fee: 100_000
             })
         );
+    }
+
+    #[test]
+    fn text_memo_activation_is_optional_and_validated() {
+        let mut p = GameParams::testnet(100);
+        assert!(!p.text_memo_active(u32::MAX));
+        let json = serde_json::to_string(&p).expect("json");
+        assert!(
+            !json.contains("text_memo_activation_height"),
+            "rules v2 parameters serialize unchanged"
+        );
+        p.text_memo_activation_height = Some(150);
+        p.validate().expect("valid");
+        assert!(!p.text_memo_active(149));
+        assert!(p.text_memo_active(150));
+        let back: GameParams =
+            serde_json::from_str(&serde_json::to_string(&p).expect("json")).expect("parse");
+        assert_eq!(back, p);
+        p.text_memo_activation_height = Some(99);
+        assert_eq!(
+            p.validate(),
+            Err(ParamsError::TextMemoBeforeGenesis {
+                activation: 99,
+                genesis: 100
+            })
+        );
+        p.text_memo_activation_height = Some(150);
+        p.dig_fee_zat = 0;
+        assert_eq!(p.validate(), Err(ParamsError::TextMemoWithoutDigFee));
     }
 
     #[test]

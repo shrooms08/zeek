@@ -3,7 +3,8 @@
 //! from a live engine, and `round-<n>.round.json` the matching round view.
 //! The settlement is recomputed from the bundle's inputs with zeek-core only
 //! and must match the engine's byte for byte. Version 1 bundles (rules v1,
-//! no dig fee) and version 2 bundles (rules v2) are both covered.
+//! no dig fee), version 2 bundles (rules v2) and version 3 bundles (rules v3,
+//! text memos) are all covered.
 
 use std::fs;
 use std::path::PathBuf;
@@ -24,7 +25,12 @@ fn examples_dir() -> PathBuf {
 fn saved_live_rounds_recompute_byte_for_byte() {
     let dir = examples_dir();
     let mut bundles: Vec<PathBuf> = Vec::new();
-    for sub in [dir.clone(), dir.join("phase4"), dir.join("phase4b")] {
+    for sub in [
+        dir.clone(),
+        dir.join("phase4"),
+        dir.join("phase4b"),
+        dir.join("phase5"),
+    ] {
         let Ok(entries) = fs::read_dir(&sub) else {
             continue;
         };
@@ -51,7 +57,7 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         let bundle: ProofBundle = serde_json::from_str(&text).expect("parse bundle");
         versions_seen.insert(bundle.version);
         assert_eq!(
-            bundle.params.rules_version(),
+            zeek_core::rounds::rules_version(&bundle.params, bundle.round).expect("version"),
             bundle.version,
             "{}: the bundle version is the rules version",
             path.display()
@@ -69,7 +75,8 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         let reserialized_text = serde_json::to_string(&bundle).expect("json");
         let reparsed: ProofBundle = serde_json::from_str(&reserialized_text).expect("reparse");
         assert_eq!(reparsed, bundle, "{} does not round-trip", path.display());
-        if bundle.version == PROOF_VERSION {
+        assert!(bundle.version <= PROOF_VERSION);
+        if bundle.version >= 2 {
             let reserialized: serde_json::Value =
                 serde_json::from_str(&reserialized_text).expect("value");
             let original: serde_json::Value = serde_json::from_str(&text).expect("value");

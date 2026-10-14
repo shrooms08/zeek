@@ -268,6 +268,25 @@ pub fn payout_inputs(
     Ok(inputs)
 }
 
+/// What the winners of a drawn round would split right now: the valid digs
+/// minus their dig fees, minus the rake. This is the settlement's
+/// `distributable` computed without a draw (the Cache is separate).
+pub fn prize_pool(params: &GameParams, digs: &ClassifiedDigs) -> Result<u64, SettleError> {
+    let mut pot = 0u64;
+    for dig in &digs.valid {
+        let contribution =
+            dig.note
+                .value
+                .checked_sub(params.dig_fee_zat)
+                .ok_or(SettleError::DigBelowFee {
+                    value: dig.note.value,
+                    dig_fee: params.dig_fee_zat,
+                })?;
+        pot = add(pot, contribution)?;
+    }
+    sub(pot, pro_rata(pot, params.rake_bps, 10_000)?)
+}
+
 /// An output before its fee is charged: sealed receiver, memo round and
 /// tile, gross amount, reason.
 type GrossOutput = (SealedReceiver, u32, u8, u64, PayoutReason);
@@ -591,6 +610,7 @@ mod tests {
         assert_eq!(s.pot, 5_985_000);
         assert_eq!(s.rake, 299_250);
         assert_eq!(s.distributable, 5_685_750);
+        assert_eq!(prize_pool(&p, &d).expect("pool"), s.distributable);
         assert_eq!(s.treasure_tile_total, 3_000_000);
         assert_eq!(s.winners, 2);
         assert_eq!(s.payouts.len(), 2);

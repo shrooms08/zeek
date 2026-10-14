@@ -177,7 +177,7 @@ pub fn run(now_ms: impl Fn() -> f64, payments: u32) -> Result<BenchReport, Bench
         )
         .map_err(|e| BenchError::Builder(e.to_string()))?;
     let PcztResult { pczt_parts, .. } = builder
-        .build_for_pczt(&mut rng, &zip317::FeeRule::standard())
+        .build_for_pczt(rng, &zip317::FeeRule::standard())
         .map_err(|e| BenchError::Builder(e.to_string()))?;
     let pczt =
         Creator::build_from_parts(pczt_parts).ok_or_else(|| BenchError::Pczt("creator".into()))?;

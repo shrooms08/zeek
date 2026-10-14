@@ -69,8 +69,12 @@ pub struct BoardView {
     pub status: RoundStatus,
     /// Blocks until the window closes (0 once closed).
     pub blocks_remaining: u32,
-    /// Sum of valid digs so far.
-    pub pot: u64,
+    /// What winners would split right now: valid digs minus dig fees, minus
+    /// the rake.
+    pub prize_pool_zat: u64,
+    /// Gross total dug so far: the plain sum of the valid digs, before dig
+    /// fees and rake. Not what is paid out; see `prize_pool_zat`.
+    pub gross_dug_zat: u64,
     /// Current Deep Cache balance.
     pub cache: u64,
     /// Relative depth per tile, `0..=100`.
@@ -84,16 +88,19 @@ impl BoardView {
         round: u32,
         status: RoundStatus,
         tip_height: u32,
-        totals: &TileTotals,
+        digs: &ClassifiedDigs,
         cache: u64,
     ) -> Result<Self, BoardError> {
+        let totals = TileTotals::from_digs(digs)?;
         let window = round_window(params, round)?;
         let blocks_remaining = window.end.saturating_sub(tip_height.saturating_add(1));
         Ok(BoardView {
             round,
             status,
             blocks_remaining,
-            pot: totals.pot().ok_or(BoardError::Overflow)?,
+            prize_pool_zat: crate::settle::prize_pool(params, digs)
+                .map_err(|_| BoardError::Overflow)?,
+            gross_dug_zat: totals.pot().ok_or(BoardError::Overflow)?,
             cache,
             depths: totals.relative_depths(),
         })
@@ -200,13 +207,37 @@ mod tests {
 
     #[test]
     fn board_view_counts_remaining_blocks() {
+        use crate::digs::{ReceivedNote, ValidDig};
+        use crate::memo::{SealedReceiver, SEALED_RECEIVER_LEN};
         let p = GameParams::testnet(1_000);
-        let totals = TileTotals([0; 25]);
-        let v = BoardView::new(&p, 0, RoundStatus::Open, 1_000, &totals, 5).expect("view");
+        let empty = ClassifiedDigs::default();
+        let v = BoardView::new(&p, 0, RoundStatus::Open, 1_000, &empty, 5).expect("view");
         assert_eq!(v.blocks_remaining, 23);
-        let v = BoardView::new(&p, 0, RoundStatus::Closing, 1_030, &totals, 5).expect("view");
+        assert_eq!((v.prize_pool_zat, v.gross_dug_zat), (0, 0));
+        let v = BoardView::new(&p, 0, RoundStatus::Closing, 1_030, &empty, 5).expect("view");
         assert_eq!(v.blocks_remaining, 0);
+        // Two digs of 100,000: gross 200,000; prize pool (200,000 - 2 x 5,000) x 95%.
+        let dig = |tile: u8| ValidDig {
+            note: ReceivedNote {
+                txid: String::new(),
+                output_index: 0,
+                height: 1_000,
+                value: 100_000,
+                memo: vec![],
+            },
+            tile,
+            sealed_receiver: SealedReceiver::from_bytes(&[0; SEALED_RECEIVER_LEN]).expect("sealed"),
+        };
+        let digs = ClassifiedDigs {
+            valid: vec![dig(1), dig(2)],
+            refunds: vec![],
+            forfeits: vec![],
+        };
+        let v = BoardView::new(&p, 0, RoundStatus::Open, 1_000, &digs, 5).expect("view");
+        assert_eq!(v.gross_dug_zat, 200_000);
+        assert_eq!(v.prize_pool_zat, 180_500);
+        assert_eq!(v.depths[1], 100);
         let json = serde_json::to_string(&v).expect("json");
-        assert!(json.contains("\"status\":\"closing\""));
+        assert!(json.contains("\"status\":\"open\""));
     }
 }

@@ -51,8 +51,11 @@ use zeek_vault::send::{self, PendingSpend};
 use crate::db::NodeDb;
 use crate::error::KeyholderError;
 
-/// Rules version this node signs payouts for.
-pub const SIGNED_RULES_VERSION: u32 = 2;
+/// Oldest rules version this node signs payouts for: rules v2 introduced the
+/// dig fee and the exact input set the checks below rely on. Rules v3 only
+/// adds the text encoding of dig memos, which this node's own classification
+/// already applied when it settled the round.
+pub const MIN_SIGNED_RULES_VERSION: u32 = 2;
 
 /// What verification needs.
 pub struct VerifyContext<'a> {
@@ -184,9 +187,9 @@ pub fn verify_payout(
             .chain
             .settlement(*round)?
             .ok_or_else(|| refuse(format!("round {round} is not settled on this node")))?;
-        if row.rules_version != SIGNED_RULES_VERSION {
+        if row.rules_version < MIN_SIGNED_RULES_VERSION {
             return Err(refuse(format!(
-                "round {round} was settled under rules version {}; this node only signs rules version {SIGNED_RULES_VERSION} payouts",
+                "round {round} was settled under rules version {}; this node only signs payouts of rules version {MIN_SIGNED_RULES_VERSION} or later",
                 row.rules_version
             )));
         }

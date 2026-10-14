@@ -449,3 +449,103 @@ async fn http_api_serves_the_round() {
     let (status, _) = get(&app, "/v1/config").await;
     assert_eq!(status, StatusCode::OK);
 }
+
+/// Rules v3: from the activation height a dig may carry the `zeek1:` text
+/// memo. The same chain settles differently before and after activation, the
+/// board reports the prize pool next to the gross total, and the version 3
+/// proof bundle recomputes.
+#[tokio::test]
+async fn text_memo_digs_count_from_the_activation_height() {
+    let vault = TestVault::new(77);
+    let base = vault.config(GENESIS);
+    let mut chain = SyntheticChain::new(&vault, GENESIS, start_time(&base.params));
+    chain.push_block(vec![]); // GENESIS
+    let text_memo = |tile: u8, player: u8| {
+        let text = vault.dig_memo(0, tile, player).encode_text();
+        let mut field = [0u8; 512];
+        field[..text.len()].copy_from_slice(text.as_bytes());
+        field
+    };
+    // GENESIS + 1: a text dig before activation; GENESIS + 2: one after it,
+    // next to a binary dig.
+    chain.push_block(vec![chain.payment(
+        300_000,
+        Pool::Ironwood,
+        text_memo(4, 1),
+    )]);
+    chain.push_block(vec![
+        chain.payment(200_000, Pool::Ironwood, text_memo(5, 2)),
+        chain.payment(100_000, Pool::Ironwood, vault.dig_memo(0, 6, 3).encode()),
+    ]);
+    while chain.next_height() < GENESIS + base.params.blocks_per_round {
+        chain.advance(1);
+    }
+    chain.advance(base.params.mtp_window + SETTLE_CONFIRMATIONS);
+    let beacon_time = start_time(&base.params) + 600 + 900;
+
+    let mut v3 = base.clone();
+    v3.params.text_memo_activation_height = Some(GENESIS + 2);
+    v3.validate().expect("valid config");
+    for (config, expected_version, valid_digs, forfeited) in
+        [(base, 2u32, 1usize, 500_000u64), (v3, 3, 2, 300_000)]
+    {
+        let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
+        let mut db = Db::open_in_memory().expect("db");
+        let mut processor = Processor::new(config.clone());
+        ingest(&mut chain, &mut db, &scanner, &config)
+            .await
+            .expect("ingest");
+        processor
+            .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+            .await
+            .expect("process");
+        let row = db.settlement(0).expect("row").expect("settled");
+        assert_eq!(row.rules_version, expected_version);
+        assert_eq!(row.settlement.forfeited, forfeited);
+        let gross: u64 = if valid_digs == 2 { 300_000 } else { 100_000 };
+        assert_eq!(row.settlement.pot, gross - valid_digs as u64 * 5_000);
+        let view = round_response(&processor, &db, 0).expect("view");
+        assert_eq!(view.digs, valid_digs);
+        let bundle = proof_response(&processor, &db, 0)
+            .expect("proof")
+            .expect("settled");
+        assert_eq!(bundle.version, expected_version);
+        assert_eq!(
+            bundle.params.text_memo_activation_height.is_some(),
+            expected_version == 3
+        );
+        assert_eq!(
+            proof::recompute(&bundle).expect("recompute"),
+            bundle.settlement
+        );
+    }
+}
+
+/// The board labels the prize pool (net of dig fees and rake) and the gross
+/// total separately while a round is open.
+#[tokio::test]
+async fn board_reports_prize_pool_and_gross_total() {
+    let vault = TestVault::new(78);
+    let config = vault.config(GENESIS);
+    let mut chain = SyntheticChain::new(&vault, GENESIS, start_time(&config.params));
+    chain.push_block(vec![
+        chain.payment(100_000, Pool::Ironwood, vault.dig_memo(0, 1, 1).encode()),
+        chain.payment(100_000, Pool::Ironwood, vault.dig_memo(0, 2, 2).encode()),
+    ]);
+    chain.advance(2);
+    let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
+    let mut db = Db::open_in_memory().expect("db");
+    let processor = Processor::new(config.clone());
+    ingest(&mut chain, &mut db, &scanner, &config)
+        .await
+        .expect("ingest");
+    let board = processor.board(&db).expect("board");
+    assert_eq!(board.round, 0);
+    assert_eq!(board.digs, 2);
+    assert_eq!(board.gross_dug_zat, 200_000);
+    assert_eq!(board.prize_pool_zat, 180_500, "(200,000 - 2 x 5,000) x 95%");
+    assert_eq!(board.rules_version, 2);
+    let json = serde_json::to_string(&board).expect("json");
+    assert!(json.contains("\"prize_pool_zat\":180500"));
+    assert!(json.contains("\"gross_dug_zat\":200000"));
+}
