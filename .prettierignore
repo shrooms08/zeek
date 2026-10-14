@@ -9,3 +9,4 @@ node_modules
 packages/zeek-pocket/wasm
 pnpm-lock.yaml
 *.md
+design
