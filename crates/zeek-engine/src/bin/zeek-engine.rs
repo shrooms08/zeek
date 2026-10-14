@@ -1,11 +1,15 @@
 //! `zeek-engine` binary: follows testnet, settles rounds, serves the API.
+//! `zeek-engine audit` instead rebuilds the vaults' history from chain data
+//! and reconciles it against the engine's databases.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use clap::{Args, Parser, Subcommand};
 use tokio::sync::{broadcast, Mutex};
 use zeek_engine::api::{router, AppState};
+use zeek_engine::audit::{self, VaultSpec};
 use zeek_engine::beacon::RelayFetcher;
 use zeek_engine::chain::{self, LightwalletdSource};
 use zeek_engine::config::{EngineSettings, GameConfig};
@@ -14,23 +18,84 @@ use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::{Event, Processor};
 
+#[derive(Parser)]
+#[command(
+    name = "zeek-engine",
+    version,
+    about = "Zeek round engine (Zcash testnet)"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Rebuild every vault's history from chain data and reconcile it against
+    /// the engine's settlements, payouts and ledger. Prints the report.
+    Audit(AuditArgs),
+}
+
+#[derive(Args)]
+struct AuditArgs {
+    /// Vaults to audit: `name=<secrets dir>[,engine=<db>][,game=<config>][,wallet=<dir>]`.
+    /// Default: the DKG vault and the old dealer vault of this repository.
+    #[arg(long = "vault")]
+    vaults: Vec<String>,
+    /// First height to scan (default: the earliest vault birthday).
+    #[arg(long)]
+    from: Option<u32>,
+}
+
 fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
+    let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
     let settings = EngineSettings::from_env()?;
-    let config = GameConfig::load(&settings.game_config_path)
-        .with_context(|| format!("loading {}", settings.game_config_path.display()))?;
-    tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .context("starting async runtime")?
-        .block_on(run(settings, config))
+        .context("starting async runtime")?;
+    match cli.command {
+        Some(Command::Audit(args)) => runtime.block_on(run_audit(settings, args)),
+        None => {
+            let config = GameConfig::load(&settings.game_config_path)
+                .with_context(|| format!("loading {}", settings.game_config_path.display()))?;
+            runtime.block_on(run(settings, config))
+        }
+    }
+}
+
+async fn run_audit(settings: EngineSettings, args: AuditArgs) -> anyhow::Result<()> {
+    let specs: Vec<VaultSpec> = if args.vaults.is_empty() {
+        vec![
+            VaultSpec::parse(
+                "dkg=.secrets,engine=data/zeek-engine.sqlite,game=config/game.testnet.json,wallet=data",
+            )?,
+            VaultSpec::parse(
+                "old-dealer=.secrets/old-dealer,engine=data/old-vault/zeek-engine.sqlite,game=config/game.testnet.old-vault.json,wallet=data/old-vault",
+            )?,
+        ]
+    } else {
+        args.vaults
+            .iter()
+            .map(|v| VaultSpec::parse(v))
+            .collect::<Result<_, _>>()?
+    };
+    let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    let outcome = audit::run(&mut source, args.from, &specs).await?;
+    print!("{}", outcome.report);
+    if outcome.mismatches > 0 {
+        anyhow::bail!("audit found {} mismatch(es)", outcome.mismatches);
+    }
+    Ok(())
 }
 
 fn settings_url(settings: &EngineSettings) -> String {
