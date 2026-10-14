@@ -136,51 +136,23 @@ impl PlanStatus {
     }
 }
 
-/// State of a payout transaction for one round.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PayoutState {
-    /// A signing session was opened; the transaction may or may not have
-    /// been broadcast (inspect before retrying).
-    Signing,
-    /// Broadcast and recorded in the vault wallet.
-    Broadcast,
-}
+pub use zeek_core::proof::{PayoutRecord, PayoutState};
 
-impl PayoutState {
-    fn as_str(self) -> &'static str {
-        match self {
-            PayoutState::Signing => "signing",
-            PayoutState::Broadcast => "broadcast",
-        }
-    }
-
-    fn parse(s: &str) -> Result<Self, EngineError> {
-        match s {
-            "signing" => Ok(PayoutState::Signing),
-            "broadcast" => Ok(PayoutState::Broadcast),
-            other => Err(EngineError::Corrupt(format!(
-                "unknown payout state `{other}`"
-            ))),
-        }
+fn payout_state_str(state: PayoutState) -> &'static str {
+    match state {
+        PayoutState::Signing => "signing",
+        PayoutState::Broadcast => "broadcast",
     }
 }
 
-/// A payout record.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PayoutRecord {
-    pub round: u32,
-    pub state: PayoutState,
-    /// Signing session id, hex.
-    pub session: String,
-    /// Transaction id once broadcast (display hex).
-    pub txid: Option<String>,
-    /// Chain tip when the record was last updated.
-    pub height: u32,
-    /// Fee of the payout transaction.
-    pub fee: u64,
-    /// Keyholders that signed.
-    pub signers: Vec<u16>,
+fn parse_payout_state(s: &str) -> Result<PayoutState, EngineError> {
+    match s {
+        "signing" => Ok(PayoutState::Signing),
+        "broadcast" => Ok(PayoutState::Broadcast),
+        other => Err(EngineError::Corrupt(format!(
+            "unknown payout state `{other}`"
+        ))),
+    }
 }
 
 /// A settled round.
@@ -704,7 +676,7 @@ impl Db {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 record.round,
-                record.state.as_str(),
+                payout_state_str(record.state),
                 record.session,
                 record.txid,
                 record.height,
@@ -796,7 +768,7 @@ impl Db {
         row.map(|(state, session, txid, height, fee, signers)| {
             Ok(PayoutRecord {
                 round,
-                state: PayoutState::parse(&state)?,
+                state: parse_payout_state(&state)?,
                 session,
                 txid,
                 height,

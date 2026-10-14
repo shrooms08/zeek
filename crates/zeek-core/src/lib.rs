@@ -36,6 +36,7 @@ pub mod digs;
 pub mod memo;
 pub mod params;
 pub mod payment;
+pub mod proof;
 pub mod random;
 pub mod rounds;
 pub mod seal;
