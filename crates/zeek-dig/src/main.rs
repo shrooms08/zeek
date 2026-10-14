@@ -24,8 +24,14 @@ struct Cli {
 enum Command {
     /// Create a new player wallet under .secrets/players/<name>/.
     Init { name: String },
-    /// Print the player's unified address (Orchard receiver).
-    Address { name: String },
+    /// Print the player's unified address (Orchard receiver). With --fresh,
+    /// a new diversified address the wallet records as exposed (for pasting
+    /// as an any-wallet payout address).
+    Address {
+        name: String,
+        #[arg(long)]
+        fresh: bool,
+    },
     /// Scan testnet for the player's notes.
     Sync { name: String },
     /// Show the player's Ironwood balance.
@@ -102,9 +108,26 @@ fn main() -> anyhow::Result<()> {
             println!("Created player `{name}`; address: {}", player.address()?);
             Ok(())
         }
-        Command::Address { name } => {
+        Command::Address { name, fresh: false } => {
             let player = Player::new(secrets.path(), &name)?;
             println!("{}", player.address()?);
+            Ok(())
+        }
+        Command::Address { name, fresh: true } => {
+            let player = Player::new(secrets.path(), &name)?;
+            let mut db = player.open_db()?;
+            let account = player
+                .find_account(&db)?
+                .with_context(|| format!("player `{name}` has not synced yet"))?;
+            let (address, _) =
+                zcash_client_backend::data_api::WalletWrite::get_next_available_address(
+                    &mut db,
+                    account,
+                    zcash_keys::keys::UnifiedAddressRequest::ORCHARD,
+                )
+                .map_err(|e| anyhow::anyhow!("next address: {e}"))?
+                .context("the wallet has no account for this player")?;
+            println!("{}", address.encode(&zeek_vault::NETWORK));
             Ok(())
         }
         Command::Sync { name } => runtime.block_on(async {
