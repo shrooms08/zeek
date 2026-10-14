@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/zeek-core", "crates/zeek-vault", "crates/zeek-engine", "crates/zeek-dig", "crates/zeek-keyholder"]
+members = ["crates/zeek-core", "crates/zeek-vault", "crates/zeek-engine", "crates/zeek-dig", "crates/zeek-keyholder", "crates/zeek-pocket"]
 
 [workspace.package]
 edition = "2021"

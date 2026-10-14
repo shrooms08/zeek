@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>zeek-pocket proving benchmark</title></head>
+<body>
+<pre id="out">starting worker…</pre>
+<script type="module">
+  const out = document.getElementById("out");
+  const worker = new Worker("./worker.js", { type: "module" });
+  worker.onmessage = async (event) => {
+    const data = event.data;
+    if (data.type === "done" && "measureUserAgentSpecificMemory" in performance) {
+      try {
+        const mem = await performance.measureUserAgentSpecificMemory();
+        data.page_memory_bytes = mem.bytes;
+      } catch (e) {
+        data.page_memory_error = String(e);
+      }
+    }
+    window.__benchResult = data;
+    out.textContent = JSON.stringify(data, null, 2);
+  };
+  worker.postMessage({ threads: navigator.hardwareConcurrency, crossOriginIsolated });
+</script>
+</body>
+</html>

@@ -14,3 +14,8 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Generated wasm bindings and JS builds
+/crates/zeek-pocket/pkg/
+node_modules/
+dist/
