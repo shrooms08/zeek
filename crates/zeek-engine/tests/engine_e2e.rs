@@ -909,7 +909,7 @@ async fn campfire_messages_and_shouts() {
         Some("contains a filtered word (giveaway)")
     );
     assert_eq!(feed.messages[2].nickname.as_deref(), Some("ember"));
-    assert_eq!(feed.messages[2].tile, Some(4));
+    assert_eq!(feed.messages[2].tiles, vec![4]);
     let with_hidden = get("/v1/campfire?include_hidden=1").await;
     assert_eq!(
         with_hidden.messages[0].text.as_deref(),

@@ -138,6 +138,7 @@ switch (command) {
     await page.getByTestId("aw-tiles").fill(args[1]);
     await page.getByTestId("aw-amount").fill(args[2]);
     if (args[3]) await page.getByTestId("aw-round").fill(args[3]);
+    if (process.env.AW_MESSAGE) await page.getByTestId("aw-message").fill(process.env.AW_MESSAGE);
     await page.getByTestId("aw-build").click();
     await waitFor("aw-result", (v) => v.length > 0, 120_000);
     console.log(await text("aw-result"));
@@ -218,6 +219,16 @@ switch (command) {
     console.log(result);
     await report();
     await shot(args[5] ?? "pocket-dig-message");
+    break;
+  }
+  case "shoutreq": {
+    await page.getByTestId("shout-text").fill(args[0]);
+    await page.getByTestId("shout-amount").fill(args[1]);
+    await page.getByTestId("shout-request").click();
+    await page.waitForTimeout(500);
+    await waitFor("shout-result", (v) => v.length > 0, 120_000);
+    console.log(`URI ${await page.getByTestId("shout-uri").inputValue()}`);
+    await shot(args[2] ?? "shout-request");
     break;
   }
   case "campfire": {

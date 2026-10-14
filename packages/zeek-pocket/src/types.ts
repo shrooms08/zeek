@@ -174,7 +174,8 @@ export interface CampfireMessage {
   id: string;
   round: number;
   kind: "dig" | "shout";
-  tile?: number;
+  /** Tiles dug by the transaction with this message (absent for shouts). */
+  tiles?: number[];
   height: number;
   time: number;
   value_zat: number;

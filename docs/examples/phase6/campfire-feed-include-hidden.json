@@ -1,0 +1,56 @@
+{
+    "messages": [
+        {
+            "id": "56a00f7465aec4715917aab83d3088d28ba900681cd57f618d7da8d1efa7096c:0",
+            "round": 83,
+            "kind": "shout",
+            "height": 4501358,
+            "time": 1791981544,
+            "value_zat": 50000,
+            "text": "free giveaway, dm me now",
+            "hidden": true,
+            "reason": "contains a filtered word (giveaway)"
+        },
+        {
+            "id": "88a0f5c2fe297d2057e78dea422dc0b06ddde75c26bfe3370a32cbf47167432b:0",
+            "round": 83,
+            "kind": "dig",
+            "tiles": [
+                6,
+                19
+            ],
+            "height": 4501345,
+            "time": 1791981281,
+            "value_zat": 200000,
+            "nickname": "ember",
+            "text": "first light at the campfire",
+            "hidden": false
+        },
+        {
+            "id": "2f4d681d11a918a12bea46832e7243bea955d4e60d8e039e6bbb5ae0985a859d:1",
+            "round": 83,
+            "kind": "shout",
+            "height": 4501345,
+            "time": 1791981281,
+            "value_zat": 50000,
+            "nickname": "carol",
+            "text": "warm hands, cold night",
+            "hidden": false
+        },
+        {
+            "id": "727ddb953971e3f791360ff91caa055a3bc4ae967ca3cce444b39ff98edfe254:0",
+            "round": 83,
+            "kind": "dig",
+            "tiles": [
+                12
+            ],
+            "height": 4501345,
+            "time": 1791981281,
+            "value_zat": 100000,
+            "nickname": "bob",
+            "text": "tile 12 feels lucky",
+            "hidden": false
+        }
+    ],
+    "next_before": null
+}

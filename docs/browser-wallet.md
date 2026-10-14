@@ -160,3 +160,51 @@ pnpm --filter harness dev           # http://localhost:5173 (COOP/COEP headers s
 `VITE_ZEEK_ENGINE_URL` points the harness at another engine (default
 `http://127.0.0.1:8787`). `apps/harness/e2e/drive.mjs` drives the same page
 from Playwright (`node e2e/drive.mjs create|sync|dig|anywallet ...`).
+
+## Phase 6 additions
+
+### Batched digs
+
+`pocket.dig({ tiles, amountEachZat, message?, maxTilesPerTx = 6, separate })`
+splits a selection into sequential transactions of at most `maxTilesPerTx`
+tiles (`separate`: one tile each). Each batch syncs to the tip, is proven
+and broadcast in turn, and reports progress (`sync`, `proving`, `broadcast`,
+`sent` with its txid). Each batch spends different notes, so a second batch
+needs a second confirmed note. If a later batch fails, the error has code
+`partial_dig` and `partial = { sent: [{txid, tiles}], unsent: [tiles] }`:
+sent batches are never resent. A batch also stops if the round changes
+between batches (the rest would land in the next round).
+
+### Campfire (rules v4)
+
+`dig({ ..., message })` attaches a message to every dig of the call;
+`shout({ message, amountZat })` sends a shout (at least 0.0005 ZEC; its value
+goes to the Deep Cache and is never refunded). Any wallet:
+`buildDigRequest({ ..., message })` and `buildShoutRequest({ message,
+amountZat })` return ZIP 321 URIs with `zeek1:` text memos. The engine
+serves the feed at `GET /v1/campfire` and announces new messages over the
+WebSocket (`subscribeCampfire`).
+
+### Browser verifier and second source
+
+`pocket.verifyRound({ round, secondSource? })` runs the five checks of
+`zeek-verify` in the worker (wasm), fetching blocks and transactions through
+the Zeek relay, then compares the block hashes of every block it used with
+the second source. Sources:
+
+| Network | Source | Works from a browser |
+|---|---|---|
+| mainnet | Blockchair, `api.blockchair.com/zcash/dashboards/block/{h}` | yes (`Access-Control-Allow-Origin: *`) |
+| testnet | none public (Blockchair has no testnet; CipherScan's testnet API answered HTTP 500; public testnet lightwalletd servers offer no gRPC-web) | — |
+| any | `zeek-verify relay --lightwalletd <url>` run by anyone | yes, with `--cors` |
+
+Without a configured source the result says **cross-check unavailable**; it
+never passes silently.
+
+### Win proofs
+
+`pocket.createWinProof(round, shareBase)` proves in the worker that a
+treasure payout of `round` reached this wallet, submits it to the engine
+(which verifies it before storing) and returns its id and a share URL
+(`?winproof=<id>`), which the harness verifies on load. See
+`docs/prove-a-win.md`.

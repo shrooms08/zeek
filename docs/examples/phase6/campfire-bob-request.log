@@ -1,0 +1,5 @@
+DEV HARNESS (not the product UI). Engine: http://127.0.0.1:8787. Cross-origin isolated: true
+round 83, tiles 12, total 0.00100000 ZEC
+Paste a fresh receive address from your wallet as the payout address (most wallets can generate a new shielded address each time). It is sealed so only the vault can read it, and a new one per dig keeps your digs unlinkable. Pay the request before the round closes; if it arrives late or names a closed round it is refunded to that address.
+URI zcash:utest1nfntf6k98aaw8hj95zfgavk2g0ws05j6kknyxemlqg5d06gvl3ks7k45h7aqhp5w5nhcrlahgvkexkn35exzxdtec838s77tsy50kdt3?amount=0.001&memo=emVlazE6V2tWRlN3SUFBQUJURE9jZFl4WDVXdGFrSFRsT3JJZXJDZnYyODdqSUNrakp1eklMaHhzSmNoOHMzRURjR0JfT0NTOU9iWExuM1lTbFdwejh6a0kweW1IWG9xd29CSTlRcXA0UHFHSXJkbVY1MXgxWW1tb1l0a2RCSTJvWWRHbzRpZG1vcGhtVUFCbGJZbTlpWFNCMGFXeGxJREV5SUdabFpXeHpJR3gxWTJ0NQ
+screenshot /Users/minos/Projects/zeek/docs/examples/phase6/anywallet-dig-message.png

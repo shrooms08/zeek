@@ -1,5 +1,6 @@
 // Serves ../pkg and this directory with COOP/COEP headers and runs the
-// benchmark in headless Chromium through Playwright. Usage: node run.mjs
+// benchmark in headless Chromium through Playwright.
+// Usage: node run.mjs [plan], e.g. `1`, `6` or `6,6` (tiles per transaction).
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -35,7 +36,8 @@ const wasmSize = (await stat(path.join(root, "pkg", "zeek_pocket_bg.wasm"))).siz
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on("console", (m) => console.error("[page]", m.text()));
-await page.goto(`http://127.0.0.1:${port}/bench/index.html`);
+const plan = process.argv[2] ?? "1";
+await page.goto(`http://127.0.0.1:${port}/bench/index.html?plan=${plan}`);
 const result = await page.waitForFunction(() => window.__benchResult, null, { timeout: 15 * 60 * 1000 });
 const data = await result.jsonValue();
 data.wasm_size_bytes = wasmSize;

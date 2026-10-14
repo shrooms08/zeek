@@ -123,18 +123,21 @@ impl Filter {
 /// One Campfire message.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CampfireMessage {
-    /// `txid:action`, unique.
+    /// `txid:action` of the first output carrying it, unique.
     pub id: String,
     pub round: u32,
     /// `"dig"` or `"shout"`.
     pub kind: String,
-    /// The tile dug, absent for a shout.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tile: Option<u8>,
+    /// The tiles dug by this transaction with this message (one dig
+    /// transaction may cover several tiles, each memo carrying the same
+    /// message); empty for a shout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tiles: Vec<u8>,
     pub height: u32,
     /// Block time (Unix seconds).
     pub time: u64,
-    /// Note value (public through the vault's viewing key, like the board).
+    /// Sum of the note values carrying it (public through the vault's
+    /// viewing key, like the board).
     pub value_zat: u64,
     /// Self-chosen nickname, if the message uses the nickname syntax.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,7 +196,7 @@ fn message_of(params: &GameParams, note: &NoteRow) -> Option<CampfireMessage> {
         id: format!("{}:{}", note.txid_hex(), note.action_index),
         round: rounds::round_for_height(params, note.height)?,
         kind: kind.to_owned(),
-        tile,
+        tiles: tile.into_iter().collect(),
         height: note.height,
         time: note.block_time,
         value_zat: note.value,
@@ -228,10 +231,31 @@ pub fn messages(
         let start = end.saturating_sub(step).max(campfire.activation_height);
         let mut notes = db.notes_in_range(start, end)?;
         notes.sort_by_key(|n| std::cmp::Reverse((n.height, n.action_index)));
+        // One transaction's digs that carry the same message are one entry.
+        let mut grouped: Vec<(String, CampfireMessage)> = Vec::new();
         for note in &notes {
-            let Some(mut message) = message_of(params, note) else {
+            let Some(message) = message_of(params, note) else {
                 continue;
             };
+            let txid = note.txid_hex();
+            match grouped.iter_mut().find(|(t, m)| {
+                *t == txid
+                    && m.kind == message.kind
+                    && m.text == message.text
+                    && m.nickname == message.nickname
+            }) {
+                Some((_, entry)) => {
+                    entry.tiles.extend(message.tiles);
+                    entry.tiles.sort_unstable();
+                    entry.value_zat = entry.value_zat.saturating_add(message.value_zat);
+                    if message.id < entry.id {
+                        entry.id = message.id;
+                    }
+                }
+                None => grouped.push((txid, message)),
+            }
+        }
+        for (_, mut message) in grouped {
             let text = message.text.clone().unwrap_or_default();
             let mut reason = filter.reason(&text);
             if reason.is_none()

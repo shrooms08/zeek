@@ -60,6 +60,7 @@ crates/zeek-engine  round engine library + `zeek-engine` binary
   src/proof.rs      proof bundle + zeek-core-only recomputation (docs/proof-bundle.md)
   src/relay.rs      chain relay for browser wallets (compact blocks, tree state, tx, broadcast)
 crates/zeek-dig     `zeek-dig` test player tool (also `send`, `pay-uri`, `address --fresh`)
+crates/zeek-verify  independent round verifier and prove-a-win (native + wasm; CLI for any lightwalletd)
 crates/zeek-pocket  browser wallet core, Rust -> wasm32 (keys, encrypted state, scanning, digs)
 packages/zeek-pocket  TypeScript API over the wasm core in a Web Worker; any-wallet ZIP 321 requests
 apps/harness        Vite DEV HARNESS: Pocket, any-wallet QR, live board (docs/browser-wallet.md)
@@ -256,6 +257,17 @@ without its `0xFF` byte; both encodings decode to the same dig, and a text
 memo before activation is classified exactly as before. The board's
 `prize_pool_zat` is what winners would split now (valid digs minus dig fees,
 minus rake); `gross_dug_zat` is the plain total dug.
+From `campfire.activation_height` (rules v4, **Campfire**) a dig may carry a
+public message and a **shout** (a message only, at least 0.0005 ZEC) feeds
+the Deep Cache; see `docs/proof-bundle.md`.
+
+## Verifying rounds and wins
+
+`zeek-verify round <n> --lightwalletd <any lightwalletd>` checks a round
+against chain data (beacon, completeness of digs, timing, settlement, payout
+transaction); `zeek-verify win <id>` checks a win proof
+([docs/prove-a-win.md](docs/prove-a-win.md)). The browser verifier in the
+harness runs the same checks.
 A round is voided when
 the median timestamp of the 11 blocks after its window, plus the assumed
 honest clock skew, is not before the beacon's publication time (see the

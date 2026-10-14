@@ -2,7 +2,7 @@
 import init, { initThreadPool, bench_prove } from "../pkg/zeek_pocket.js";
 
 self.onmessage = async (event) => {
-  const { threads, crossOriginIsolated } = event.data;
+  const { threads, crossOriginIsolated, plan } = event.data;
   try {
     const t0 = performance.now();
     const module = await init();
@@ -10,8 +10,14 @@ self.onmessage = async (event) => {
     const t1 = performance.now();
     await initThreadPool(threads);
     const threadPoolMs = performance.now() - t1;
-    const report = bench_prove(1);
-    const report25 = bench_prove(25);
+    // One transaction per entry of `plan` (payments = tiles), in sequence,
+    // in this one worker: wasm memory only grows, so the reading after each
+    // batch is the peak so far.
+    const batches = [];
+    for (const payments of plan) {
+      const report = bench_prove(payments);
+      batches.push({ payments, ...report, wasm_memory_bytes: module.memory.buffer.byteLength });
+    }
     const memoryBytes = module.memory.buffer.byteLength;
     self.postMessage({
       type: "done",
@@ -20,8 +26,8 @@ self.onmessage = async (event) => {
       wasm_load_ms: wasmLoadMs,
       thread_pool_ms: threadPoolMs,
       wasm_memory_bytes: memoryBytes,
-      report,
-      report25,
+      plan,
+      batches,
     });
   } catch (e) {
     self.postMessage({ type: "error", message: String(e), stack: e && e.stack });

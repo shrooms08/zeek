@@ -40,7 +40,7 @@ async function guarded(target: HTMLElement, action: () => Promise<void>): Promis
 
 function messageRow(m: CampfireMessage, showHidden: boolean): HTMLLIElement {
   const who = m.nickname === undefined ? "anonymous" : `[${m.nickname}]`;
-  const where = m.kind === "shout" ? "shout" : `tile ${String(m.tile ?? "?")}`;
+  const where = m.kind === "shout" ? "shout" : `tile ${(m.tiles ?? []).join(",")}`;
   const when = new Date(m.time * 1000).toISOString().slice(11, 19);
   const body = m.hidden
     ? `(hidden: ${m.reason ?? "filtered"})${showHidden && m.text !== undefined ? ` ${m.text}` : ""}`

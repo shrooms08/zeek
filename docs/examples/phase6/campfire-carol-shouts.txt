@@ -1,0 +1,5 @@
+Paid 1 payment(s) totalling 50000 zatoshis (fee 10000)
+txid: 2f4d681d11a918a12bea46832e7243bea955d4e60d8e039e6bbb5ae0985a859d
+Error: insufficient confirmed Ironwood funds: 60000 zatoshis required but only 0 spendable; 792500 zatoshis are waiting for confirmations (received notes need 10 confirmations, change needs 3); run `zeek-vault sync` later and retry
+Paid 1 payment(s) totalling 50000 zatoshis (fee 10000)
+txid: 56a00f7465aec4715917aab83d3088d28ba900681cd57f618d7da8d1efa7096c

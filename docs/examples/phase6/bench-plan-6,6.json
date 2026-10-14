@@ -1,0 +1,42 @@
+{
+  "type": "done",
+  "crossOriginIsolated": true,
+  "threads": 8,
+  "wasm_load_ms": 24.040000000037253,
+  "thread_pool_ms": 30.924999999813735,
+  "wasm_memory_bytes": 233373696,
+  "plan": [
+    6,
+    6
+  ],
+  "batches": [
+    {
+      "payments": 6,
+      "proving_key_ms": 5885,
+      "verifying_key_ms": 3885,
+      "build_ms": 252,
+      "prove_ms": 11207,
+      "sign_ms": 33,
+      "extract_verify_ms": 73,
+      "tx_bytes": 24946,
+      "actions": 7,
+      "version": "V6",
+      "wasm_memory_bytes": 233373696
+    },
+    {
+      "payments": 6,
+      "proving_key_ms": 5777,
+      "verifying_key_ms": 3716,
+      "build_ms": 225,
+      "prove_ms": 11105,
+      "sign_ms": 42,
+      "extract_verify_ms": 87,
+      "tx_bytes": 24946,
+      "actions": 7,
+      "version": "V6",
+      "wasm_memory_bytes": 233373696
+    }
+  ],
+  "page_memory_error": "SecurityError: Failed to execute 'measureUserAgentSpecificMemory' on 'Performance': performance.measureUserAgentSpecificMemory is not available.",
+  "wasm_size_bytes": 12944737
+}
