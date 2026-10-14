@@ -9,6 +9,7 @@
 //   wincreate <passphrase> <round>    create and submit a win proof (Pocket)
 //   winverify <id or proof> [shot]    verify a win proof in the browser
 //   digmsg <passphrase> <tiles> <zec> <message> [perTx] [shot]
+//   send <passphrase> <to> <zec>    unlock, send privately to an address
 //   campfire [shot]                   screenshot of the Campfire feed (with hidden text shown)
 // The browser profile (IndexedDB) persists in ../../data/harness-profile.
 // Screenshots go to ../../docs/examples/phase5/.
@@ -117,6 +118,15 @@ switch (command) {
     await sync();
     await report();
     await shot(args[1] ?? "pocket-synced");
+    break;
+  }
+  case "send": {
+    await unlock(args[0]);
+    await page.getByTestId("send-to").fill(args[1]);
+    await page.getByTestId("send-amount").fill(args[2]);
+    await page.getByTestId("send").click();
+    await page.waitForTimeout(500);
+    console.log(await waitFor("send-result", notBusy, 20 * 60_000));
     break;
   }
   case "dig": {

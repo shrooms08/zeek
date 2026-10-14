@@ -107,6 +107,7 @@ export function Field(props: FieldProps) {
           setHasFocus(false);
         }}
         data-closed={closed}
+        data-testid="field"
       >
         <g data-layer="ground">
           <polygon
@@ -152,7 +153,7 @@ export function Field(props: FieldProps) {
         </g>
         <g data-layer="overlay" />
       </svg>
-      <div id={liveId} className="sr-only" aria-live="polite">
+      <div id={liveId} className="sr-only" aria-live="polite" data-testid="field-live">
         {hasFocus ? describe(cursor) : ""}
       </div>
       <ul className="sr-only" aria-label="Tiles">

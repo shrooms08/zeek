@@ -247,6 +247,7 @@ export function QrCard(props: {
       className="panel p-4 flex flex-col gap-3"
       aria-label={`Payment ${props.index + 1} of ${props.total}`}
       data-testid="qr-card"
+      data-uri={props.uri}
     >
       <div className="label">
         Payment {props.index + 1} of {props.total} ·{" "}
