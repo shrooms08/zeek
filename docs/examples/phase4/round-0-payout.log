@@ -1,0 +1,2 @@
+[2m2026-10-13T23:02:09.312878Z[0m [32m INFO[0m payout transaction prepared [3mround[0m[2m=[0m0 [3moutputs[0m[2m=[0m1 [3mfee[0m[2m=[0m10000 [3mcollected[0m[2m=[0m5000 [3mdeficit[0m[2m=[0m5000 [3mfloat[0m[2m=[0m3430000
+[2m2026-10-13T23:02:11.512002Z[0m [32m INFO[0m payout broadcast [3mround[0m[2m=[0m0 [3mtxid[0m[2m=[0m7744d648f786070d40f2bf070b1b76f6946460ccad853bdbb538e19c7e6402dc [3msigners[0m[2m=[0m[1, 2]
