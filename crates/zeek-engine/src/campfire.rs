@@ -221,7 +221,9 @@ pub fn messages(
         return Ok(Vec::new());
     };
     let limit = limit.clamp(1, MAX_LIMIT);
-    let mut end = before.unwrap_or(u32::MAX);
+    // Scan down from the cursor, or from just above the stored tip.
+    let tip_end = db.tip()?.map_or(0, |b| b.height.saturating_add(1));
+    let mut end = before.map_or(tip_end, |b| b.min(tip_end));
     let mut out = Vec::new();
     // Recent texts (newest first) for the duplicate heuristic: a message is
     // a duplicate of a newer one, so the first copy stays visible.
