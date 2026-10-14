@@ -1,0 +1,369 @@
+zeek-engine audit: chain data from height 4497334
+chain tip 4499812
+
+== vault dkg (utest1nfntf6k98aaw8hj95zfgavk2g0ws05j6kknyxemlqg5d06gvl3ks7k45h7aqhp5w5nhcrlahgvkexkn35exzxdtec838s77tsy50kdt3)
+h=4499342 tx 18bd62f74af98c35bf0a68e49a5c606184f640f812a783dd35871910e6835dc9 fee=25000
+  +      4630000  ironwood:0 External memo "zeek vault migration to DKG vault" (85c57c305c6d664173b42d6ef0e002333ccd05a24b0b55bdb98c1f8e8ef67d00)
+  =      4630000  balance after this transaction
+h=4499353 tx 53857722672b96b2f959e5c7f24b18df00ba210a9c4d417073ff6df265e07353 fee=50000
+  +       100000  ironwood:0 External dig round 0 tile 7 (b6fcfc12e445723e15f42c906bc41e419a6ed8cf0212f98916cdc7e87a277122)
+  +       100000  ironwood:1 External dig round 0 tile 8 (e04a7b1a3be248e9d726e4d85bb6bd882c99912b866ddd041077d559d7ffb502)
+  +       100000  ironwood:3 External dig round 0 tile 4 (5cdf223b51968921292820ca26a4f72352b16f611c8e6995e928b186d3680f1c)
+  +       100000  ironwood:4 External dig round 0 tile 2 (cc53bb2a7aaa27bc21d471b058c771ac3f528b7e9fb8130b123536abf0a15a0b)
+  +       100000  ironwood:5 External dig round 0 tile 1 (d2ddb7cbbc03576e81a47004cdda8e3e3f224a3fc300bd00f4615b615a3ad723)
+  +       100000  ironwood:6 External dig round 0 tile 6 (9096aedaaacd646225aa12ce4e8c99b86e507cfab694d461b6e94840ce0c4837)
+  +       100000  ironwood:7 External dig round 0 tile 3 (cd9f197346b5de888c0c65c16c44825520b40b9244bd0c6f3c264376e79abf0d)
+  +       100000  ironwood:8 External dig round 0 tile 5 (f34a718d379a9d9d8eac0e9d64e3d2cc821da210ebe09fc7c6be8119b6071b16)
+  +       100000  ironwood:9 External dig round 0 tile 0 (cd0f1e75ddf55de5b9e1c6f7cb36f42f79ccf3150d502c70958fc3b2f2daaa0d)
+  =      5530000  balance after this transaction
+h=4499353 tx 29ca62e0928568e80b62c22abd727c3d658f1a97a7e3c2145e30ee18502424aa fee=45000
+  +       100000  ironwood:0 External dig round 0 tile 22 (3b60c13c608cbe01b43957ac58c030376368cb7812b5bf37e70dcfe38a45890e)
+  +       100000  ironwood:1 External dig round 0 tile 19 (7e77367366c7878ab8bb6c2e7614141fd0eb9c78683bb496df11344526acf92d)
+  +       100000  ironwood:3 External dig round 0 tile 20 (4f3b820ece3af9964c47b406908090eb0f4efb08677441aa8be27890b3ade624)
+  +       100000  ironwood:4 External dig round 0 tile 24 (d39d91676ec9d031d7a420a806103b43d3fe4aeb0249d030bfeff62355710c2c)
+  +       100000  ironwood:5 External dig round 0 tile 21 (90af62637c2e33c8875f115a180b7e08dec0ad54598de635526b121984f93713)
+  +       100000  ironwood:6 External dig round 0 tile 18 (f1fd7bd69218aaa953bb83fad05bcb162e26cc4b86a4d52cedacb64475053d2e)
+  +       100000  ironwood:7 External dig round 0 tile 23 (e8ff6c568a3da0371d9baf841ad9fc128fdbff29c6a7a40be0f21004b3672627)
+  +       100000  ironwood:8 External dig round 0 tile 17 (44f80d4cee37c4deb360db0830a2e9ebf17f13c80ff8074c9a6f983801d21419)
+  =      6330000  balance after this transaction
+h=4499353 tx e25af791902ea4908cca6c0b25fa4408e3a2d702215f0969fa28446e3b52b8a7 fee=45000
+  +       100000  ironwood:0 External dig round 0 tile 12 (377c4af3b5ad2fd21462c150baefc00b042a393f7dc201600e7defb4a64ff81c)
+  +       100000  ironwood:1 External dig round 0 tile 15 (5e94720df6a623907c7e272b9d3571ee4758431be53effc69de7db234940990e)
+  +       100000  ironwood:2 External dig round 0 tile 13 (cf692fb65d8b3a04eeac79cc9a87cae1b66ca6066cfdafef991be497ca56e111)
+  +       100000  ironwood:3 External dig round 0 tile 14 (74f6882dda8968c4bbc03a59b393686b1dba92d28f29bb90fa371ea37652b022)
+  +       100000  ironwood:5 External dig round 0 tile 10 (e1fd050411856d7cdddca36f6e755f1f8f14ec3a107a7a6e8421c429d87b7f01)
+  +       100000  ironwood:6 External dig round 0 tile 16 (70ec1b6a52c6c6e316737693a6896d838f72044f7afe9ef186ab04658be4f422)
+  +       100000  ironwood:7 External dig round 0 tile 11 (fd53c8fe84b516b027fc87c042f6ca1ae13750587309492008663dec4a91d433)
+  +       100000  ironwood:8 External dig round 0 tile 9 (0083da016e9aa691daa30a61170873f61aa4d61cb11d4594388ab85657b82e3e)
+  =      7130000  balance after this transaction
+h=4499408 tx 7744d648f786070d40f2bf070b1b76f6946460ccad853bdbb538e19c7e6402dc fee=10000
+  +      2250000  ironwood:1 Internal empty memo (1b64d31485abaca08af9e45776cad340811b1ecaeb03b155b82673a35f215c3b)
+  -      4630000  spent 18bd62f74af98c35:0 (received at h=4499342, memo "zeek vault migration to DKG vault")
+  >      2370000  paid out, memo "Zeek round 0: treasure"
+  =      4750000  balance after this transaction
+h=4499528 tx a99a13e9d3e57ca51a8a1d0e49207c7f41cc551040993630f183e1435e6d082c fee=130000
+  +       100000  ironwood:0 External dig round 7 tile 10 (fe539f88c2aa1ee9b514d42bdafbc25eba03c71201eef84fc1ec97f1e05eac09)
+  +       100000  ironwood:1 External dig round 7 tile 8 (edddee7cae84c6c386e355416999cf283566ea8d75fec96c78cf12bf1829562b)
+  +       100000  ironwood:2 External dig round 7 tile 3 (795fa1255e2eca5dfeade1a58e5e90444a1f98f539555135c266ab610bec8122)
+  +       100000  ironwood:3 External dig round 7 tile 12 (b69e75b474f83f4af6bd7e461b1dfe5e15c964aba04137e93a991d0b4f25d725)
+  +       100000  ironwood:4 External dig round 7 tile 17 (4996b8ee9133d0bfd969072428ff6477caec9f6c0a4c579b853361e1cfee3b26)
+  +       100000  ironwood:5 External dig round 7 tile 16 (db0b2c2471747675eb2adbd92234e3c994aecca148cf84ad6cde8b7a54b97f23)
+  +       100000  ironwood:6 External dig round 7 tile 15 (5f05484e4a0049cb0e3ff3cb484d6bb0923e5f0c2c085eae82ad82b904602c0c)
+  +       100000  ironwood:7 External dig round 7 tile 14 (4f7e820326a60e6b0344a4da7c80771873c5e36fd5f5e5fc68ba9d774325b80e)
+  +       100000  ironwood:8 External dig round 7 tile 6 (16c75654dbe1d4acf3ab1ff2e9f854b32b809f767dd5c86d0f0507f48426b606)
+  +       100000  ironwood:9 External dig round 7 tile 9 (8d8fb7e48ba37c4e6ff18379cc85f161289669a87b6aed7fde26b7f576ea5a0a)
+  +       100000  ironwood:10 External dig round 7 tile 2 (d68aca17c6dd7bb96b018e3a48d562f31f9e18632d7dc1f3148514af5ac91911)
+  +       100000  ironwood:11 External dig round 7 tile 18 (ccfa6512f50401b200d14fddc46e47fb4c59f0e9262c32283cb12ac4fede6f1f)
+  +       100000  ironwood:12 External dig round 7 tile 20 (f85a8bdc5c1ed639ffbe85a46fd31285d862eeb6775cd2741575ad418564a417)
+  +       100000  ironwood:13 External dig round 7 tile 0 (98ef166141253365923919426e07e37555345853f041b5185654e7b58567ce3e)
+  +       100000  ironwood:14 External dig round 7 tile 24 (d79a857ab18c99315993b3c6c0fe4a414556a69784a6f741845e9d944fae3a0b)
+  +       100000  ironwood:15 External dig round 7 tile 19 (fd8d8a5b95fbc9428b1203d9efe3b0e00fc41e12f1e4d33823d40bdaa935c808)
+  +       100000  ironwood:16 External dig round 7 tile 22 (bec6f94cbfd08d34640132b346b15cc50edf4eab087e355fa9c16423d9babe2d)
+  +       100000  ironwood:17 External dig round 7 tile 4 (a37e9a5e8f7da4baf4740239661488a680deaddfd8b09a45990b592a07afb83a)
+  +       100000  ironwood:18 External dig round 7 tile 21 (3684a5903f3c755277aae9bb6a6b7fc1719045a58b8256e81510a745aacf2f16)
+  +       100000  ironwood:19 External dig round 7 tile 13 (8e8669aeb016e4b84511a9592d2fc4436579581c4d7718f0f85bed2e4e74fd02)
+  +       100000  ironwood:21 External dig round 7 tile 11 (3a76747b7bff83c05b8dd6aa195aa10bcc2114e68f80f7d95a04b57532bc3612)
+  +       100000  ironwood:22 External dig round 7 tile 5 (1717e5f90c5cb324c0338fa970d38f6356ea6976633b944c512e227abb35fb2d)
+  +       100000  ironwood:23 External dig round 7 tile 1 (750ba313f12954d157782194ae5a9129b08d856a0cd049c7a05f4df8c2948f08)
+  +       100000  ironwood:24 External dig round 7 tile 23 (b5debce7356be3df488cb97b44dc2867bd75529be4e95d6534abddcb0733293f)
+  +       100000  ironwood:25 External dig round 7 tile 7 (ce482c9cc8160a3178e1bfa011c4e56a7d5f25ba06f1a69ddb45977f887a1813)
+  =      7250000  balance after this transaction
+h=4499541 tx 64b1c352e5b205f345d8287f9fe99349d9658eada4a9741cb091599af74e74c7 fee=10000
+  +       200000  ironwood:0 External dig round 999 tile 4 (e637981224da570378b21405e00caccc83c544a0abba4b531cbc9d8727e5b63e)
+  =      7450000  balance after this transaction
+h=4499567 tx 3bd23cf9cd55ba3611b58efa2de2e7f699de30d14744138071a81b28cac231a1 fee=125000
+  +         5000  ironwood:10 Internal empty memo (e951c38ca2def71586981e26848580afd453526f7ff9e5d177852f1e5b864e35)
+  -       100000  spent e25af791902ea490:3 (received at h=4499353, dig round 0 tile 14)
+  -       100000  spent 29ca62e0928568e8:3 (received at h=4499353, dig round 0 tile 20)
+  -       100000  spent 53857722672b96b2:1 (received at h=4499353, dig round 0 tile 8)
+  -       100000  spent e25af791902ea490:2 (received at h=4499353, dig round 0 tile 13)
+  -       100000  spent e25af791902ea490:0 (received at h=4499353, dig round 0 tile 12)
+  -       100000  spent 53857722672b96b2:3 (received at h=4499353, dig round 0 tile 4)
+  -       100000  spent e25af791902ea490:5 (received at h=4499353, dig round 0 tile 10)
+  -       100000  spent 29ca62e0928568e8:6 (received at h=4499353, dig round 0 tile 18)
+  -       100000  spent 29ca62e0928568e8:1 (received at h=4499353, dig round 0 tile 19)
+  -       100000  spent 53857722672b96b2:6 (received at h=4499353, dig round 0 tile 6)
+  -       100000  spent 29ca62e0928568e8:0 (received at h=4499353, dig round 0 tile 22)
+  -       100000  spent e25af791902ea490:8 (received at h=4499353, dig round 0 tile 9)
+  -       100000  spent e25af791902ea490:1 (received at h=4499353, dig round 0 tile 15)
+  -       100000  spent 53857722672b96b2:7 (received at h=4499353, dig round 0 tile 3)
+  -       100000  spent 29ca62e0928568e8:4 (received at h=4499353, dig round 0 tile 24)
+  -       100000  spent e25af791902ea490:6 (received at h=4499353, dig round 0 tile 16)
+  -       100000  spent e25af791902ea490:7 (received at h=4499353, dig round 0 tile 11)
+  -       100000  spent 53857722672b96b2:5 (received at h=4499353, dig round 0 tile 1)
+  -       100000  spent 53857722672b96b2:9 (received at h=4499353, dig round 0 tile 0)
+  -       100000  spent 53857722672b96b2:4 (received at h=4499353, dig round 0 tile 2)
+  -       100000  spent 53857722672b96b2:8 (received at h=4499353, dig round 0 tile 5)
+  -       100000  spent 53857722672b96b2:0 (received at h=4499353, dig round 0 tile 7)
+  -       100000  spent 29ca62e0928568e8:5 (received at h=4499353, dig round 0 tile 21)
+  -       100000  spent 29ca62e0928568e8:8 (received at h=4499353, dig round 0 tile 17)
+  -       100000  spent 29ca62e0928568e8:7 (received at h=4499353, dig round 0 tile 23)
+  >      2370000  paid out, memo "Zeek round 7: treasure"
+  =      4955000  balance after this transaction
+h=4499598 tx dbcefc218cdf270d0b98339277f2e76fe96d60b5119be74f3583673f2faf18b1 fee=10000
+  +      2045000  ironwood:0 Internal empty memo (7d98e23bb9cef63cff4d015445bc1de4407a90d0905e730faa63c058a56d2c13)
+  -      2250000  spent 7744d648f786070d:1 (received at h=4499408, empty memo)
+  >       195000  paid out, memo "Zeek round 8: refund"
+  =      4750000  balance after this transaction
+h=4499739 tx d109c63b51ae15ed588d64cfe512a8b6711a38799134a08562a3bc0d2501e8b7 fee=45000
+  +       100000  ironwood:0 External dig round 16 tile 23 (c4839047e37ef3acd9b26e9ec6834d4b37906324d5e94dc55f89152ea587ae39)
+  +       100000  ironwood:1 External dig round 16 tile 17 (b219e650a38a8aa837d27a8f25a10e597f34c5e30ac276586709863ff12c110b)
+  +       100000  ironwood:2 External dig round 16 tile 21 (592407bc1f9f8b42a38a95428ea4b5070dae92494e5a3f36e5fa93f31e267524)
+  +       100000  ironwood:3 External dig round 16 tile 24 (3948fe40e0770471eea7e70da51792f587d6ef25b32e3dfa4e284b01e5fa912e)
+  +       100000  ironwood:4 External dig round 16 tile 22 (55ae3c05861be5b96a2be6639e2b96b9993dd53ad3a2198cac173390a56e233b)
+  +       100000  ironwood:5 External dig round 16 tile 18 (3361dca6f80e6a7983869193166427e53acf8524dbb6bede0b6ea09809109013)
+  +       100000  ironwood:6 External dig round 16 tile 20 (de7652d80a0b83e70a2c46a060320eb400888e9f4b7ccaf0b6bf7f850c40ef12)
+  +       100000  ironwood:7 External dig round 16 tile 19 (aef4f89ca3d0c55526838396010f80541426987e543f9845169f8586ae060235)
+  =      5550000  balance after this transaction
+h=4499739 tx a25939a028e74192b141e5e155ad19e98ce6e8169b5d64faec2b17f44fbdfe34 fee=45000
+  +       100000  ironwood:0 External dig round 16 tile 9 (d51ca2835b1ce41143994020f094341a555fc67b39bc02d0a9370bf7865f6517)
+  +       100000  ironwood:1 External dig round 16 tile 16 (3a9725754d5097dc6e3b2b2e43ca81710c8a2d4bf2293454f83ab703adaaab1d)
+  +       100000  ironwood:2 External dig round 16 tile 14 (de2f8e6e72ae5c31db73f7e57966cb84658abe9fcabe5ea78611a7269b74ea05)
+  +       100000  ironwood:3 External dig round 16 tile 13 (cc5ad4ad7d8d1db435a3a37ef3e42c9f93b94d636d4f28632236df21b7adc227)
+  +       100000  ironwood:5 External dig round 16 tile 12 (6902c182c2644c2c79814e347ab2646c1c1ea1ae1e9c34ea15f5630490572115)
+  +       100000  ironwood:6 External dig round 16 tile 11 (908abff19d24251ddfc2f5927df39e4be2bddd21b55caa2a77ef759c82e76631)
+  +       100000  ironwood:7 External dig round 16 tile 10 (dbe902007eae5a6aea95da594211e2ff6ae7896e8171e9e96cc14713dbccb12e)
+  +       100000  ironwood:8 External dig round 16 tile 15 (96692b1e7d4488da334f850a4b376f70ddf54728a74fc4742e8b9dc1b2677f29)
+  =      6350000  balance after this transaction
+h=4499739 tx e4cb8a1397d7498a0fece6797ccb5f83973245f93ddf42cab907f3045105df57 fee=50000
+  +       100000  ironwood:0 External dig round 16 tile 2 (1d4a7b8e6e69c47484cdf3d86bfc9fc7607f807904b8d5b32cf4b808a19bf405)
+  +       100000  ironwood:1 External dig round 16 tile 0 (513fa1cecfdaa0dfb34f2e7c9fbd899de6b74cdcd09732379b6069658e956c28)
+  +       100000  ironwood:3 External dig round 16 tile 7 (87d2534e77c5e79e108faf3c362dfcd07ec6fdaa6c16f1cb82caf046a65fa909)
+  +       100000  ironwood:4 External dig round 16 tile 4 (b2218ee10a1494fe9b3f2af76da859718ea883fbcc98bfa90c00fba4001c2d39)
+  +       100000  ironwood:5 External dig round 16 tile 6 (c6de97f3ce68098e34d034a345d63ae4d68266229ebf1580567b4cf4a121d806)
+  +       100000  ironwood:6 External dig round 16 tile 3 (79055aa9c665c686603d44ae9b00f393806f0a20ec09317a7b80b95009b4be0c)
+  +       100000  ironwood:7 External dig round 16 tile 1 (8cb8bc80cea8ab74aa760a31fe1dd126da5877ab64a7de86a73e7b9c41563d27)
+  +       100000  ironwood:8 External dig round 16 tile 8 (8af0e801d86fb3201242defa0af471ab3f69c2794be3c7730bbbc1cd17bea80b)
+  +       100000  ironwood:9 External dig round 16 tile 5 (2c0400fe1d792b5b8f768eede65fe982ac867019c0fef66c3f244927d9dfbf06)
+  =      7250000  balance after this transaction
+h=4499756 tx 91bc1c12cc7389a788dd720712e61a6fcbc28942449f6bae094bfea077d1715e fee=130000
+  +       100000  ironwood:0 External dig round 17 tile 9 (cbdc5e61c46f6a341ae59e54585c7865ddd12d2c5a78d641945d6ceb9de1c123)
+  +       100000  ironwood:1 External dig round 17 tile 16 (77d79650d585e8941e627cd83067323480484e5246d274d57859becb911c6727)
+  +       100000  ironwood:2 External dig round 17 tile 11 (c50b47a7b1fff5037f0de4ffa970ce85fa30e717ae55dd47f31023c290a28327)
+  +       100000  ironwood:3 External dig round 17 tile 17 (611204fe21bf503885c3df3f84e58c5449392c96c88cf40276b45359a1c6dd2f)
+  +       100000  ironwood:4 External dig round 17 tile 3 (a05a9d572953daff8a0b750f0738cfc94f7563eb175e36af261ac98a0a7faa13)
+  +       100000  ironwood:5 External dig round 17 tile 22 (71952fb283e7683ea56e86d223640ec4259103f737d21848ae31d227d19e5a19)
+  +       100000  ironwood:6 External dig round 17 tile 21 (7a9ddff3c5ae726a1f34454f0f5b3f9bc596f7fc083130dd4b2b2a8d526cc43d)
+  +       100000  ironwood:7 External dig round 17 tile 13 (997f61750f9ef9b65ab21c8fd0e53439a6c7bfd7497ba272b93e4a20e0d7a13b)
+  +       100000  ironwood:8 External dig round 17 tile 8 (a455578a85c6a6514ca284fb1271940aa41e72e41c868bd1b0b1e7d2c9c8bd21)
+  +       100000  ironwood:9 External dig round 17 tile 23 (033153b6d239dea1f0d977b996a02233e0b0c8105deab559c57f051f6f804b06)
+  +       100000  ironwood:10 External dig round 17 tile 10 (8228bb1652d6402dc4e7476b4148a1ef6693c3d0ac4125a1186cf786144db624)
+  +       100000  ironwood:11 External dig round 17 tile 15 (355a8bc601e265d111d004a6c80c62f33eb69aa1ecb5a3a8bbdaa881720adb3a)
+  +       100000  ironwood:12 External dig round 17 tile 6 (3f989c93d132db5ab9ca9c4b5877ba8864037d7530864b4316a7df1ca2a6463e)
+  +       100000  ironwood:13 External dig round 17 tile 14 (fa6a0160548d6d4dff5617fbc8e49b53dd82d4470f0f93a76b23e293cbfa5020)
+  +       100000  ironwood:14 External dig round 17 tile 4 (73f5c30972a55ae2025297242ba415a92f5e65886e1a23baccbc5d2678308e26)
+  +       100000  ironwood:15 External dig round 17 tile 24 (a98484b58f2516cbf80a2d8eeef3ee6586be24c6a2bb890eb3d83c8bfc019408)
+  +       100000  ironwood:16 External dig round 17 tile 5 (3a384574f131edafc3dbc07eb2b6bdfc97d7575f4f04aff169eac06111c73805)
+  +       100000  ironwood:17 External dig round 17 tile 12 (85e4284fd1274151b59dd995dff87ad58072060b9b7eee55447c0093e29aec3b)
+  +       100000  ironwood:18 External dig round 17 tile 2 (1ca463664d5ec733001681058f77ad615347ba587c2e2a8f1fcbd069fec40235)
+  +       100000  ironwood:20 External dig round 17 tile 7 (3d70d2dd3c7da74c5341762c838a464c596ba74895577784510b0ae36d904d27)
+  +       100000  ironwood:21 External dig round 17 tile 19 (2e2b8a7bd2bf2c28a9fca5a2dcf1b8135bc0dd7aca840602a2e1f487f9031706)
+  +       100000  ironwood:22 External dig round 17 tile 0 (81c6585353abdcb9a022854ea441dc5dd10533046328d9710438b47e43493230)
+  +       100000  ironwood:23 External dig round 17 tile 1 (6f3417f6ecd3c943d14914823974ef64ef5d7a026bdb673a9a743111151a651f)
+  +       100000  ironwood:24 External dig round 17 tile 20 (96ce9e6a3c9012fe0fb6db7ad23b6a0d8464e3b54543d0c10136ba73e006d205)
+  +       100000  ironwood:25 External dig round 17 tile 18 (1ede3cfee65e5538db3d4d03ef51425bbef432adc7dd66f9dfe4fb24a0094d17)
+  =      9750000  balance after this transaction
+h=4499789 tx 9a8ea08341294d4103b2a1fadb0f87f3d3950711e3433115ba55a1a2b2058928 fee=125000
+  +       123750  ironwood:10 Internal empty memo (98403083f89a5cfc4e692b04e7c6e21d7a8292b1cfdb534d2e6c2ba217513f1c)
+  -       100000  spent d109c63b51ae15ed:2 (received at h=4499739, dig round 16 tile 21)
+  -       100000  spent a25939a028e74192:8 (received at h=4499739, dig round 16 tile 15)
+  -       100000  spent a25939a028e74192:0 (received at h=4499739, dig round 16 tile 9)
+  -       100000  spent e4cb8a1397d7498a:4 (received at h=4499739, dig round 16 tile 4)
+  -       100000  spent d109c63b51ae15ed:1 (received at h=4499739, dig round 16 tile 17)
+  -       100000  spent e4cb8a1397d7498a:8 (received at h=4499739, dig round 16 tile 8)
+  -       100000  spent d109c63b51ae15ed:6 (received at h=4499739, dig round 16 tile 20)
+  -       100000  spent a25939a028e74192:3 (received at h=4499739, dig round 16 tile 13)
+  -       100000  spent d109c63b51ae15ed:7 (received at h=4499739, dig round 16 tile 19)
+  -       100000  spent e4cb8a1397d7498a:0 (received at h=4499739, dig round 16 tile 2)
+  -       100000  spent d109c63b51ae15ed:3 (received at h=4499739, dig round 16 tile 24)
+  -       100000  spent e4cb8a1397d7498a:1 (received at h=4499739, dig round 16 tile 0)
+  -       100000  spent e4cb8a1397d7498a:9 (received at h=4499739, dig round 16 tile 5)
+  -       100000  spent a25939a028e74192:7 (received at h=4499739, dig round 16 tile 10)
+  -       100000  spent a25939a028e74192:2 (received at h=4499739, dig round 16 tile 14)
+  -       100000  spent d109c63b51ae15ed:4 (received at h=4499739, dig round 16 tile 22)
+  -       100000  spent a25939a028e74192:1 (received at h=4499739, dig round 16 tile 16)
+  -       100000  spent e4cb8a1397d7498a:3 (received at h=4499739, dig round 16 tile 7)
+  -       100000  spent e4cb8a1397d7498a:6 (received at h=4499739, dig round 16 tile 3)
+  -       100000  spent d109c63b51ae15ed:0 (received at h=4499739, dig round 16 tile 23)
+  -       100000  spent a25939a028e74192:5 (received at h=4499739, dig round 16 tile 12)
+  -       100000  spent e4cb8a1397d7498a:7 (received at h=4499739, dig round 16 tile 1)
+  -       100000  spent e4cb8a1397d7498a:5 (received at h=4499739, dig round 16 tile 6)
+  -       100000  spent a25939a028e74192:6 (received at h=4499739, dig round 16 tile 11)
+  -       100000  spent d109c63b51ae15ed:5 (received at h=4499739, dig round 16 tile 18)
+  >      2251250  paid out, memo "Zeek round 16: treasure"
+  =      7373750  balance after this transaction
+h=4499806 tx 003117e43a249460db9b295a82d0761a30da126145af927bbbd57a23cf20d3b3 fee=125000
+  +       123750  ironwood:4 Internal empty memo (7996147981273975405c35def29e44cdbb5cc5b3536c4b78f6ae88e9c115ba11)
+  -       100000  spent 91bc1c12cc7389a7:10 (received at h=4499756, dig round 17 tile 10)
+  -       100000  spent 91bc1c12cc7389a7:24 (received at h=4499756, dig round 17 tile 20)
+  -       100000  spent 91bc1c12cc7389a7:12 (received at h=4499756, dig round 17 tile 6)
+  -       100000  spent 91bc1c12cc7389a7:6 (received at h=4499756, dig round 17 tile 21)
+  -       100000  spent 91bc1c12cc7389a7:11 (received at h=4499756, dig round 17 tile 15)
+  -       100000  spent 91bc1c12cc7389a7:15 (received at h=4499756, dig round 17 tile 24)
+  -       100000  spent 91bc1c12cc7389a7:21 (received at h=4499756, dig round 17 tile 19)
+  -       100000  spent 91bc1c12cc7389a7:25 (received at h=4499756, dig round 17 tile 18)
+  -       100000  spent 91bc1c12cc7389a7:2 (received at h=4499756, dig round 17 tile 11)
+  -       100000  spent 91bc1c12cc7389a7:0 (received at h=4499756, dig round 17 tile 9)
+  -       100000  spent 91bc1c12cc7389a7:5 (received at h=4499756, dig round 17 tile 22)
+  -       100000  spent 91bc1c12cc7389a7:9 (received at h=4499756, dig round 17 tile 23)
+  -       100000  spent 91bc1c12cc7389a7:17 (received at h=4499756, dig round 17 tile 12)
+  -       100000  spent 91bc1c12cc7389a7:20 (received at h=4499756, dig round 17 tile 7)
+  -       100000  spent 91bc1c12cc7389a7:7 (received at h=4499756, dig round 17 tile 13)
+  -       100000  spent 91bc1c12cc7389a7:16 (received at h=4499756, dig round 17 tile 5)
+  -       100000  spent 91bc1c12cc7389a7:14 (received at h=4499756, dig round 17 tile 4)
+  -       100000  spent 91bc1c12cc7389a7:1 (received at h=4499756, dig round 17 tile 16)
+  -       100000  spent 91bc1c12cc7389a7:4 (received at h=4499756, dig round 17 tile 3)
+  -       100000  spent 91bc1c12cc7389a7:8 (received at h=4499756, dig round 17 tile 8)
+  -       100000  spent 91bc1c12cc7389a7:23 (received at h=4499756, dig round 17 tile 1)
+  -       100000  spent 91bc1c12cc7389a7:18 (received at h=4499756, dig round 17 tile 2)
+  -       100000  spent 91bc1c12cc7389a7:3 (received at h=4499756, dig round 17 tile 17)
+  -       100000  spent 91bc1c12cc7389a7:22 (received at h=4499756, dig round 17 tile 0)
+  -       100000  spent 91bc1c12cc7389a7:13 (received at h=4499756, dig round 17 tile 14)
+  >      2251250  paid out, memo "Zeek round 17: treasure"
+  =      4997500  balance after this transaction
+unspent notes: 30 totalling 4997500
+        123750  003117e43a249460:4 h=4499806 Internal empty memo
+          5000  3bd23cf9cd55ba36:10 h=4499567 Internal empty memo
+        200000  64b1c352e5b205f3:0 h=4499541 External dig round 999 tile 4
+        123750  9a8ea08341294d41:10 h=4499789 Internal empty memo
+        100000  a99a13e9d3e57ca5:0 h=4499528 External dig round 7 tile 10
+        100000  a99a13e9d3e57ca5:1 h=4499528 External dig round 7 tile 8
+        100000  a99a13e9d3e57ca5:2 h=4499528 External dig round 7 tile 3
+        100000  a99a13e9d3e57ca5:3 h=4499528 External dig round 7 tile 12
+        100000  a99a13e9d3e57ca5:4 h=4499528 External dig round 7 tile 17
+        100000  a99a13e9d3e57ca5:5 h=4499528 External dig round 7 tile 16
+        100000  a99a13e9d3e57ca5:6 h=4499528 External dig round 7 tile 15
+        100000  a99a13e9d3e57ca5:7 h=4499528 External dig round 7 tile 14
+        100000  a99a13e9d3e57ca5:8 h=4499528 External dig round 7 tile 6
+        100000  a99a13e9d3e57ca5:9 h=4499528 External dig round 7 tile 9
+        100000  a99a13e9d3e57ca5:10 h=4499528 External dig round 7 tile 2
+        100000  a99a13e9d3e57ca5:11 h=4499528 External dig round 7 tile 18
+        100000  a99a13e9d3e57ca5:12 h=4499528 External dig round 7 tile 20
+        100000  a99a13e9d3e57ca5:13 h=4499528 External dig round 7 tile 0
+        100000  a99a13e9d3e57ca5:14 h=4499528 External dig round 7 tile 24
+        100000  a99a13e9d3e57ca5:15 h=4499528 External dig round 7 tile 19
+        100000  a99a13e9d3e57ca5:16 h=4499528 External dig round 7 tile 22
+        100000  a99a13e9d3e57ca5:17 h=4499528 External dig round 7 tile 4
+        100000  a99a13e9d3e57ca5:18 h=4499528 External dig round 7 tile 21
+        100000  a99a13e9d3e57ca5:19 h=4499528 External dig round 7 tile 13
+        100000  a99a13e9d3e57ca5:21 h=4499528 External dig round 7 tile 11
+        100000  a99a13e9d3e57ca5:22 h=4499528 External dig round 7 tile 5
+        100000  a99a13e9d3e57ca5:23 h=4499528 External dig round 7 tile 1
+        100000  a99a13e9d3e57ca5:24 h=4499528 External dig round 7 tile 23
+        100000  a99a13e9d3e57ca5:25 h=4499528 External dig round 7 tile 7
+       2045000  dbcefc218cdf270d:0 h=4499598 Internal empty memo
+-- reconciliation against data/zeek-engine.sqlite
+round 0: 25 notes in window [4499347, 4499371) match the engine (rules v1, pot 2500000, fees 5000, paid 2370000, cache 1200000 -> 1325000)
+  payout tx 7744d648f786070d40f2bf070b1b76f6946460ccad853bdbb538e19c7e6402dc at h=4499408: chain fee 10000 vs recorded 10000 ok
+  fee coverage: collected 5000, fee 10000, deficit 5000 (paid from the operator float)
+  outputs recovered with the outgoing viewing key [2370000] vs settlement nets [2370000] ok
+  inputs 1 notes totalling 4630000; change [2250000]
+round 1: 0 notes in window [4499371, 4499395) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 2: 0 notes in window [4499395, 4499419) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 3: 0 notes in window [4499419, 4499443) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 4: 0 notes in window [4499443, 4499467) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 5: 0 notes in window [4499467, 4499491) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 6: 0 notes in window [4499491, 4499515) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1325000 -> 1325000)
+round 7: 25 notes in window [4499515, 4499539) match the engine (rules v1, pot 2500000, fees 5000, paid 2370000, cache 1325000 -> 1450000)
+  payout tx 3bd23cf9cd55ba3611b58efa2de2e7f699de30d14744138071a81b28cac231a1 at h=4499567: chain fee 125000 vs recorded 125000 ok
+  fee coverage: collected 5000, fee 125000, deficit 120000 (paid from the operator float)
+  outputs recovered with the outgoing viewing key [2370000] vs settlement nets [2370000] ok
+  inputs 25 notes totalling 2500000; change [5000]
+round 8: 1 notes in window [4499539, 4499563) match the engine (rules v1, pot 0, fees 5000, paid 195000, cache 1450000 -> 1450000)
+  payout tx dbcefc218cdf270d0b98339277f2e76fe96d60b5119be74f3583673f2faf18b1 at h=4499598: chain fee 10000 vs recorded 10000 ok
+  fee coverage: collected 5000, fee 10000, deficit 5000 (paid from the operator float)
+  outputs recovered with the outgoing viewing key [195000] vs settlement nets [195000] ok
+  inputs 1 notes totalling 2250000; change [2045000]
+round 9: 0 notes in window [4499563, 4499587) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 10: 0 notes in window [4499587, 4499611) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 11: 0 notes in window [4499611, 4499635) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 12: 0 notes in window [4499635, 4499659) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 13: 0 notes in window [4499659, 4499683) match the engine (rules v2, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 14: 0 notes in window [4499683, 4499707) match the engine (rules v2, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 15: 0 notes in window [4499707, 4499731) match the engine (rules v2, pot 0, fees 0, paid 0, cache 1450000 -> 1450000)
+round 16: 25 notes in window [4499731, 4499755) match the engine (rules v2, pot 2375000, fees 130000, paid 2251250, cache 1450000 -> 1568750)
+  payout tx 9a8ea08341294d4103b2a1fadb0f87f3d3950711e3433115ba55a1a2b2058928 at h=4499789: chain fee 125000 vs recorded 125000 ok
+  fee coverage: collected 130000, fee 125000, deficit 0
+  outputs recovered with the outgoing viewing key [2251250] vs settlement nets [2251250] ok
+  inputs 25 notes totalling 2500000; change [123750]
+  rules v2 inputs: 25 charged dig notes all spent; 0 float notes
+round 17: 25 notes in window [4499755, 4499779) match the engine (rules v2, pot 2375000, fees 130000, paid 2251250, cache 1568750 -> 1687500)
+  payout tx 003117e43a249460db9b295a82d0761a30da126145af927bbbd57a23cf20d3b3 at h=4499806: chain fee 125000 vs recorded 125000 ok
+  fee coverage: collected 130000, fee 125000, deficit 0
+  outputs recovered with the outgoing viewing key [2251250] vs settlement nets [2251250] ok
+  inputs 25 notes totalling 2500000; change [123750]
+  rules v2 inputs: 25 charged dig notes all spent; 0 float notes
+18 settled rounds checked
+ledger from the chain balance: vault 4997500 = cache 1687500 + obligations 0 + reserved fees 0 + float 3310000 (shortfall 0)
+-- wallet data at tip 4499802: total 4997500 (spendable 4868750, pending 123750, uneconomic 5000) vs chain 4997500 ok
+
+== vault old-dealer (utest123wq0lx66duqc4n4lwszr5705zh3lyy3c7dn49kjv86decmnft99lvum8cqhfvm9p4k5q2v9qlqxymc75p8kqs2ngjnrmd652stwfjkm)
+h=4498706 tx a01b01693f13094276bf5a10e5cbbb6ed66a9a28c499969b958fae1b03d4f254 fee=10000
+  +     12500000  ironwood:0 External empty memo (b7887e7716789ed1dbf8e078982df8f362626a6e86213b89735aab4e2e5f552c)
+  =     12500000  balance after this transaction
+h=4498917 tx cd7216dac957a9c5ae1ff8528e3e2dee3ff663126a1a252f3697fa3c2d28dce8 fee=10000
+  +        50000  ironwood:0 External memo "zeek first frost spend" (4ecf369da9ad01b9d12dc4ec2b935aaa4510ea991e137319e5cb0a0a16ea3b0e)
+  +     12440000  ironwood:1 Internal empty memo (3543cd7d2d0d8ac81bf0fea8a0151ae25ff8bdafacfcc6a730ba0c12220fc908)
+  -     12500000  spent a01b01693f130942:0 (received at h=4498706, empty memo)
+  =     12490000  balance after this transaction
+h=4499155 tx ae491e50304820f3a0bed3f2beac08899f76f4910dc1033ad434bde05f971328 fee=10000
+  +      9480000  ironwood:1 Internal empty memo (de99e5801c2cbd7ed8267a5b1b7b632549098f97c6e8c003f236adda1c854c21)
+  -        50000  spent cd7216dac957a9c5:0 (received at h=4498917, memo "zeek first frost spend")
+  -     12440000  spent cd7216dac957a9c5:1 (received at h=4498917, empty memo)
+  >      3000000  paid out, memo "zeek player funding"
+  =      9480000  balance after this transaction
+h=4499166 tx 560fbc55fd4c03be996b9fb98397215fdb4defa0b20f8a5b254b6f2f0d2ff34d fee=10000
+  +      6470000  ironwood:1 Internal empty memo (f69c74754ba0d0dc1b808ec9223d37b8ea36af87718d1290c726058524e7751e)
+  -      9480000  spent ae491e50304820f3:1 (received at h=4499155, empty memo)
+  >      3000000  paid out, memo "zeek player funding"
+  =      6470000  balance after this transaction
+h=4499169 tx 795fe04d1a3d65d76f7718d5ab1ebfbb7aaa86cc903dac7cd89d3304a32182a3 fee=10000
+  +      3460000  ironwood:1 Internal empty memo (a53c323ad7f92aca756ae4e26b663d1c87ef74766e37c798178abb0d21762e15)
+  -      6470000  spent 560fbc55fd4c03be:1 (received at h=4499166, empty memo)
+  >      3000000  paid out, memo "zeek player funding"
+  =      3460000  balance after this transaction
+h=4499185 tx 0d1e25c9adce11c45c40488026fde2d1c3c18f2fbe7bda33cc3cbeb6c6e9bdb6 fee=10000
+  +       400000  ironwood:0 External dig round 0 tile 17 (f77799910a6fe1aabf6589e3ef1edffef4d1a7b3ddfdf702af41c686cfbc243f)
+  =      3860000  balance after this transaction
+h=4499185 tx e9dfa444e35a756d5d8323ecc433fdce17a8534a0cb21140c525b69a1fbd61e3 fee=10000
+  +       300000  ironwood:1 External dig round 0 tile 3 (e55cc92408f1869e7d06d450e1f61a4e05f5919e10174b84773fa3d7bfb3440d)
+  =      4160000  balance after this transaction
+h=4499185 tx 7c931d5af8f27aa6bc321b759f1070eb1a55444fafe4eb06631740fa79bfc1cd fee=10000
+  +       500000  ironwood:1 External dig round 0 tile 3 (c26c7bb0bd45d6008d404550bf378f933bed90b30c845e61c8441129474d3502)
+  =      4660000  balance after this transaction
+h=4499195 tx 6a19aedcd97fd104e9840ebf84e86a52e11903360684888b65c1f996af3fdfd9 fee=10000
+  +       200000  ironwood:1 External dig round 5 tile 17 (efcb578037f686258c84d2e8a85527953a06d34ed6a591c6f9d57dc74a7b3c2e)
+  =      4860000  balance after this transaction
+h=4499333 tx ccbe72fbe92eb57ae738a52e89079344aee2f9fc2dddd0b01d49dcbac5438626 fee=10000
+  +      3255000  ironwood:0 Internal empty memo (0815d78b0aed644fd95f2eb57f248e66476f1496d97774c6b07aa8294da4473d)
+  -      3460000  spent 795fe04d1a3d65d7:1 (received at h=4499169, empty memo)
+  >       195000  paid out, memo "Zeek round 0: refund"
+  =      4655000  balance after this transaction
+h=4499342 tx 18bd62f74af98c35bf0a68e49a5c606184f640f812a783dd35871910e6835dc9 fee=25000
+  +            0  ironwood:1 Internal empty memo (6c96cd2bd73c24d3c9c18e7f2aa7103150f732fac6ebf13f97a50fc36f5ffc29)
+  -       500000  spent 7c931d5af8f27aa6:1 (received at h=4499185, dig round 0 tile 3)
+  -       300000  spent e9dfa444e35a756d:1 (received at h=4499185, dig round 0 tile 3)
+  -      3255000  spent ccbe72fbe92eb57a:0 (received at h=4499333, empty memo)
+  -       200000  spent 6a19aedcd97fd104:1 (received at h=4499195, dig round 5 tile 17)
+  -       400000  spent 0d1e25c9adce11c4:0 (received at h=4499185, dig round 0 tile 17)
+  >      4630000  paid out, memo "zeek vault migration to DKG vault"
+  =            0  balance after this transaction
+unspent notes: 1 totalling 0
+             0  18bd62f74af98c35:1 h=4499342 Internal empty memo
+-- reconciliation against data/old-vault/zeek-engine.sqlite
+round 0: 4 notes in window [4499174, 4499198) match the engine (rules v1, pot 1200000, fees 5000, paid 195000, cache 0 -> 1200000)
+  payout tx ccbe72fbe92eb57ae738a52e89079344aee2f9fc2dddd0b01d49dcbac5438626 at h=4499333: chain fee 10000 vs recorded 10000 ok
+  fee coverage: collected 5000, fee 10000, deficit 5000 (paid from the operator float)
+  outputs recovered with the outgoing viewing key [195000] vs settlement nets [195000] ok
+  inputs 1 notes totalling 3460000; change [3255000]
+round 1: 0 notes in window [4499198, 4499222) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1200000 -> 1200000)
+round 2: 0 notes in window [4499222, 4499246) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1200000 -> 1200000)
+round 3: 0 notes in window [4499246, 4499270) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1200000 -> 1200000)
+round 4: 0 notes in window [4499270, 4499294) match the engine (rules v1, pot 0, fees 0, paid 0, cache 1200000 -> 1200000)
+5 settled rounds checked
+ledger from the chain balance: vault 0 = cache 1200000 + obligations 0 + reserved fees 0 + float 0 (shortfall 1200000)
+MISMATCH the vault does not cover its obligations
+-- wallet data/old-vault at tip 4499337: total 0 (spendable 0, pending 0, uneconomic 0) vs chain 0 ok
+-- vault old-dealer: its Cache of 1200000 was carried over to vault dkg (initial_cache_zat 1200000) by tx 18bd62f74af98c35bf0a68e49a5c606184f640f812a783dd35871910e6835dc9 at h=4499342; the shortfall above is that carry-over, not a loss
+
+mismatches: 0

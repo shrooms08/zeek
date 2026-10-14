@@ -1,0 +1,17 @@
+== alice tiles 0,1,2,3,4,5,6,7,8
+Board: round 16 (open) tip 4499733 blocks remaining 21
+Dug tiles [0, 1, 2, 3, 4, 5, 6, 7, 8] for round 16 with 100000 zatoshis each (fee 50000), target height 4499734
+txid: e4cb8a1397d7498a0fece6797ccb5f83973245f93ddf42cab907f3045105df57
+Sealed 9 distinct fresh payout receivers (diversifier indices [4609266919, 4609266920, 4609266921, 4609266922, 4609266923, 4609266924, 4609266925, 4609266926, 4609266927])
+== bob tiles 9,10,11,12,13,14,15,16
+Board: round 16 (open) tip 4499736 blocks remaining 18
+Dug tiles [9, 10, 11, 12, 13, 14, 15, 16] for round 16 with 100000 zatoshis each (fee 45000), target height 4499737
+txid: a25939a028e74192b141e5e155ad19e98ce6e8169b5d64faec2b17f44fbdfe34
+Sealed 8 distinct fresh payout receivers (diversifier indices [4609266934, 4609266935, 4609266936, 4609266937, 4609266938, 4609266939, 4609266940, 4609266941])
+== carol tiles 17,18,19,20,21,22,23,24
+Board: round 16 (open) tip 4499737 blocks remaining 17
+Dug tiles [17, 18, 19, 20, 21, 22, 23, 24] for round 16 with 100000 zatoshis each (fee 45000), target height 4499738
+txid: d109c63b51ae15ed588d64cfe512a8b6711a38799134a08562a3bc0d2501e8b7
+Sealed 8 distinct fresh payout receivers (diversifier indices [4609266947, 4609266948, 4609266949, 4609266950, 4609266951, 4609266952, 4609266953, 4609266954])
+DIGS-DONE
+
