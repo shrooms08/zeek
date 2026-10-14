@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -25,5 +26,9 @@ export default tseslint.config(
   {
     files: ["**/*.js", "**/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    files: ["apps/harness/e2e/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node } },
   },
 );
