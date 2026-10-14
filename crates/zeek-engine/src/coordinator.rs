@@ -215,10 +215,18 @@ impl Coordinator {
                 continue;
             };
             let raw = source.transaction(&internal).await?;
-            let openings = self.openings_of(game, &row.settlement, &txid, height, &raw)?;
-            db.set_payout_openings(round, &openings)?;
-            tracing::info!(round, %txid, height, outputs = openings.outputs.len(), "payout openings recorded");
-            recorded.push(round);
+            // One round that cannot be opened (for example a payout made by an
+            // older vault) must not block the others.
+            match self.openings_of(game, &row.settlement, &txid, height, &raw) {
+                Ok(openings) => {
+                    db.set_payout_openings(round, &openings)?;
+                    tracing::info!(round, %txid, height, outputs = openings.outputs.len(), "payout openings recorded");
+                    recorded.push(round);
+                }
+                Err(e) => {
+                    tracing::warn!(round, %txid, error = %e, "payout openings unavailable for this round")
+                }
+            }
         }
         Ok(recorded)
     }

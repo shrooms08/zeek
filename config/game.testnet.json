@@ -10,6 +10,7 @@
     "marginal_fee_zat": 5000,
     "dig_fee_zat": 5000,
     "text_memo_activation_height": 4500067,
+    "campfire": { "activation_height": 4501339, "min_shout_zat": 50000 },
     "drand": {
       "beacon_id": "quicknet",
       "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
