@@ -422,6 +422,7 @@ pub async fn run(
     let mut mismatches = 0usize;
     let mut vault_files = Vec::with_capacity(specs.len());
     let mut histories = Vec::with_capacity(specs.len());
+    let mut ledgers: Vec<Option<ledger::Ledger>> = Vec::with_capacity(specs.len());
     for spec in specs {
         let vault = SecretsDir::new(&spec.secrets_dir).load_vault()?;
         histories.push(VaultHistory::new(&vault)?);
@@ -515,10 +516,57 @@ pub async fn run(
 
         // Reconciliation against the engine.
         if let (Some(db_path), Some(game_path)) = (&spec.engine_db, &spec.game_config) {
-            mismatches += reconcile(&mut report, history, chain_balance, tip, db_path, game_path)?;
+            let (found, ledger) =
+                reconcile(&mut report, history, chain_balance, tip, db_path, game_path)?;
+            mismatches += found;
+            ledgers.push(Some(ledger));
+        } else {
+            ledgers.push(None);
         }
         if let Some(dir) = &spec.wallet_data_dir {
             mismatches += reconcile_wallet(&mut report, history, chain_balance, dir)?;
+        }
+    }
+
+    // A vault that was emptied into another audited vault has a shortfall of
+    // exactly the Cache it carried over: the receiving game's
+    // `initial_cache_zat` must equal it, and the migration transaction must
+    // appear as a payment in one history and a received note in the other.
+    for (i, (spec, history)) in specs.iter().zip(&histories).enumerate() {
+        let Some(Some(ledger)) = ledgers.get(i) else {
+            continue;
+        };
+        if ledger.shortfall == 0 || ledger.vault_balance != 0 || ledger.shortfall != ledger.cache {
+            continue;
+        }
+        for (j, (other_spec, other)) in specs.iter().zip(&histories).enumerate() {
+            if i == j {
+                continue;
+            }
+            let Some(game_path) = &other_spec.game_config else {
+                continue;
+            };
+            let other_config = GameConfig::load(game_path)?;
+            if other_config.initial_cache_zat != ledger.cache {
+                continue;
+            }
+            let migration = history.txs.iter().find(|tx| {
+                !tx.paid.is_empty() && other.notes.keys().any(|(_, txid, _)| *txid == tx.txid)
+            });
+            if let Some(tx) = migration {
+                let _ = writeln!(
+                    report,
+                    "-- vault {}: its Cache of {} was carried over to vault {} (initial_cache_zat {}) by tx {} at h={}; the shortfall above is that carry-over, not a loss",
+                    spec.name,
+                    ledger.cache,
+                    other_spec.name,
+                    other_config.initial_cache_zat,
+                    tx.txid,
+                    tx.height
+                );
+                mismatches = mismatches.saturating_sub(1);
+                break;
+            }
         }
     }
     let _ = writeln!(report);
@@ -590,6 +638,7 @@ fn pool_name(pool: Pool) -> &'static str {
 
 /// Compares the chain history with the engine database: notes per settled
 /// round, payout transactions (inputs, outputs, fee), and the ledger.
+/// Returns the mismatches found and the ledger computed from the chain balance.
 fn reconcile(
     report: &mut String,
     history: &VaultHistory,
@@ -597,7 +646,7 @@ fn reconcile(
     tip: u32,
     db_path: &Path,
     game_path: &Path,
-) -> Result<usize, EngineError> {
+) -> Result<(usize, ledger::Ledger), EngineError> {
     let mut mismatches = 0usize;
     let config = GameConfig::load(game_path)?;
     let processor = Processor::new(config.clone());
@@ -757,7 +806,7 @@ fn reconcile(
         mismatches += 1;
         let _ = writeln!(report, "MISMATCH the vault does not cover its obligations");
     }
-    Ok(mismatches)
+    Ok((mismatches, ledger))
 }
 
 /// Compares the chain balance with what the vault wallet reports.
