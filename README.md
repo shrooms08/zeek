@@ -58,7 +58,11 @@ crates/zeek-engine  round engine library + `zeek-engine` binary
   src/db.rs         SQLite (blocks, notes, beacons, settlement plans)
   src/api.rs        axum REST + WebSocket
   src/proof.rs      proof bundle + zeek-core-only recomputation (docs/proof-bundle.md)
-crates/zeek-dig     `zeek-dig` test player tool
+  src/relay.rs      chain relay for browser wallets (compact blocks, tree state, tx, broadcast)
+crates/zeek-dig     `zeek-dig` test player tool (also `send`, `pay-uri`, `address --fresh`)
+crates/zeek-pocket  browser wallet core, Rust -> wasm32 (keys, encrypted state, scanning, digs)
+packages/zeek-pocket  TypeScript API over the wasm core in a Web Worker; any-wallet ZIP 321 requests
+apps/harness        Vite DEV HARNESS: Pocket, any-wallet QR, live board (docs/browser-wallet.md)
 config/             committed public game configs (no secrets)
 docs/               proof bundle format and real artifacts of settled rounds
 crates/zeek-vault   library + `zeek-vault` CLI (testnet only)
@@ -200,6 +204,13 @@ an ed25519-signed envelope bound to a session; a coordinator that tampers
 with a payout is refused by every keyholder with the reason logged. The
 `rogue-demo` cargo feature exists only to demonstrate that refusal.
 
+## Playing from a browser (Phase 5)
+
+Any Zcash wallet can dig by paying a ZIP 321 request whose memos use the text
+encoding of rules v3; Zeek Pocket is a shielded wallet that runs entirely in
+the browser. Architecture, threat model, storage format, relay privacy
+trade-offs and how to run the harness: [docs/browser-wallet.md](docs/browser-wallet.md).
+
 ## Privacy: who can learn what
 
 Digs are shielded payments; the only public data is the vault's chain
@@ -239,6 +250,12 @@ Undecodable memos and digs under the minimum are forfeited to the Cache; digs
 for the wrong round, outside the window or in a voided round are refunded
 minus both fees, or forfeited whole when they cannot cover them. Rounds
 settled before rules v2 keep their recorded results (proof bundle version 1).
+From `text_memo_activation_height` (rules v3) a dig memo may also be sent as
+ZIP 302 text, `zeek1:` followed by the unpadded base64url of the binary memo
+without its `0xFF` byte; both encodings decode to the same dig, and a text
+memo before activation is classified exactly as before. The board's
+`prize_pool_zat` is what winners would split now (valid digs minus dig fees,
+minus rake); `gross_dug_zat` is the plain total dug.
 A round is voided when
 the median timestamp of the 11 blocks after its window, plus the assumed
 honest clock skew, is not before the beacon's publication time (see the
@@ -251,6 +268,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo build -p zeek-core --target wasm32-unknown-unknown   # rustup target add wasm32-unknown-unknown
+# browser wallet (see docs/browser-wallet.md for toolchains)
+pnpm build:wasm && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 # network tests (need ZEEK_LIGHTWALLETD_URL):
 cargo test -p zeek-vault --test network -- --ignored --skip funded_vault_send
 ```
