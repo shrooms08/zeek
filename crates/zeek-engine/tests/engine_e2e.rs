@@ -141,9 +141,19 @@ async fn round_is_ingested_settled_served_and_reproducible() {
         panic!("expected a drawn round");
     };
     let s = &row.settlement;
-    assert_eq!(s.pot, 1_200_000);
-    assert_eq!(s.rake, 60_000);
+    assert_eq!(row.rules_version, 2);
+    assert_eq!(
+        s.pot,
+        1_200_000 - 3 * 5_000,
+        "three dig fees come off first"
+    );
+    assert_eq!(s.rake, 59_250);
     assert_eq!(s.forfeited, 200_000, "dust dig and text memo");
+    assert_eq!(
+        s.dig_fees,
+        4 * 5_000,
+        "three valid digs and the paid refund"
+    );
     let refunds: Vec<_> = s
         .payouts
         .iter()
@@ -155,7 +165,15 @@ async fn round_is_ingested_settled_served_and_reproducible() {
         })
         .collect();
     assert_eq!(refunds.len(), 1);
-    assert_eq!(refunds[0].net, 200_000 - 5_000);
+    assert_eq!(refunds[0].net, 200_000 - 5_000 - 5_000);
+    // The payout transaction must spend exactly the four charged notes.
+    let inputs = processor.payout_inputs(&db, &row).expect("inputs");
+    assert_eq!(inputs.len(), 4);
+    assert!(inputs.iter().all(|n| n.value >= 200_000));
+    assert!(inputs
+        .windows(2)
+        .all(|w| (w[0].height, &w[0].txid, w[0].output_index)
+            <= (w[1].height, &w[1].txid, w[1].output_index)));
     let winners = s
         .payouts
         .iter()
@@ -176,6 +194,8 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     let round_view = round_response(&processor, &db, 0).expect("round view");
     assert_eq!(round_view.status, RoundStatus::Settled);
     let settled = round_view.settled.as_ref().expect("settled view");
+    assert_eq!(settled.rules_version, 2);
+    assert_eq!(settled.dig_fees, 20_000);
     assert_eq!(settled.tile_totals[3], 800_000);
     assert_eq!(settled.tile_totals[17], 400_000);
     assert_eq!(settled.treasure_tile, Some(treasure_tile));
@@ -273,7 +293,7 @@ async fn cache_carry_over_is_the_first_previous_cache() {
     let row = db.settlement(0).expect("row").expect("settled");
     assert_eq!(row.settlement.previous_cache, 777_000);
     assert!(
-        row.settlement.new_cache >= 777_000 + 60_000,
+        row.settlement.new_cache >= 777_000 + 59_250,
         "rake lands on top of the carry-over"
     );
     let bundle = proof_response(&processor, &db, 0)

@@ -17,8 +17,8 @@ use zeek_core::timing::TimingVerdict;
 
 use crate::error::EngineError;
 
-/// Schema version written to `meta`.
-pub const SCHEMA_VERSION: u32 = 1;
+/// Schema version written to `meta`. Version 2 added `notes.cmx`.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// A stored block header summary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,7 +33,7 @@ pub struct BlockRow {
 }
 
 /// Pool a note was received in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Pool {
     Ironwood,
@@ -69,6 +69,10 @@ pub struct NoteRow {
     pub value: u64,
     /// The full 512-byte memo field.
     pub memo: Vec<u8>,
+    /// Extracted note commitment `cmx` of the output, the public handle a
+    /// payout transaction's spend is matched against. `None` only for rows
+    /// written before schema version 2 and not yet backfilled.
+    pub cmx: Option<[u8; 32]>,
 }
 
 impl NoteRow {
@@ -193,6 +197,9 @@ pub struct SettlementRow {
     pub outcome: RoundOutcome,
     pub settlement: Settlement,
     pub status: PlanStatus,
+    /// Rules the settlement was computed under (1 or 2); rows written before
+    /// rules v2 existed are version 1.
+    pub rules_version: u32,
 }
 
 /// The engine database.
@@ -240,6 +247,7 @@ impl Db {
                  block_time INTEGER NOT NULL,
                  value INTEGER NOT NULL,
                  memo BLOB NOT NULL,
+                 cmx BLOB,
                  UNIQUE (txid, action_index, pool)
              );
              CREATE INDEX IF NOT EXISTS notes_height ON notes (height);
@@ -268,7 +276,8 @@ impl Db {
                  timing TEXT NOT NULL,
                  outcome TEXT NOT NULL,
                  settlement TEXT NOT NULL,
-                 status TEXT NOT NULL
+                 status TEXT NOT NULL,
+                 rules_version INTEGER NOT NULL DEFAULT 1
              );",
         )?;
         conn.execute(
@@ -280,7 +289,16 @@ impl Db {
             [],
             |r| r.get(0),
         )?;
-        if stored != SCHEMA_VERSION.to_string() {
+        if stored == "1" {
+            // Version 1 → 2: note commitments are recorded; existing rows are
+            // backfilled from their transactions by the chain follower.
+            conn.execute_batch(
+                "ALTER TABLE notes ADD COLUMN cmx BLOB;
+                 ALTER TABLE settlements ADD COLUMN rules_version INTEGER NOT NULL DEFAULT 1;
+                 UPDATE meta SET value = '2' WHERE key = 'schema_version';",
+            )?;
+            tracing::info!("engine database migrated from schema 1 to 2 (note commitments)");
+        } else if stored != SCHEMA_VERSION.to_string() {
             return Err(EngineError::Corrupt(format!(
                 "schema version {stored} is not supported (expected {SCHEMA_VERSION})"
             )));
@@ -407,8 +425,8 @@ impl Db {
     /// Stores a note; a note already present (same txid, action, pool) is kept.
     pub fn insert_note(&self, note: &NoteRow) -> Result<bool, EngineError> {
         let inserted = self.conn.execute(
-            "INSERT OR IGNORE INTO notes (txid, action_index, pool, height, block_time, value, memo)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR IGNORE INTO notes (txid, action_index, pool, height, block_time, value, memo, cmx)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 note.txid.as_slice(),
                 note.action_index,
@@ -416,19 +434,26 @@ impl Db {
                 note.height,
                 note.block_time,
                 note.value,
-                note.memo
+                note.memo,
+                note.cmx.map(|c| c.to_vec())
             ],
         )?;
         Ok(inserted == 1)
     }
 
-    /// Notes mined in heights `start..end` (exclusive), in chain order.
-    pub fn notes_in_range(&self, start: u32, end: u32) -> Result<Vec<NoteRow>, EngineError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT txid, action_index, pool, height, block_time, value, memo FROM notes
-             WHERE height >= ?1 AND height < ?2 ORDER BY height, id",
-        )?;
-        let rows = stmt.query_map(params![start, end], |r| {
+    const NOTE_COLUMNS: &'static str =
+        "txid, action_index, pool, height, block_time, value, memo, cmx";
+
+    fn query_notes(
+        &self,
+        where_clause: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<NoteRow>, EngineError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {} FROM notes WHERE {where_clause} ORDER BY height, id",
+            Self::NOTE_COLUMNS
+        ))?;
+        let rows = stmt.query_map(args, |r| {
             Ok((
                 r.get::<_, Vec<u8>>(0)?,
                 r.get::<_, u16>(1)?,
@@ -437,13 +462,20 @@ impl Db {
                 r.get::<_, u64>(4)?,
                 r.get::<_, u64>(5)?,
                 r.get::<_, Vec<u8>>(6)?,
+                r.get::<_, Option<Vec<u8>>>(7)?,
             ))
         })?;
         let mut notes = Vec::new();
         for row in rows {
-            let (txid, action_index, pool, height, block_time, value, memo) = row?;
+            let (txid, action_index, pool, height, block_time, value, memo, cmx) = row?;
             let txid = <[u8; 32]>::try_from(txid.as_slice())
                 .map_err(|_| EngineError::Corrupt("txid is not 32 bytes".into()))?;
+            let cmx = cmx
+                .map(|c| {
+                    <[u8; 32]>::try_from(c.as_slice())
+                        .map_err(|_| EngineError::Corrupt("cmx is not 32 bytes".into()))
+                })
+                .transpose()?;
             notes.push(NoteRow {
                 txid,
                 action_index,
@@ -452,9 +484,47 @@ impl Db {
                 block_time,
                 value,
                 memo,
+                cmx,
             });
         }
         Ok(notes)
+    }
+
+    /// Notes mined in heights `start..end` (exclusive), in chain order.
+    pub fn notes_in_range(&self, start: u32, end: u32) -> Result<Vec<NoteRow>, EngineError> {
+        self.query_notes("height >= ?1 AND height < ?2", &[&start, &end])
+    }
+
+    /// Notes stored before schema version 2, whose commitment is not recorded yet.
+    pub fn notes_without_cmx(&self) -> Result<Vec<NoteRow>, EngineError> {
+        self.query_notes("cmx IS NULL", &[])
+    }
+
+    /// The note with commitment `cmx`, if the vault received it.
+    pub fn note_by_cmx(&self, cmx: &[u8; 32]) -> Result<Option<NoteRow>, EngineError> {
+        Ok(self.query_notes("cmx = ?1", &[&cmx.as_slice()])?.pop())
+    }
+
+    /// Forgets every recorded commitment (simulates a schema-1 database).
+    #[cfg(test)]
+    pub(crate) fn clear_note_commitments(&self) -> Result<(), EngineError> {
+        self.conn.execute("UPDATE notes SET cmx = NULL", [])?;
+        Ok(())
+    }
+
+    /// Records the commitment of a note stored before schema version 2.
+    pub fn set_note_cmx(
+        &self,
+        txid: &[u8; 32],
+        action_index: u16,
+        pool: Pool,
+        cmx: &[u8; 32],
+    ) -> Result<(), EngineError> {
+        self.conn.execute(
+            "UPDATE notes SET cmx = ?1 WHERE txid = ?2 AND action_index = ?3 AND pool = ?4",
+            params![cmx.as_slice(), txid.as_slice(), action_index, pool.as_str()],
+        )?;
+        Ok(())
     }
 
     /// Number of stored notes.
@@ -522,8 +592,9 @@ impl Db {
         let json = |v: &dyn erased::Ser| v.to_json();
         self.conn.execute(
             "INSERT INTO settlements (round, settled_at_height, start_block_time,
-                 post_close_block_times, drand_round, beacon_time, timing, outcome, settlement, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 post_close_block_times, drand_round, beacon_time, timing, outcome, settlement, status,
+                 rules_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 row.round,
                 row.settled_at_height,
@@ -534,7 +605,8 @@ impl Db {
                 json(&row.timing)?,
                 json(&row.outcome)?,
                 json(&row.settlement)?,
-                row.status.as_str()
+                row.status.as_str(),
+                row.rules_version
             ],
         )?;
         Ok(())
@@ -546,7 +618,7 @@ impl Db {
             .conn
             .query_row(
                 "SELECT settled_at_height, start_block_time, post_close_block_times, drand_round,
-                        beacon_time, timing, outcome, settlement, status
+                        beacon_time, timing, outcome, settlement, status, rules_version
                  FROM settlements WHERE round = ?1",
                 params![round],
                 |r| {
@@ -560,6 +632,7 @@ impl Db {
                         r.get::<_, String>(6)?,
                         r.get::<_, String>(7)?,
                         r.get::<_, String>(8)?,
+                        r.get::<_, u32>(9)?,
                     ))
                 },
             )
@@ -575,6 +648,7 @@ impl Db {
                 outcome,
                 settlement,
                 status,
+                rules_version,
             )| {
                 Ok(SettlementRow {
                     round,
@@ -587,6 +661,7 @@ impl Db {
                     outcome: erased::de(&outcome)?,
                     settlement: erased::de(&settlement)?,
                     status: PlanStatus::parse(&status)?,
+                    rules_version,
                 })
             },
         )
@@ -746,19 +821,20 @@ impl Db {
             out.push_str(&row?);
         }
         let mut stmt = self.conn.prepare(
-            "SELECT hex(txid), action_index, pool, height, block_time, value, hex(memo) FROM notes
+            "SELECT hex(txid), action_index, pool, height, block_time, value, hex(memo), hex(coalesce(cmx, x'')) FROM notes
              ORDER BY height, txid, action_index, pool",
         )?;
         for row in stmt.query_map([], |r| {
             Ok(format!(
-                "note {} {} {} {} {} {} {}\n",
+                "note {} {} {} {} {} {} {} {}\n",
                 r.get::<_, String>(0)?,
                 r.get::<_, u16>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, u32>(3)?,
                 r.get::<_, u64>(4)?,
                 r.get::<_, u64>(5)?,
-                r.get::<_, String>(6)?
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?
             ))
         })? {
             out.push_str(&row?);
@@ -782,11 +858,11 @@ impl Db {
         }
         let mut stmt = self.conn.prepare(
             "SELECT round, settled_at_height, start_block_time, post_close_block_times, drand_round,
-                    beacon_time, timing, outcome, settlement, status FROM settlements ORDER BY round",
+                    beacon_time, timing, outcome, settlement, status, rules_version FROM settlements ORDER BY round",
         )?;
         for row in stmt.query_map([], |r| {
             Ok(format!(
-                "settlement {} {} {} {} {} {} {} {} {} {}\n",
+                "settlement {} {} {} {} {} {} {} {} {} {} {}\n",
                 r.get::<_, u32>(0)?,
                 r.get::<_, u32>(1)?,
                 r.get::<_, u64>(2)?,
@@ -796,7 +872,8 @@ impl Db {
                 r.get::<_, String>(6)?,
                 r.get::<_, String>(7)?,
                 r.get::<_, String>(8)?,
-                r.get::<_, String>(9)?
+                r.get::<_, String>(9)?,
+                r.get::<_, u32>(10)?
             ))
         })? {
             out.push_str(&row?);
@@ -856,6 +933,7 @@ mod tests {
             block_time: 1_004,
             value: 100_000,
             memo: vec![0xFF; 512],
+            cmx: None,
         };
         assert!(db.insert_note(&note).expect("insert"));
         assert!(
@@ -864,10 +942,62 @@ mod tests {
         );
         assert_eq!(db.notes_in_range(1, 5).expect("notes"), vec![note.clone()]);
         assert_eq!(note.to_received_note().txid, "07".repeat(32));
+        assert_eq!(db.notes_without_cmx().expect("missing").len(), 1);
+        db.set_note_cmx(&note.txid, 1, Pool::Ironwood, &[9; 32])
+            .expect("backfill");
+        assert!(db.notes_without_cmx().expect("missing").is_empty());
+        assert_eq!(
+            db.note_by_cmx(&[9; 32]).expect("lookup").map(|n| n.value),
+            Some(100_000)
+        );
+        assert!(db.note_by_cmx(&[8; 32]).expect("lookup").is_none());
 
         let affected = db.rollback_to(4).expect("rollback");
         assert!(affected.is_empty());
         assert_eq!(db.tip().expect("tip").map(|b| b.height), Some(3));
         assert_eq!(db.note_count().expect("count"), 0);
+    }
+
+    #[test]
+    fn schema_version_1_is_migrated_in_place() {
+        let conn = Connection::open_in_memory().expect("conn");
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '1');
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY, txid BLOB NOT NULL, action_index INTEGER NOT NULL,
+                 pool TEXT NOT NULL, height INTEGER NOT NULL, block_time INTEGER NOT NULL,
+                 value INTEGER NOT NULL, memo BLOB NOT NULL, UNIQUE (txid, action_index, pool));
+             CREATE TABLE settlements (
+                 round INTEGER PRIMARY KEY, settled_at_height INTEGER NOT NULL,
+                 start_block_time INTEGER NOT NULL, post_close_block_times TEXT NOT NULL,
+                 drand_round INTEGER NOT NULL, beacon_time INTEGER NOT NULL, timing TEXT NOT NULL,
+                 outcome TEXT NOT NULL, settlement TEXT NOT NULL, status TEXT NOT NULL);
+             INSERT INTO notes (txid, action_index, pool, height, block_time, value, memo)
+                 VALUES (x'00', 0, 'ironwood', 5, 1, 7, x'ff');",
+        )
+        .expect("v1 schema");
+        let db = Db::init(conn).expect("migrate");
+        assert_eq!(db.meta("schema_version").expect("meta"), Some("2".into()));
+        assert_eq!(
+            db.conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info('settlements') WHERE name = 'rules_version'",
+                    [],
+                    |r| r.get::<_, u32>(0)
+                )
+                .expect("column"),
+            1,
+            "old settlement rows read back as rules version 1"
+        );
+        // The v1 txid above is 1 byte, so the row is reported as corrupt when
+        // read; the migration itself only adds the column.
+        assert_eq!(
+            db.conn
+                .query_row("SELECT count(*) FROM notes WHERE cmx IS NULL", [], |r| r
+                    .get::<_, u32>(0))
+                .expect("count"),
+            1
+        );
     }
 }

@@ -2,14 +2,15 @@
 //! `docs/examples/`: every `round-<n>.proof.json` is a proof bundle fetched
 //! from a live engine, and `round-<n>.round.json` the matching round view.
 //! The settlement is recomputed from the bundle's inputs with zeek-core only
-//! and must match the engine's byte for byte.
+//! and must match the engine's byte for byte. Version 1 bundles (rules v1,
+//! no dig fee) and version 2 bundles (rules v2) are both covered.
 
 use std::fs;
 use std::path::PathBuf;
 
 use zeek_core::beacon;
 use zeek_engine::api::RoundResponse;
-use zeek_engine::proof::{self, ProofBundle};
+use zeek_engine::proof::{self, ProofBundle, PROOF_VERSION};
 
 fn examples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -23,7 +24,7 @@ fn examples_dir() -> PathBuf {
 fn saved_live_rounds_recompute_byte_for_byte() {
     let dir = examples_dir();
     let mut bundles: Vec<PathBuf> = Vec::new();
-    for sub in [dir.clone(), dir.join("phase4")] {
+    for sub in [dir.clone(), dir.join("phase4"), dir.join("phase4b")] {
         let Ok(entries) = fs::read_dir(&sub) else {
             continue;
         };
@@ -44,9 +45,17 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         dir.display()
     );
 
+    let mut versions_seen = std::collections::BTreeSet::new();
     for path in bundles {
         let text = fs::read_to_string(&path).expect("read bundle");
         let bundle: ProofBundle = serde_json::from_str(&text).expect("parse bundle");
+        versions_seen.insert(bundle.version);
+        assert_eq!(
+            bundle.params.rules_version(),
+            bundle.version,
+            "{}: the bundle version is the rules version",
+            path.display()
+        );
         let recomputed = proof::recompute(&bundle).expect("recompute with zeek-core");
         assert_eq!(
             serde_json::to_string(&recomputed).expect("json"),
@@ -54,15 +63,23 @@ fn saved_live_rounds_recompute_byte_for_byte() {
             "{} does not recompute to the engine's settlement",
             path.display()
         );
-        // The serialized bundle itself must round-trip unchanged.
-        let reserialized: serde_json::Value = serde_json::to_value(&bundle).expect("value");
-        let original: serde_json::Value = serde_json::from_str(&text).expect("value");
-        assert_eq!(
-            reserialized,
-            original,
-            "{} does not round-trip",
-            path.display()
-        );
+        // The bundle must round-trip: byte for byte for the current format,
+        // and as a struct for older formats (re-serializing them adds the
+        // fields later versions introduced, with their v1 values).
+        let reserialized_text = serde_json::to_string(&bundle).expect("json");
+        let reparsed: ProofBundle = serde_json::from_str(&reserialized_text).expect("reparse");
+        assert_eq!(reparsed, bundle, "{} does not round-trip", path.display());
+        if bundle.version == PROOF_VERSION {
+            let reserialized: serde_json::Value =
+                serde_json::from_str(&reserialized_text).expect("value");
+            let original: serde_json::Value = serde_json::from_str(&text).expect("value");
+            assert_eq!(
+                reserialized,
+                original,
+                "{} does not round-trip byte for byte",
+                path.display()
+            );
+        }
 
         // The bound drand round is the one the published beacon carries, and
         // its randomness is sha256(signature).
@@ -88,5 +105,11 @@ fn saved_live_rounds_recompute_byte_for_byte() {
         assert_eq!(settled.payouts, bundle.settlement.payouts);
         assert_eq!(settled.new_cache, bundle.settlement.new_cache);
         assert_eq!(settled.drand_round, bundle.drand_round);
+        assert_eq!(settled.dig_fees, bundle.settlement.dig_fees);
+        assert_eq!(settled.rules_version, bundle.version);
     }
+    assert!(
+        versions_seen.contains(&1),
+        "the Phase 3 and 4 artifacts are version 1 bundles"
+    );
 }

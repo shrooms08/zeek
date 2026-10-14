@@ -11,14 +11,20 @@ use zeek_core::rounds::{self, RoundWindow};
 use zeek_core::settle::{self, RoundOutcome, Settlement};
 use zeek_core::timing::{self, TimingVerdict};
 
-/// Bundle format version.
-pub const PROOF_VERSION: u32 = 1;
+/// Bundle format version. Version 1 bundles were settled under rules v1 (no
+/// dig fee); version 2 bundles under rules v2. The bundle version is the
+/// rules version, and `params.dig_fee_zat` must agree with it.
+pub const PROOF_VERSION: u32 = 2;
+/// Oldest bundle version `recompute` still verifies.
+pub const OLDEST_SUPPORTED_PROOF_VERSION: u32 = 1;
 
 /// A self-contained description of one settled round.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofBundle {
+    /// Bundle format and rules version (1 or 2).
     pub version: u32,
-    /// Game parameters the round was played under.
+    /// Game parameters the round was played under (including the dig fee
+    /// from version 2 on).
     pub params: GameParams,
     pub round: u32,
     pub window: RoundWindow,
@@ -53,6 +59,12 @@ pub struct ProofBundle {
 pub enum ProofError {
     #[error("unsupported proof bundle version {0}")]
     Version(u32),
+    #[error("bundle version {bundle} does not match the rules version {rules} its parameters encode (dig_fee_zat = {dig_fee})")]
+    RulesVersion {
+        bundle: u32,
+        rules: u32,
+        dig_fee: u64,
+    },
     #[error("window does not match the parameters: expected {expected:?}, got {got:?}")]
     Window {
         expected: RoundWindow,
@@ -96,10 +108,17 @@ pub enum ProofError {
 /// `zeek-core`, checking every intermediate claim the bundle makes. Returns
 /// the recomputed settlement; the caller compares it with `bundle.settlement`.
 pub fn recompute(bundle: &ProofBundle) -> Result<Settlement, ProofError> {
-    if bundle.version != PROOF_VERSION {
+    if bundle.version < OLDEST_SUPPORTED_PROOF_VERSION || bundle.version > PROOF_VERSION {
         return Err(ProofError::Version(bundle.version));
     }
     let params = &bundle.params;
+    if params.rules_version() != bundle.version {
+        return Err(ProofError::RulesVersion {
+            bundle: bundle.version,
+            rules: params.rules_version(),
+            dig_fee: params.dig_fee_zat,
+        });
+    }
     let window = rounds::round_window(params, bundle.round)?;
     if window != bundle.window {
         return Err(ProofError::Window {

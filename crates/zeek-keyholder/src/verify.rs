@@ -12,44 +12,55 @@
 //!    outputs equals exactly the payouts and refunds this node's **own**
 //!    settlement computed for the claimed rounds, after opening each sealed
 //!    receiver with the sealing key;
-//! 4. every other value-carrying output goes to the vault's internal-scope
-//!    change address (follows from 3: anything else would be an unexpected
-//!    payout);
-//! 5. the fee equals the ZIP 317 fee for this transaction's action counts;
-//! 6. none of the claimed rounds was signed by this node before;
+//! 4. there is exactly one other value-carrying output and it goes to the
+//!    vault's internal-scope change address;
+//! 5. the inputs are exactly the dig notes the rules charge for the claimed
+//!    rounds ([`zeek_core::settle::payout_inputs`]), plus operator-float notes
+//!    (vault notes that are not digs) only when those dig notes cannot pay the
+//!    outputs and the fee; the fee equals the ZIP 317 fee for the
+//!    transaction's action counts and does not exceed the fees the rules
+//!    collected for those rounds;
+//! 6. none of the claimed rounds was signed by this node before, and each was
+//!    settled under the rules version this node signs for;
 //! 7. the transaction is V6 on the consensus branch of its expiry height,
 //!    and not expired.
 //!
-//! Refusal reasons name the check that failed and never include an opened
-//! receiver.
+//! Refusal reasons name the check that failed and the exact item (output or
+//! input index, round, amounts) and never include an opened receiver or any
+//! secret.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use orchard::keys::{FullViewingKey, Scope, SpendValidatingKey};
+use orchard::note::ExtractedNoteCommitment;
 use orchard::ValuePool;
 use pczt::roles::signer::Signer;
 use pczt::roles::verifier::Verifier;
 use pczt::Pczt;
-use zcash_primitives::transaction::fees::zip317;
-use zcash_primitives::transaction::fees::FeeRule;
 use zcash_primitives::transaction::TxVersion;
 use zcash_protocol::consensus::{BranchId, MAIN_NETWORK, TEST_NETWORK};
 use zeek_core::memo::{DigMemo, ORCHARD_RECEIVER_LEN};
-use zeek_core::params::{GameParams, Network};
+use zeek_core::params::Network;
 use zeek_core::seal::SealingPrivateKey;
+use zeek_core::settle;
 use zeek_engine::db::Db;
+use zeek_engine::processor::Processor;
 use zeek_vault::send::{self, PendingSpend};
 
 use crate::db::NodeDb;
 use crate::error::KeyholderError;
 
+/// Rules version this node signs payouts for.
+pub const SIGNED_RULES_VERSION: u32 = 2;
+
 /// What verification needs.
 pub struct VerifyContext<'a> {
-    pub params: &'a GameParams,
+    /// The game, for the rules and for classifying this node's notes.
+    pub processor: &'a Processor,
     pub fvk: &'a FullViewingKey,
     pub sealing: &'a SealingPrivateKey,
-    /// This node's own chain database (its settlements).
+    /// This node's own chain database (its notes and settlements).
     pub chain: &'a Db,
     /// This node's signing records.
     pub node: &'a NodeDb,
@@ -61,11 +72,51 @@ pub struct Approved {
     pub sighash: [u8; 32],
     pub rounds: Vec<u32>,
     pub payouts: usize,
+    /// Distinct payout receivers among the payouts (never the receivers).
+    pub distinct_receivers: usize,
+    pub charged_inputs: usize,
+    pub float_inputs: usize,
     pub fee: u64,
 }
 
 fn refuse(reason: impl Into<String>) -> KeyholderError {
     KeyholderError::Refused(reason.into())
+}
+
+/// Formats zatoshis with thousands separators, as refusal reasons print them.
+pub fn zat(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A payout this node expects, by its position in a round's settlement.
+struct ExpectedPayout {
+    round: u32,
+    index: usize,
+    receiver: [u8; ORCHARD_RECEIVER_LEN],
+    net: u64,
+}
+
+/// A dig note this node expects to be spent.
+struct ExpectedInput {
+    round: u32,
+    txid: String,
+    output_index: u16,
+    value: u64,
+    cmx: [u8; 32],
+}
+
+/// One spend of the PCZT, as the walk saw it.
+struct SeenSpend {
+    index: usize,
+    cmx: [u8; 32],
 }
 
 /// Runs every check; returns the pending spends to sign on success.
@@ -74,6 +125,7 @@ pub fn verify_payout(
     pczt_bytes: &[u8],
     rounds: &[u32],
 ) -> Result<Approved, KeyholderError> {
+    let params = &ctx.processor.config().params;
     let pczt =
         Pczt::parse(pczt_bytes).map_err(|e| refuse(format!("PCZT does not parse: {e:?}")))?;
 
@@ -89,7 +141,7 @@ pub fn verify_payout(
         )));
     }
     let expiry = effects.expiry_height();
-    let expected_branch = match ctx.params.network {
+    let expected_branch = match params.network {
         Network::Main => BranchId::for_height(&MAIN_NETWORK, expiry),
         Network::Test => BranchId::for_height(&TEST_NETWORK, expiry),
     };
@@ -111,11 +163,16 @@ pub fn verify_payout(
         ));
     }
 
-    // 6. Rounds: settled here, distinct, not signed before.
-    let mut seen = std::collections::BTreeSet::new();
-    let mut expected: Vec<([u8; ORCHARD_RECEIVER_LEN], u64)> = Vec::new();
+    // 6. Rounds: distinct, settled here under the signed rules, not signed before.
+    if rounds.is_empty() {
+        return Err(refuse("no rounds claimed"));
+    }
+    let mut seen_rounds = std::collections::BTreeSet::new();
+    let mut expected_payouts: Vec<ExpectedPayout> = Vec::new();
+    let mut expected_inputs: Vec<ExpectedInput> = Vec::new();
+    let mut collected_fees = 0u64;
     for round in rounds {
-        if !seen.insert(*round) {
+        if !seen_rounds.insert(*round) {
             return Err(refuse(format!("round {round} is listed twice")));
         }
         if let Some(session) = ctx.node.signed_session(*round)? {
@@ -127,23 +184,60 @@ pub fn verify_payout(
             .chain
             .settlement(*round)?
             .ok_or_else(|| refuse(format!("round {round} is not settled on this node")))?;
-        for payout in &row.settlement.payouts {
+        if row.rules_version != SIGNED_RULES_VERSION {
+            return Err(refuse(format!(
+                "round {round} was settled under rules version {}; this node only signs rules version {SIGNED_RULES_VERSION} payouts",
+                row.rules_version
+            )));
+        }
+        for (index, payout) in row.settlement.payouts.iter().enumerate() {
             let memo = DigMemo {
                 round: payout.memo_round,
                 tile: payout.memo_tile,
                 sealed_receiver: payout.sealed_receiver.clone(),
             };
             let receiver = memo
-                .open(ctx.params.network, ctx.sealing)
-                .map_err(|e| refuse(format!("round {round}: a sealed receiver does not open with this node's sealing key ({e})")))?;
-            expected.push((receiver.orchard, payout.net));
+                .open(params.network, ctx.sealing)
+                .map_err(|e| refuse(format!("round {round} payout {index}: the sealed receiver does not open with this node's sealing key ({e})")))?;
+            expected_payouts.push(ExpectedPayout {
+                round: *round,
+                index,
+                receiver: receiver.orchard,
+                net: payout.net,
+            });
+        }
+        collected_fees = collected_fees
+            .checked_add(row.settlement.total_fees)
+            .ok_or_else(|| refuse("collected fees overflow"))?;
+        for note in ctx.processor.payout_inputs(ctx.chain, &row)? {
+            let stored = ctx
+                .chain
+                .notes_in_range(note.height, note.height + 1)?
+                .into_iter()
+                .find(|n| n.txid_hex() == note.txid && n.action_index == note.output_index)
+                .ok_or_else(|| {
+                    refuse(format!(
+                        "dig note {}:{} of round {round} is not in this node's database",
+                        note.txid, note.output_index
+                    ))
+                })?;
+            let cmx = stored.cmx.ok_or_else(|| {
+                refuse(format!(
+                    "dig note {}:{} of round {round} has no recorded note commitment yet (backfill pending)",
+                    note.txid, note.output_index
+                ))
+            })?;
+            expected_inputs.push(ExpectedInput {
+                round: *round,
+                txid: note.txid,
+                output_index: note.output_index,
+                value: note.value,
+                cmx,
+            });
         }
     }
-    if rounds.is_empty() {
-        return Err(refuse("no rounds claimed"));
-    }
 
-    // 1 + 2 + 3: walk every action of both bundles.
+    // 1 + 2: walk every action of both bundles.
     let change_address = ctx
         .fvk
         .address_at(0u32, Scope::Internal)
@@ -151,8 +245,9 @@ pub fn verify_payout(
     let ak = SpendValidatingKey::from(ctx.fvk.clone());
     let mut spent = 0u64;
     let mut out_total = 0u64;
-    let mut found: Vec<([u8; ORCHARD_RECEIVER_LEN], u64)> = Vec::new();
-    let mut change_outputs = 0usize;
+    let mut spends: Vec<SeenSpend> = Vec::new();
+    let mut found: Vec<(usize, [u8; ORCHARD_RECEIVER_LEN], u64)> = Vec::new();
+    let mut change_outputs: Vec<(usize, u64)> = Vec::new();
     let mut action_counts: BTreeMap<ValuePool, usize> = BTreeMap::new();
     let mut failure: Option<String> = None;
     let mut walk = |pool: ValuePool, bundle: &orchard::pczt::Bundle| {
@@ -165,34 +260,48 @@ pub fn verify_payout(
             if !padding_spend {
                 if let Err(e) = spend.verify_nullifier(Some(ctx.fvk)) {
                     failure = Some(format!(
-                        "{pool:?} action {index}: spend is not a note of this vault ({e:?})"
+                        "input {index}: spend is not a note of this vault ({e:?})"
                     ));
                     return;
                 }
                 if let Err(e) = spend.verify_rk(Some(ctx.fvk)) {
                     failure = Some(format!(
-                        "{pool:?} action {index}: spend rk is inconsistent with this vault ({e:?})"
+                        "input {index}: spend rk is inconsistent with this vault ({e:?})"
                     ));
                     return;
                 }
-                match spend.value() {
-                    Some(v) => spent = spent.saturating_add(v.inner()),
-                    None => {
-                        failure = Some(format!("{pool:?} action {index}: spend value is missing"));
-                        return;
-                    }
-                }
+                let (Some(recipient), Some(value), Some(rho), Some(rseed)) =
+                    (spend.recipient(), spend.value(), spend.rho(), spend.rseed())
+                else {
+                    failure = Some(format!("input {index}: spent note fields are missing"));
+                    return;
+                };
+                let note = Option::from(orchard::Note::from_parts(
+                    *recipient,
+                    *value,
+                    *rho,
+                    *rseed,
+                    *spend.note_version(),
+                ));
+                let Some(note) = note else {
+                    failure = Some(format!(
+                        "input {index}: spent note fields do not form a valid note"
+                    ));
+                    return;
+                };
+                let note: orchard::Note = note;
+                let cmx = ExtractedNoteCommitment::from(note.commitment()).to_bytes();
+                spent = spent.saturating_add(value.inner());
+                spends.push(SeenSpend { index, cmx });
             }
             if let Err(e) = output.verify_note_commitment(spend) {
                 failure = Some(format!(
-                    "{pool:?} action {index}: output commitment does not recompute ({e:?})"
+                    "output {index}: note commitment does not recompute ({e:?})"
                 ));
                 return;
             }
             let (Some(recipient), Some(value)) = (output.recipient(), output.value()) else {
-                failure = Some(format!(
-                    "{pool:?} action {index}: output recipient or value missing"
-                ));
+                failure = Some(format!("output {index}: recipient or value missing"));
                 return;
             };
             let value = value.inner();
@@ -202,9 +311,9 @@ pub fn verify_payout(
             }
             let raw = recipient.to_raw_address_bytes();
             if raw == change_address {
-                change_outputs += 1;
+                change_outputs.push((index, value));
             } else {
-                found.push((raw, value));
+                found.push((index, raw, value));
             }
         }
     };
@@ -223,46 +332,127 @@ pub fn verify_payout(
         return Err(refuse(reason));
     }
 
-    // 3. Payout multiset.
-    let mut expected_sorted = expected.clone();
-    expected_sorted.sort();
-    let mut found_sorted = found.clone();
-    found_sorted.sort();
-    if expected_sorted != found_sorted {
-        let sum = |v: &[([u8; 43], u64)]| v.iter().map(|(_, a)| *a).sum::<u64>();
+    // 3. Payouts: each output must be one expected (receiver, amount).
+    let mut unmatched: Vec<&ExpectedPayout> = expected_payouts.iter().collect();
+    for (index, raw, value) in &found {
+        if let Some(pos) = unmatched
+            .iter()
+            .position(|e| e.receiver == *raw && e.net == *value)
+        {
+            unmatched.swap_remove(pos);
+            continue;
+        }
+        if let Some(e) = unmatched.iter().find(|e| e.net == *value) {
+            return Err(refuse(format!(
+                "output {index}: recipient does not match the sealed payout receiver for round {} (amount matches)",
+                e.round
+            )));
+        }
+        if let Some(e) = unmatched.iter().find(|e| e.receiver == *raw) {
+            return Err(refuse(format!(
+                "output {index}: amount {} expected {}",
+                zat(*value),
+                zat(e.net)
+            )));
+        }
         return Err(refuse(format!(
-            "payout set mismatch: this node expects {} output(s) totalling {} zatoshis for rounds {:?}, the PCZT pays {} output(s) totalling {}",
-            expected.len(),
-            sum(&expected),
-            rounds,
-            found.len(),
-            sum(&found)
+            "output {index}: unexpected output of {} zatoshis (not a payout of rounds {rounds:?} nor vault change)",
+            zat(*value)
+        )));
+    }
+    if let Some(e) = unmatched.first() {
+        return Err(refuse(format!(
+            "round {} payout {} (net {}) is not among the outputs",
+            e.round,
+            e.index,
+            zat(e.net)
         )));
     }
 
-    // 5. Fee.
+    // 4. Exactly one change output.
+    if change_outputs.len() != 1 {
+        return Err(refuse(format!(
+            "the transaction has {} outputs to the vault's change address; exactly one is expected",
+            change_outputs.len()
+        )));
+    }
+
+    // 5. Inputs: the charged dig notes, plus float notes only when needed.
+    let mut float_inputs: Vec<&SeenSpend> = Vec::new();
+    let mut matched_inputs = vec![false; expected_inputs.len()];
+    for spend in &spends {
+        if let Some(pos) = expected_inputs.iter().position(|e| e.cmx == spend.cmx) {
+            if matched_inputs[pos] {
+                return Err(refuse(format!(
+                    "input {}: dig note spent twice",
+                    spend.index
+                )));
+            }
+            matched_inputs[pos] = true;
+            continue;
+        }
+        if ctx.chain.note_by_cmx(&spend.cmx)?.is_some() {
+            return Err(refuse(format!(
+                "input {}: note is not a dig of rounds {rounds:?}",
+                spend.index
+            )));
+        }
+        float_inputs.push(spend);
+    }
+    if let Some(pos) = matched_inputs.iter().position(|m| !m) {
+        let e = &expected_inputs[pos];
+        return Err(refuse(format!(
+            "dig note {}:{} of round {} is not spent by the transaction",
+            e.txid, e.output_index, e.round
+        )));
+    }
+    let charged_value = expected_inputs
+        .iter()
+        .try_fold(0u64, |acc, e| acc.checked_add(e.value))
+        .ok_or_else(|| refuse("charged value overflow"))?;
+    let payouts_value = expected_payouts
+        .iter()
+        .try_fold(0u64, |acc, e| acc.checked_add(e.net))
+        .ok_or_else(|| refuse("payout value overflow"))?;
+    let charged_count = u64::try_from(expected_inputs.len()).map_err(|_| refuse("count"))?;
+    let payout_count = u64::try_from(expected_payouts.len()).map_err(|_| refuse("count"))?;
+    if let Some(first_float) = float_inputs.first() {
+        let fee_without_float = settle::zip317_fee(params, charged_count, payout_count + 1)
+            .map_err(|e| refuse(e.to_string()))?;
+        let needed = payouts_value
+            .checked_add(fee_without_float)
+            .ok_or_else(|| refuse("needed value overflow"))?;
+        if charged_value > needed {
+            return Err(refuse(format!(
+                "input {}: float note not needed: the dig notes of rounds {rounds:?} cover the outputs and the fee",
+                first_float.index
+            )));
+        }
+    }
+
+    // Fee: exact for the shape, and within what the rules collected.
     let fee = spent
         .checked_sub(out_total)
         .ok_or_else(|| refuse("outputs exceed spent value"))?;
-    let expected_fee = zip317::FeeRule::standard()
-        .fee_required(
-            &TEST_NETWORK,
-            expiry,
-            core::iter::empty::<zcash_primitives::transaction::fees::transparent::InputSize>(),
-            core::iter::empty::<usize>(),
-            0,
-            0,
-            action_counts.get(&ValuePool::Orchard).copied().unwrap_or(0),
-            action_counts
-                .get(&ValuePool::Ironwood)
-                .copied()
-                .unwrap_or(0),
-        )
-        .map_err(|e| refuse(format!("fee rule error: {e:?}")))?
-        .into_u64();
+    let actions: usize = action_counts.values().sum();
+    let expected_fee = settle::zip317_fee(
+        params,
+        u64::try_from(actions).map_err(|_| refuse("count"))?,
+        0,
+    )
+    .map_err(|e| refuse(e.to_string()))?;
     if fee != expected_fee {
         return Err(refuse(format!(
-            "fee {fee} differs from the ZIP 317 fee {expected_fee}"
+            "fee {} differs from the ZIP 317 fee {} for {actions} actions",
+            zat(fee),
+            zat(expected_fee)
+        )));
+    }
+    if fee > collected_fees {
+        return Err(refuse(format!(
+            "fee {} exceeds the fees collected by the rules for rounds {rounds:?} ({})",
+            zat(fee),
+            zat(collected_fees)
         )));
     }
 
@@ -273,8 +463,7 @@ pub fn verify_payout(
         let expected_rk: [u8; 32] = (&ak.randomize(&spend.alpha)).into();
         if expected_rk != spend.rk {
             return Err(refuse(format!(
-                "{} action {}: rk is not this vault's ak randomized by the action's alpha",
-                zeek_vault::wallet::pool_name(spend.pool),
+                "input {}: rk is not this vault's ak randomized by the action's alpha",
                 spend.index
             )));
         }
@@ -282,11 +471,18 @@ pub fn verify_payout(
     let sighash = Signer::new(pczt)
         .map_err(|e| refuse(format!("signer cannot parse the PCZT: {e:?}")))?
         .shielded_sighash();
+    let mut receivers: Vec<[u8; ORCHARD_RECEIVER_LEN]> =
+        expected_payouts.iter().map(|e| e.receiver).collect();
+    receivers.sort_unstable();
+    receivers.dedup();
     tracing::info!(
         rounds = ?rounds,
         payouts = found.len(),
-        change_outputs,
+        distinct_receivers = receivers.len(),
+        charged_inputs = expected_inputs.len(),
+        float_inputs = float_inputs.len(),
         fee,
+        collected = collected_fees,
         "payout PCZT verified against this node's own settlement"
     );
     Ok(Approved {
@@ -294,6 +490,23 @@ pub fn verify_payout(
         sighash,
         rounds: rounds.to_vec(),
         payouts: found.len(),
+        distinct_receivers: receivers.len(),
+        charged_inputs: expected_inputs.len(),
+        float_inputs: float_inputs.len(),
         fee,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::zat;
+
+    #[test]
+    fn thousands_separators() {
+        assert_eq!(zat(0), "0");
+        assert_eq!(zat(999), "999");
+        assert_eq!(zat(1_000), "1,000");
+        assert_eq!(zat(2_370_000), "2,370,000");
+        assert_eq!(zat(1_234_567_890), "1,234,567,890");
+    }
 }

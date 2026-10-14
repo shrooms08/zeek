@@ -63,6 +63,7 @@ rogue-demo = []
 
 [dev-dependencies]
 zeek-engine = { path = ".", features = ["testkit"] }
+proptest = "1.6"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

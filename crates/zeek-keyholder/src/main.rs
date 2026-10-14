@@ -9,6 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use tokio::sync::{Mutex, RwLock};
 use zeek_engine::config::{GameConfig, DEFAULT_RELAYS};
 use zeek_engine::db::Db;
+use zeek_engine::processor::Processor;
 use zeek_keyholder::api::{router, AppState};
 use zeek_keyholder::config::KeyholderConfig;
 use zeek_keyholder::db::NodeDb;
@@ -134,6 +135,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         config: config.clone(),
         game: game.clone(),
+        processor: Processor::new(game.clone()),
         identity,
         dkg: DkgState::default(),
         signer: SignerState::default(),

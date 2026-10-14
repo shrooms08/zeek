@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use zeek_engine::config::GameConfig;
 use zeek_engine::db::Db;
+use zeek_engine::processor::Processor;
 
 use crate::config::{KeyholderConfig, COORDINATOR_ID};
 use crate::db::NodeDb;
@@ -27,6 +28,8 @@ use zeek_engine::protocol::{
 pub struct AppState {
     pub config: KeyholderConfig,
     pub game: GameConfig,
+    /// Classifies this node's notes for payout verification.
+    pub processor: Processor,
     pub identity: Identity,
     pub dkg: DkgState,
     pub signer: SignerState,
@@ -154,7 +157,7 @@ async fn sign_request(State(state): State<Arc<AppState>>, Json(env): Json<Envelo
     let chain = state.chain_db.lock().await;
     let node = state.node_db.lock().await;
     let ctx = VerifyContext {
-        params: &state.game.params,
+        processor: &state.processor,
         fvk: &keys.fvk,
         sealing: &keys.sealing,
         chain: &chain,

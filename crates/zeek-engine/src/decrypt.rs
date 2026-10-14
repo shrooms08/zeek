@@ -27,6 +27,8 @@ pub struct CompactHit {
     pub action_index: u16,
     /// Note value from the compact plaintext.
     pub value: u64,
+    /// Extracted note commitment of the output.
+    pub cmx: [u8; 32],
 }
 
 /// A fully decrypted output.
@@ -36,6 +38,8 @@ pub struct FullNote {
     pub action_index: u16,
     pub value: u64,
     pub memo: [u8; 512],
+    /// Extracted note commitment of the output.
+    pub cmx: [u8; 32],
 }
 
 /// Trial-decrypts outputs with one prepared incoming viewing key.
@@ -91,14 +95,52 @@ impl DigScanner {
                 ),
             };
             if let Some((note, _address)) = decrypted {
+                let cmx = <[u8; 32]>::try_from(action.cmx.as_slice()).map_err(|_| {
+                    EngineError::MalformedBlock {
+                        height,
+                        reason: format!("compact action {index}: cmx is not 32 bytes"),
+                    }
+                })?;
                 hits.push(CompactHit {
                     pool,
                     action_index,
                     value: note.value().inner(),
+                    cmx,
                 });
             }
         }
         Ok(())
+    }
+
+    /// The extracted note commitment of action `index` of the given pool in
+    /// the full transaction `raw` (mined under `branch`), for backfilling
+    /// notes stored before commitments were recorded.
+    pub fn commitment_of(
+        txid_hex: &str,
+        raw: &[u8],
+        branch: BranchId,
+        pool: Pool,
+        index: u16,
+    ) -> Result<[u8; 32], EngineError> {
+        let tx = Transaction::read(raw, branch).map_err(|e| EngineError::MalformedTransaction {
+            txid: txid_hex.to_owned(),
+            reason: e.to_string(),
+        })?;
+        let bundle = match pool {
+            Pool::Ironwood => tx.ironwood_bundle(),
+            Pool::Orchard => tx.orchard_bundle(),
+        }
+        .ok_or_else(|| EngineError::MalformedTransaction {
+            txid: txid_hex.to_owned(),
+            reason: format!("no {pool:?} bundle"),
+        })?;
+        let action = bundle.actions().get(usize::from(index)).ok_or_else(|| {
+            EngineError::MalformedTransaction {
+                txid: txid_hex.to_owned(),
+                reason: format!("action {index} missing"),
+            }
+        })?;
+        Ok(action.cmx().to_bytes())
     }
 
     /// Decrypts the hit outputs of the full transaction `raw` (mined under
@@ -153,11 +195,20 @@ impl DigScanner {
                     reason: "value differs between compact and full decryption".into(),
                 });
             }
+            let cmx = action.cmx().to_bytes();
+            if cmx != hit.cmx {
+                return Err(EngineError::MalformedTransaction {
+                    txid: txid_hex.to_owned(),
+                    reason: "note commitment differs between the compact block and the transaction"
+                        .into(),
+                });
+            }
             notes.push(FullNote {
                 pool: hit.pool,
                 action_index: hit.action_index,
                 value: hit.value,
                 memo,
+                cmx,
             });
         }
         Ok(notes)
@@ -202,6 +253,11 @@ mod tests {
         let (_, ironwood) = &all[0];
         assert_eq!(ironwood[0].pool, Pool::Ironwood);
         assert_eq!(ironwood[0].value, 250_000);
+        assert_eq!(
+            ironwood[0].cmx,
+            <[u8; 32]>::try_from(block.vtx[0].ironwood_actions[0].cmx.as_slice()).expect("cmx"),
+            "the recorded commitment is the compact block's"
+        );
         assert_eq!(DigMemo::decode(&ironwood[0].memo).expect("memo"), memo);
         let (_, orchard) = &all[1];
         assert_eq!(orchard[0].pool, Pool::Orchard);

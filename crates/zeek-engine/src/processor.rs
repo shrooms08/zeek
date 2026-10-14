@@ -175,8 +175,13 @@ impl Processor {
         Ok(rounds::round_for_height(&self.config.params, tip).unwrap_or(0))
     }
 
-    /// The valid digs of `round` so far (not voided).
-    fn classified(&self, db: &Db, round: u32, voided: bool) -> Result<ClassifiedDigs, EngineError> {
+    /// Every note of `round` classified under the game rules.
+    pub fn classified(
+        &self,
+        db: &Db,
+        round: u32,
+        voided: bool,
+    ) -> Result<ClassifiedDigs, EngineError> {
         let window = rounds::round_window(&self.config.params, round)?;
         let notes = db
             .notes_in_range(window.start, window.end)?
@@ -188,6 +193,22 @@ impl Processor {
             round,
             voided,
             notes,
+        )?)
+    }
+
+    /// The notes the payout transaction of a settled round must spend, in the
+    /// deterministic order of [`settle::payout_inputs`].
+    pub fn payout_inputs(
+        &self,
+        db: &Db,
+        row: &SettlementRow,
+    ) -> Result<Vec<zeek_core::digs::ReceivedNote>, EngineError> {
+        let voided = matches!(row.outcome, RoundOutcome::Voided);
+        let classified = self.classified(db, row.round, voided)?;
+        Ok(settle::payout_inputs(
+            &self.config.params,
+            &classified,
+            row.outcome,
         )?)
     }
 
@@ -424,6 +445,7 @@ impl Processor {
                 outcome,
                 settlement: settlement.clone(),
                 status: PlanStatus::AwaitingSignatures,
+                rules_version: params.rules_version(),
             };
             db.insert_settlement(&row)?;
             tracing::info!(

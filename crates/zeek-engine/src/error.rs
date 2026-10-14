@@ -95,6 +95,21 @@ pub enum EngineError {
 
     #[error("rounds {0:?} already have a payout transaction")]
     AlreadyPaid(Vec<u32>),
+
+    #[error("the payout for rounds {rounds:?} needs {needed} zatoshis but the round's notes and the spendable operator float hold only {available}")]
+    InsufficientVaultFunds {
+        rounds: Vec<u32>,
+        needed: u64,
+        available: u64,
+    },
+
+    #[error("dig note {txid}:{index} of round {round} cannot be spent: {reason}")]
+    InputUnspendable {
+        round: u32,
+        txid: String,
+        index: u16,
+        reason: String,
+    },
 }
 
 impl EngineError {

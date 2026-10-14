@@ -80,13 +80,26 @@ pub struct SettledRound {
     pub new_cache: u64,
     pub cache_in: u64,
     pub cache_paid: u64,
+    /// Dig fees plus output fees.
     pub total_fees: u64,
+    /// Dig fees charged to the notes the payout transaction spends (rules v2;
+    /// absent in views saved under rules v1).
+    #[serde(default)]
+    pub dig_fees: u64,
     pub total_paid: u64,
     pub forfeited: u64,
+    /// Rules the round was settled under (1 or 2; views saved before the
+    /// field existed are rules v1).
+    #[serde(default = "rules_v1")]
+    pub rules_version: u32,
     pub plan_status: PlanStatus,
     pub settled_at_height: u32,
     /// Payout transaction, once broadcast.
     pub payout: Option<PayoutRecord>,
+}
+
+fn rules_v1() -> u32 {
+    1
 }
 
 /// `GET /v1/rounds/{n}`.
@@ -240,8 +253,10 @@ pub fn round_response(
             cache_in: s.cache_in,
             cache_paid: s.cache_paid,
             total_fees: s.total_fees,
+            dig_fees: s.dig_fees,
             total_paid: s.total_paid,
             forfeited: s.forfeited,
+            rules_version: row.rules_version,
             plan_status: row.status,
             settled_at_height: row.settled_at_height,
             payout: payout.clone(),

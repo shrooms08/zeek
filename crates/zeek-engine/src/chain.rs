@@ -141,6 +141,7 @@ pub async fn ingest(
 ) -> Result<IngestReport, EngineError> {
     let chain_tip = source.latest_height().await?;
     db.set_chain_tip(chain_tip)?;
+    backfill_commitments(source, db, config).await?;
     // Before genesis no block is stored; keep the tip's time so the board can
     // estimate when round 0 starts.
     if chain_tip < config.genesis_height {
@@ -198,6 +199,34 @@ pub async fn ingest(
     }
     report.stored_tip = db.tip()?.map(|b| b.height);
     Ok(report)
+}
+
+/// Records the note commitment of every note stored before schema version 2,
+/// reading it from the note's transaction. Returns how many were filled.
+pub async fn backfill_commitments(
+    source: &mut dyn ChainSource,
+    db: &mut Db,
+    config: &GameConfig,
+) -> Result<usize, EngineError> {
+    let missing = db.notes_without_cmx()?;
+    for note in &missing {
+        let raw = source.transaction(&note.txid).await?;
+        let cmx = DigScanner::commitment_of(
+            &note.txid_hex(),
+            &raw,
+            branch_for(config.params.network, note.height),
+            note.pool,
+            note.action_index,
+        )?;
+        db.set_note_cmx(&note.txid, note.action_index, note.pool, &cmx)?;
+    }
+    if !missing.is_empty() {
+        tracing::info!(
+            notes = missing.len(),
+            "backfilled note commitments for notes stored under schema 1"
+        );
+    }
+    Ok(missing.len())
 }
 
 /// Returns the first height to forget if `block` does not extend the stored
@@ -272,6 +301,7 @@ async fn store_block(
                 block_time: u64::from(block.time),
                 value: note.value,
                 memo: note.memo.to_vec(),
+                cmx: Some(note.cmx),
             })?;
             if inserted {
                 stored += 1;
@@ -330,6 +360,23 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].height, 1_002);
         assert_eq!(notes[0].value, 200_000);
+        let cmx = notes[0].cmx.expect("commitment recorded");
+        assert_eq!(
+            db.note_by_cmx(&cmx).expect("lookup").map(|n| n.value),
+            Some(200_000)
+        );
+
+        // A schema-1 row (no commitment) is backfilled from its transaction.
+        db.clear_note_commitments().expect("null");
+        assert_eq!(db.notes_without_cmx().expect("missing").len(), 1);
+        let filled = backfill_commitments(&mut chain, &mut db, &config)
+            .await
+            .expect("backfill");
+        assert_eq!(filled, 1);
+        assert_eq!(
+            db.notes_in_range(1_000, 1_024).expect("notes")[0].cmx,
+            Some(cmx)
+        );
 
         // A second pass with nothing new is a no-op.
         let again = ingest(&mut chain, &mut db, &scanner, &config)
