@@ -17,7 +17,13 @@ import init, {
   verifyScan,
   verifyWinProof as coreVerifyWinProof,
 } from "../wasm/zeek_pocket.js";
-import { describePartial, planBatches } from "./batching.js";
+import {
+  CHANGE_POLL_MS,
+  CHANGE_WAIT_MS,
+  describePartial,
+  planBatches,
+  privacyGapMs,
+} from "./batching.js";
 import { blockchairHash, compareHashes, sourceName, type BlockHash } from "./crosscheck.js";
 import { cryptoRandom, planTransactionFetches, type TxRef } from "./decoys.js";
 import { PocketError, toPocketError } from "./errors.js";
@@ -371,29 +377,74 @@ const handlers: { [M in MethodName]: Handler<M> } = {
         });
       };
       try {
-        progress("sync");
-        const chainTip = await syncToTip(id);
-        const [{ json }, board] = await Promise.all([client.config(), client.board()]);
-        if (round === -1) {
-          round = board.round;
-        } else if (board.round !== round) {
-          throw new PocketError(
-            "closing_too_soon",
-            `round ${round} closed before batch ${index + 1}; the rest would land in round ${board.round}`,
-          );
-        }
-        progress("proving");
-        const built = c.buildDig(
-          json,
-          JSON.stringify({
+        if (index > 0 && separate === true) {
+          // Separate payments go out at random intervals so their timing
+          // does not tie them together.
+          const gap = privacyGapMs(cryptoRandom);
+          digProgress(id, {
+            phase: "waiting",
+            batch: index + 1,
+            batches: batches.length,
             tiles: batchTiles,
-            amountEachZat,
-            round: board.round,
-            blocksRemaining: board.blocks_remaining,
-            chainTip,
-            message: message ?? null,
-          }),
-        ) as BuiltTransaction;
+            waitingFor: "privacy-gap",
+            seconds: Math.round(gap / 1000),
+          });
+          await new Promise((resolve) => setTimeout(resolve, gap));
+        }
+        const started = Date.now();
+        let built: BuiltTransaction | undefined;
+        let board: { round: number; blocks_remaining: number } = { round: -1, blocks_remaining: 0 };
+        while (built === undefined) {
+          progress("sync");
+          const chainTip = await syncToTip(id);
+          const [{ json }, current] = await Promise.all([client.config(), client.board()]);
+          board = current;
+          if (round === -1) {
+            round = board.round;
+          } else if (board.round !== round) {
+            throw new PocketError(
+              "closing_too_soon",
+              `round ${round} closed before batch ${index + 1}; the rest would land in round ${board.round}`,
+            );
+          }
+          try {
+            progress("proving");
+            built = c.buildDig(
+              json,
+              JSON.stringify({
+                tiles: batchTiles,
+                amountEachZat,
+                round: board.round,
+                blocksRemaining: board.blocks_remaining,
+                chainTip,
+                message: message ?? null,
+              }),
+            ) as BuiltTransaction;
+          } catch (error) {
+            // A later batch may need the change of an earlier one: wait for
+            // it to confirm (3 blocks) rather than give up.
+            const e = toPocketError(error);
+            const balance = c.balance() as Balance;
+            const waited = Date.now() - started;
+            if (
+              e.code !== "insufficient_funds" ||
+              index === 0 ||
+              balance.pending_zat === 0 ||
+              waited > CHANGE_WAIT_MS
+            ) {
+              throw e;
+            }
+            digProgress(id, {
+              phase: "waiting",
+              batch: index + 1,
+              batches: batches.length,
+              tiles: batchTiles,
+              waitingFor: "change",
+              seconds: Math.round(waited / 1000),
+            });
+            await new Promise((resolve) => setTimeout(resolve, CHANGE_POLL_MS));
+          }
+        }
         progress("broadcast", built.txid);
         await broadcastBuilt(c, built);
         sent.push({

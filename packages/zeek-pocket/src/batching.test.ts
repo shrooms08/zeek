@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describePartial, planBatches } from "./batching.js";
+import { describePartial, planBatches, privacyGapMs } from "./batching.js";
 
 describe("planBatches", () => {
   it("splits 12 tiles into two transactions of 6 by default", () => {
@@ -23,5 +23,13 @@ describe("planBatches", () => {
     expect(message).toContain("tiles 0,1 in ab");
     expect(message).toContain("Not sent: tiles 2,3");
     expect(message).toContain("never resent");
+  });
+});
+
+describe("privacyGapMs", () => {
+  it("stays within 2 to 20 seconds", () => {
+    expect(privacyGapMs(() => 0)).toBe(2_000);
+    expect(privacyGapMs(() => 0.999999)).toBeLessThanOrEqual(20_000);
+    expect(privacyGapMs(() => 0.5)).toBe(11_000);
   });
 });

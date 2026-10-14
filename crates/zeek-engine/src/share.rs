@@ -79,7 +79,8 @@ pub fn card_svg(card: &Card) -> String {
             r##"<text x="88" y="470" font-family="Archivo Black" font-size="128" fill="#E8B54A">{}</text>
 <text x="{}" y="470" font-family="Archivo Black" font-size="40" fill="#FFFFFF">ZEC</text>"##,
             escape(a),
-            100 + 76 * a.chars().count(),
+            // Archivo Black at 128 px: digits and signs ≈ 0.72 em, the dot ≈ 0.33 em.
+            100 + a.chars().map(|c| if c == '.' { 42 } else { 92 }).sum::<usize>(),
         )
     });
     format!(

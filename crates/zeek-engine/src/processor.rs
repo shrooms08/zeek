@@ -91,6 +91,8 @@ pub struct BoardState {
     pub cache: u64,
     /// Relative tile depths, `0..=100`.
     pub depths: [u8; 25],
+    /// Depth stage 0 to 5 per tile (share of the round's total, bucketed).
+    pub stages: [u8; 25],
     /// Number of valid digs so far.
     pub digs: usize,
 }
@@ -277,6 +279,7 @@ impl Processor {
             rules_version: rounds::rules_version(params, round)?,
             cache: view.cache,
             depths: view.depths,
+            stages: view.stages,
             digs: classified.valid.len(),
         })
     }

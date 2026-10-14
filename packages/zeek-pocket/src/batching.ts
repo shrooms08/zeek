@@ -43,3 +43,13 @@ export function describePartial(
       : sent.map((b) => `tiles ${b.tiles.join(",")} in ${b.txid}`).join("; ");
   return `dig stopped: ${cause}. Sent: ${done}. Not sent: tiles ${unsent.join(",")} (send them again in a new dig; sent batches are never resent).`;
 }
+
+/** A random privacy gap between separate payments: 2 to 20 seconds. */
+export function privacyGapMs(random: () => number): number {
+  return Math.round(2_000 + random() * 18_000);
+}
+
+/** How long a batch waits for earlier change to confirm before giving up. */
+export const CHANGE_WAIT_MS = 8 * 60_000;
+/** How often it re-syncs while waiting. */
+export const CHANGE_POLL_MS = 20_000;

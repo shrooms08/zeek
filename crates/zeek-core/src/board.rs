@@ -56,6 +56,26 @@ impl TileTotals {
         depths
     }
 
+    /// Depth stage 0 to 5 of every tile: its share of the round's total,
+    /// bucketed at `0`, `> 0`, `≥ 4 %`, `≥ 8 %`, `≥ 14 %`, `≥ 22 %` (integer
+    /// math in basis points). Exact amounts are never shown during a round.
+    pub fn depth_stages(&self) -> [u8; TILE_COUNT as usize] {
+        const BOUNDS_BPS: [u128; 4] = [400, 800, 1_400, 2_200];
+        let total: u128 = self.0.iter().map(|v| u128::from(*v)).sum();
+        let mut stages = [0u8; TILE_COUNT as usize];
+        if total == 0 {
+            return stages;
+        }
+        for (stage, value) in stages.iter_mut().zip(self.0.iter()) {
+            if *value == 0 {
+                continue;
+            }
+            let bps = u128::from(*value) * 10_000 / total;
+            *stage = 1 + BOUNDS_BPS.iter().filter(|b| bps >= **b).count() as u8;
+        }
+        stages
+    }
+
     /// Sum of all tiles.
     pub fn pot(&self) -> Option<u64> {
         self.0.iter().try_fold(0u64, |acc, v| acc.checked_add(*v))
@@ -79,6 +99,8 @@ pub struct BoardView {
     pub cache: u64,
     /// Relative depth per tile, `0..=100`.
     pub depths: [u8; TILE_COUNT as usize],
+    /// Depth stage 0 to 5 per tile (see [`TileTotals::depth_stages`]).
+    pub stages: [u8; TILE_COUNT as usize],
 }
 
 impl BoardView {
@@ -103,6 +125,7 @@ impl BoardView {
             gross_dug_zat: totals.pot().ok_or(BoardError::Overflow)?,
             cache,
             depths: totals.relative_depths(),
+            stages: totals.depth_stages(),
         })
     }
 }
@@ -169,6 +192,22 @@ mod tests {
         assert_eq!(depths[1], 33);
         assert_eq!(depths[2], 0);
         assert_eq!(totals.pot(), Some(1_334));
+    }
+
+    #[test]
+    fn depth_stages_follow_the_design_buckets() {
+        let mut totals = TileTotals([0; 25]);
+        assert_eq!(totals.depth_stages(), [0; 25]);
+        // Shares: 3/1000 (>0), 40 (4 %), 80 (8 %), 140 (14 %), 220 (22 %), rest.
+        for (i, v) in [3u64, 40, 80, 140, 220, 517].iter().enumerate() {
+            totals.0[i] = *v;
+        }
+        let stages = totals.depth_stages();
+        assert_eq!(&stages[..7], &[1, 2, 3, 4, 5, 5, 0]);
+        totals.0 = [0; 25];
+        totals.0[3] = 39;
+        totals.0[4] = 961;
+        assert_eq!(totals.depth_stages()[3], 1, "3.9 % is below the 4 % bucket");
     }
 
     #[test]

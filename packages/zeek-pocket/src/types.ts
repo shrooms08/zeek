@@ -162,11 +162,16 @@ export interface DigBatch {
 
 /** Progress of a batched dig. */
 export interface DigProgress {
-  phase: "sync" | "proving" | "broadcast" | "sent";
+  phase: "sync" | "waiting" | "proving" | "broadcast" | "sent";
   batch: number;
   batches: number;
   tiles: number[];
   txid?: string;
+  /** Why a batch is waiting: a random privacy gap between separate
+   * payments, or the previous batch's change confirming. */
+  waitingFor?: "privacy-gap" | "change";
+  /** Seconds of the current wait (privacy gap) or waited so far (change). */
+  seconds?: number;
 }
 
 /** A Campfire message as the engine serves it. */
