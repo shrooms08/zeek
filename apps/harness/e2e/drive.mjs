@@ -5,6 +5,11 @@
 //   dig <passphrase> <tiles> <zec>    unlock, dig from the browser
 //   anywallet <payout> <tiles> <zec>  build a ZIP 321 request, print the URI
 //   shot <name>                       screenshot of the current page state
+//   verify <round> [second relay url] [shot]   browser round verifier
+//   wincreate <passphrase> <round>    create and submit a win proof (Pocket)
+//   winverify <id or proof> [shot]    verify a win proof in the browser
+//   digmsg <passphrase> <tiles> <zec> <message> [perTx] [shot]
+//   campfire [shot]                   screenshot of the Campfire feed (with hidden text shown)
 // The browser profile (IndexedDB) persists in ../../data/harness-profile.
 // Screenshots go to ../../docs/examples/phase5/.
 import { mkdir } from "node:fs/promises";
@@ -15,7 +20,7 @@ import { chromium } from "playwright";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../..");
 const profile = path.join(repo, "data", "harness-profile");
-const shots = path.join(repo, "docs", "examples", "phase5");
+const shots = path.join(repo, "docs", "examples", process.env.SHOTS_DIR ?? "phase6");
 const url = process.env.HARNESS_URL ?? "http://localhost:5173/";
 const [command, ...args] = process.argv.slice(2);
 
@@ -138,6 +143,88 @@ switch (command) {
     console.log(await text("aw-result"));
     console.log(`URI ${await page.getByTestId("aw-uri").inputValue()}`);
     await shot(args[4] ?? "anywallet-request");
+    break;
+  }
+  case "verify": {
+    await page.getByTestId("verify-round").fill(args[0]);
+    if (args[1]) await page.getByTestId("verify-second").fill(args[1]);
+    const started = Date.now();
+    await page.getByTestId("verify-run").click();
+    await page.waitForTimeout(500);
+    const result = await waitFor(
+      "verify-progress",
+      (v) =>
+        v.startsWith("round ") ||
+        (/^[a-z_]+: /.test(v) &&
+          !/^(bundle|blocks|scan|transactions|checks|cross-check|done):/.test(v)),
+      15 * 60_000,
+    );
+    console.log(`browser verification took ${Math.round((Date.now() - started) / 1000)} s`);
+    console.log(result);
+    for (const id of ["beacon", "digs", "timing", "settlement", "payout"]) {
+      const row = page.getByTestId(`check-${id}`);
+      if ((await row.count()) > 0) {
+        console.log(
+          `${id}: ${await row.getAttribute("data-status")}: ${(await row.textContent())?.split("\n")[0]}`,
+        );
+      }
+    }
+    console.log(await text("verify-crosscheck"));
+    await shot(args[2] ?? `verify-round-${args[0]}`);
+    break;
+  }
+  case "wincreate": {
+    await unlock(args[0]);
+    await page.getByTestId("win-round").fill(args[1]);
+    await page.getByTestId("win-create").click();
+    await page.waitForTimeout(500);
+    const result = await waitFor(
+      "win-created",
+      (v) => v.startsWith("{") || /^[a-z_]+: /.test(v),
+      10 * 60_000,
+    );
+    console.log(result);
+    await shot(args[2] ?? "win-proof-created");
+    break;
+  }
+  case "winverify": {
+    await page.getByTestId("win-verify-input").fill(args[0]);
+    await page.getByTestId("win-verify").click();
+    await page.waitForTimeout(500);
+    const result = await waitFor(
+      "win-verdict",
+      (v) => v.startsWith("VALID") || v.startsWith("INVALID") || /^[a-z_]+: /.test(v),
+      5 * 60_000,
+    );
+    console.log(result);
+    await shot(args[1] ?? "win-proof-verified");
+    break;
+  }
+  case "digmsg": {
+    await unlock(args[0]);
+    await page.getByTestId("dig-tiles").fill(args[1]);
+    await page.getByTestId("dig-amount").fill(args[2]);
+    await page.getByTestId("dig-message").fill(args[3] ?? "");
+    if (args[4]) await page.getByTestId("dig-max-per-tx").fill(args[4]);
+    const started = Date.now();
+    await page.getByTestId("dig").click();
+    await page.waitForTimeout(500);
+    const result = await waitFor(
+      "dig-result",
+      (v) => v.startsWith("{") || /^[a-z_]+: /.test(v),
+      40 * 60_000,
+    );
+    console.log(`dig finished in ${Math.round((Date.now() - started) / 1000)} s`);
+    console.log(result);
+    await report();
+    await shot(args[5] ?? "pocket-dig-message");
+    break;
+  }
+  case "campfire": {
+    await page.getByTestId("campfire-show-hidden").check();
+    await page.waitForTimeout(4_000);
+    console.log(await page.getByTestId("campfire-feed").innerText());
+    await shot(args[0] ?? "campfire");
     break;
   }
   case "shot": {

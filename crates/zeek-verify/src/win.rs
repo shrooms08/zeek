@@ -113,6 +113,8 @@ pub enum WinProofError {
     NoOpenings,
     #[error("payout {0} has no opening in the bundle")]
     NoOpening(u32),
+    #[error("round {round} has no payout {index} (it made {count} payout(s))")]
+    NoPayout { round: u32, index: u32, count: usize },
     #[error("the opening is malformed: {0}")]
     BadOpening(String),
     #[error("building the proof failed: {0}")]
@@ -225,7 +227,11 @@ pub fn treasure_opening(
         .settlement
         .payouts
         .get(payout_index as usize)
-        .ok_or(WinProofError::NoOpening(payout_index))?;
+        .ok_or(WinProofError::NoPayout {
+            round: bundle.round,
+            index: payout_index,
+            count: bundle.settlement.payouts.len(),
+        })?;
     if !matches!(payout.reason, PayoutReason::Win { .. }) {
         return Err(WinProofError::NotATreasurePayout(payout_index));
     }

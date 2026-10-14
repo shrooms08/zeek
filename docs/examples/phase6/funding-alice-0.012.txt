@@ -1,0 +1,2 @@
+Sent 1200000 zatoshis (fee 10000)
+txid: 5f3cb9be009e13c4b553c5923f2f1ed7dd050a72ede06b3d8e32c6bc2fd79409

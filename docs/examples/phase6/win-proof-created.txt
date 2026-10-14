@@ -1,0 +1,10 @@
+DEV HARNESS (not the product UI). Engine: http://127.0.0.1:8787. Cross-origin isolated: true
+{
+  "id": "8a4696ec5062c95e3e207e55800ffce8",
+  "stored": true,
+  "shareUrl": "http://localhost:5173/?winproof=8a4696ec5062c95e3e207e55800ffce8",
+  "seconds": 23.4,
+  "proofBytes": 6304,
+  "verdict": "The holder of this proof controls the address that received round 74's treasure payout 0 (2251250 zatoshis, transaction 3f0aa3084291827a68b6ae8bfc7dbe2468077c7817db690589bd6aab1094847b)."
+}
+screenshot /Users/minos/Projects/zeek/docs/examples/phase6/win-proof-created.png

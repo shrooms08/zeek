@@ -1,0 +1,12 @@
+== wrong-round
+  [FAIL] payout: round 73 has no payout 0 (it made 0 payout(s))
+INVALID: payout: round 73 has no payout 0 (it made 0 payout(s))
+engine: 422 payout: round 73 has no payout 0 (it made 0 payout(s))
+== wrong-output
+  [FAIL] payout: round 74 has no payout 1 (it made 1 payout(s))
+INVALID: payout: round 74 has no payout 1 (it made 1 payout(s))
+engine: 422 payout: round 74 has no payout 1 (it made 1 payout(s))
+== altered-message
+  [FAIL] signature: the spend authorization signature does not verify over the bound message (round, transaction, output, recipient, nonce)
+INVALID: signature: the spend authorization signature does not verify over the bound message (round, transaction, output, recipient, nonce)
+engine: 422 signature: the spend authorization signature does not verify over the bound message (round, transaction, output, recipient, nonce)

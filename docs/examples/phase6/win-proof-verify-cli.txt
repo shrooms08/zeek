@@ -1,0 +1,8 @@
+lightwalletd https://testnet.zec.rocks:443: chain test at height 4501333 (ECC LightWalletD v0.5.4)
+Win proof 8a4696ec5062c95e3e207e55800ffce8 (round 74, payout 0)
+  [ok] payout: payout 0 of round 74 is a treasure payout of 2251250 zatoshis
+  [ok] payout transaction: output 7 of 3f0aa3084291827a68b6ae8bfc7dbe2468077c7817db690589bd6aab1094847b (mined at 4501182) pays 2251250 zatoshis to the opened address
+  [ok] address binding: the anchor commits to a 1-zatoshi note at the payout address
+  [ok] proof: the Orchard-protocol Halo2 proof verifies (address integrity, spend authority, Merkle path)
+  [ok] signature: spend authorization and binding signatures verify over the bound message
+VALID: The holder of this proof controls the address that received round 74's treasure payout 0 (2251250 zatoshis, transaction 3f0aa3084291827a68b6ae8bfc7dbe2468077c7817db690589bd6aab1094847b).
