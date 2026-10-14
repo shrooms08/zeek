@@ -34,32 +34,40 @@
 use std::convert::Infallible;
 
 use orchard::circuit::{OrchardCircuitVersion, ProvingKey, VerifyingKey};
+use orchard::keys::{FullViewingKey, Scope};
 use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::ValuePool;
 use pasta_curves::pallas;
+use pczt::roles::creator::Creator;
+use pczt::roles::io_finalizer::IoFinalizer;
 use pczt::roles::prover::Prover;
 use pczt::roles::signer::Signer;
 use pczt::roles::tx_extractor::TransactionExtractor;
 use pczt::roles::verifier::Verifier;
 use pczt::Pczt;
 use rand_core::OsRng;
+use shardtree::error::ShardTreeError;
 use zcash_address::ZcashAddress;
 use zcash_client_backend::data_api::error::Error as WalletApiError;
+use zcash_client_backend::data_api::locking::LockFilter;
 use zcash_client_backend::data_api::wallet::input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, SpendPolicy,
 };
+use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::data_api::wallet::{
     create_pczt_from_proposal, extract_and_store_transaction_from_pczt, propose_transfer,
     ConfirmationsPolicy,
 };
-use zcash_client_backend::data_api::WalletCommitmentTrees;
+use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees};
 use zcash_client_backend::fees::zip317::SingleOutputChangeStrategy;
 use zcash_client_backend::fees::DustOutputPolicy;
 use zcash_client_backend::wallet::{Note, OvkPolicy};
+use zcash_client_sqlite::wallet::commitment_tree::Error as TreeStoreError;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId};
 use zcash_keys::address::Address;
-use zcash_primitives::transaction::builder::BundlePadding;
+use zcash_primitives::transaction::builder::{BuildConfig, Builder, BundlePadding, PcztResult};
 use zcash_primitives::transaction::fees::zip317;
+use zcash_primitives::transaction::fees::FeeRule as _;
 use zcash_primitives::transaction::{Transaction, TxId, TxVersion};
 use zcash_protocol::consensus::{BlockHeight, BranchId, OrchardProtocolRevision};
 use zcash_protocol::memo::MemoBytes;
@@ -471,6 +479,201 @@ pub fn prepare_pczt(
     )
     .map_err(|e| VaultError::Build(e.to_string()))?;
 
+    Ok(PreparedPczt {
+        pczt,
+        target_height,
+        fee,
+    })
+}
+
+/// One note the caller wants spent, identified the way the wallet reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteId {
+    /// Display-order hex txid.
+    pub txid: String,
+    /// Action index within the transaction.
+    pub output_index: u16,
+}
+
+/// One output of an explicitly shaped transaction.
+#[derive(Clone)]
+pub struct ShapedOutput {
+    /// Orchard-protocol recipient.
+    pub recipient: orchard::Address,
+    pub value: Zatoshis,
+    pub memo: MemoBytes,
+    /// Whether this is the vault's own change (encrypted to the internal
+    /// outgoing viewing key) or a payment (external outgoing viewing key, so
+    /// the vault can later recover what it paid).
+    pub is_change: bool,
+}
+
+/// Builds an IO-finalized, unproven V6 PCZT that spends **exactly** the
+/// Ironwood notes `spends` (in that order) and creates **exactly** `outputs`.
+///
+/// Unlike [`prepare_pczt`] nothing is selected or balanced here: the caller
+/// states the full shape and this function refuses anything that does not
+/// balance to the ZIP 317 fee for that shape. Every spent note must be
+/// unspent, mined at or below `anchor_height`, and witnessed in the wallet's
+/// Ironwood commitment tree at that anchor; the builder refuses a note whose
+/// recipient is not derived from `fvk`.
+pub fn build_pczt_from_notes(
+    db: &mut Db,
+    fvk: &FullViewingKey,
+    spends: &[NoteId],
+    outputs: &[ShapedOutput],
+    target_height: BlockHeight,
+    anchor_height: BlockHeight,
+) -> Result<PreparedPczt, VaultError> {
+    if spends.is_empty() {
+        return Err(VaultError::NothingToSign);
+    }
+    if anchor_height >= target_height {
+        return Err(VaultError::Build(format!(
+            "anchor height {anchor_height} must be below the target height {target_height}"
+        )));
+    }
+    let target: TargetHeight = target_height.into();
+
+    // Resolve every spend to its note and position.
+    let mut notes = Vec::with_capacity(spends.len());
+    let mut spent_total = 0u64;
+    for id in spends {
+        let txid = TxId::from_hex(&id.txid)
+            .ok_or_else(|| VaultError::Build(format!("txid {} is not hex", id.txid)))?;
+        let received = db
+            .get_spendable_note(
+                &txid,
+                ShieldedPool::Ironwood,
+                u32::from(id.output_index),
+                target,
+                LockFilter::Unfiltered,
+            )
+            .map_err(wallet_err)?
+            .ok_or_else(|| {
+                VaultError::Build(format!(
+                    "note {}:{} is not an unspent Ironwood note of this wallet",
+                    id.txid, id.output_index
+                ))
+            })?;
+        let mined = received.mined_height().ok_or_else(|| {
+            VaultError::Build(format!("note {}:{} is not mined", id.txid, id.output_index))
+        })?;
+        if mined > anchor_height {
+            return Err(VaultError::Build(format!(
+                "note {}:{} was mined at {mined}, above the anchor {anchor_height}",
+                id.txid, id.output_index
+            )));
+        }
+        if received.spending_key_scope() != Scope::External
+            && received.spending_key_scope() != Scope::Internal
+        {
+            return Err(VaultError::Build("unexpected key scope".into()));
+        }
+        let note = match received.note() {
+            Note::Orchard { note, pool } if *pool == ValuePool::Ironwood => *note,
+            Note::Orchard { pool, .. } => {
+                return Err(VaultError::UnexpectedInputPool(pool_name(*pool).to_owned()))
+            }
+            Note::Sapling(_) => return Err(VaultError::UnexpectedInputPool("sapling".into())),
+        };
+        spent_total = spent_total
+            .checked_add(note.value().inner())
+            .ok_or_else(|| VaultError::Build("spent value overflow".into()))?;
+        notes.push((note, received.note_commitment_tree_position()));
+    }
+
+    // Anchor and witnesses from the wallet's Ironwood tree.
+    let tree_err = |e: ShardTreeError<TreeStoreError>| VaultError::Wallet(format!("{e:?}"));
+    let (anchor, paths) = db
+        .with_ironwood_tree_mut::<_, _, ShardTreeError<TreeStoreError>>(|tree| {
+            let root = tree.root_at_checkpoint_id(&anchor_height)?;
+            let mut paths = Vec::with_capacity(notes.len());
+            for (_, position) in &notes {
+                paths.push(tree.witness_at_checkpoint_id_caching(*position, &anchor_height)?);
+            }
+            Ok((root, paths))
+        })
+        .map_err(tree_err)?
+        .ok_or_else(|| VaultError::Wallet("the wallet keeps no Ironwood tree".into()))?;
+    let anchor = anchor.ok_or_else(|| {
+        VaultError::Build(format!(
+            "no Ironwood checkpoint at anchor height {anchor_height}"
+        ))
+    })?;
+
+    // Shape check: inputs must equal outputs plus the ZIP 317 fee.
+    let outputs_total = outputs
+        .iter()
+        .try_fold(0u64, |acc, o| acc.checked_add(o.value.into_u64()))
+        .ok_or_else(|| VaultError::Build("output value overflow".into()))?;
+    let actions = spends.len().max(outputs.len()).max(zip317::GRACE_ACTIONS);
+    let fee = zip317::FeeRule::standard()
+        .fee_required(
+            &NETWORK,
+            target_height,
+            core::iter::empty::<zcash_primitives::transaction::fees::transparent::InputSize>(),
+            core::iter::empty::<usize>(),
+            0,
+            0,
+            0,
+            actions,
+        )
+        .map_err(|e| VaultError::Build(format!("fee: {e:?}")))?;
+    let required = outputs_total
+        .checked_add(fee.into_u64())
+        .ok_or_else(|| VaultError::Build("required value overflow".into()))?;
+    if spent_total != required {
+        return Err(VaultError::Build(format!(
+            "transaction does not balance: spends {spent_total}, outputs {outputs_total}, ZIP 317 fee {} for {actions} actions",
+            fee.into_u64()
+        )));
+    }
+
+    let mut builder = Builder::new(
+        NETWORK,
+        target_height,
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+            ironwood_anchor: Some(orchard::Anchor::from(anchor)),
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
+        },
+    );
+    for ((note, _), path) in notes.into_iter().zip(paths) {
+        let path = path.ok_or_else(|| {
+            VaultError::Build(format!(
+                "a spent note has no witness at anchor {anchor_height}"
+            ))
+        })?;
+        builder
+            .add_ironwood_spend::<zip317::FeeError>(fvk.clone(), note, path.into())
+            .map_err(|e| VaultError::Build(format!("add spend: {e}")))?;
+    }
+    for output in outputs {
+        let scope = if output.is_change {
+            Scope::Internal
+        } else {
+            Scope::External
+        };
+        builder
+            .add_ironwood_output::<zip317::FeeError>(
+                Some(fvk.to_ovk(scope)),
+                output.recipient,
+                output.value,
+                output.memo.clone(),
+            )
+            .map_err(|e| VaultError::Build(format!("add output: {e}")))?;
+    }
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .map_err(|e| VaultError::Build(format!("build: {e}")))?;
+    let pczt = Creator::build_from_parts(pczt_parts)
+        .ok_or_else(|| VaultError::Pczt("creator could not assemble the PCZT".into()))?;
+    let pczt = IoFinalizer::new(pczt)
+        .finalize_io()
+        .map_err(|e| VaultError::Pczt(format!("io finalizer: {e:?}")))?;
     Ok(PreparedPczt {
         pczt,
         target_height,

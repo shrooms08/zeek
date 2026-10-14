@@ -153,7 +153,12 @@ pub struct PoolBalance {
     pub spendable: Zatoshis,
     /// Value waiting for more confirmations (received notes and change).
     pub pending: Zatoshis,
-    /// Total value including pending.
+    /// Value in notes worth no more than the ZIP 317 marginal fee, which the
+    /// wallet never selects because spending one costs at least what it
+    /// holds. `zcash_client_backend`'s `Balance::total()` leaves this out;
+    /// it is still the vault's money and counts in [`PoolBalance::total`].
+    pub uneconomic: Zatoshis,
+    /// Total value including pending and uneconomic notes.
     pub total: Zatoshis,
 }
 
@@ -162,6 +167,7 @@ impl PoolBalance {
     pub const ZERO: Self = PoolBalance {
         spendable: Zatoshis::ZERO,
         pending: Zatoshis::ZERO,
+        uneconomic: Zatoshis::ZERO,
         total: Zatoshis::ZERO,
     };
 
@@ -169,10 +175,13 @@ impl PoolBalance {
         let pending = (balance.change_pending_confirmation()
             + balance.value_pending_spendability())
         .ok_or_else(|| VaultError::Wallet("pending balance overflow".into()))?;
+        let total = (balance.total() + balance.uneconomic_value())
+            .ok_or_else(|| VaultError::Wallet("total balance overflow".into()))?;
         Ok(PoolBalance {
             spendable: balance.spendable_value(),
             pending,
-            total: balance.total(),
+            uneconomic: balance.uneconomic_value(),
+            total,
         })
     }
 }

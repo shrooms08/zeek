@@ -27,6 +27,7 @@ pczt.workspace = true
 zcash_address.workspace = true
 zcash_client_backend.workspace = true
 zcash_client_sqlite.workspace = true
+shardtree = "0.7"
 zcash_keys.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
@@ -54,9 +55,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
 incrementalmerkletree = "0.8.2"
-shardtree = "0.7"
+tempfile = "3"
 zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.30.1", features = ["test-dependencies"] }
 zcash_protocol = { version = "0.10.5", features = ["local-consensus"] }

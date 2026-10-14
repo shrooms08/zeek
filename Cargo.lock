@@ -4606,6 +4606,7 @@ dependencies = [
  "pasta_curves",
  "pczt",
  "postcard",
+ "proptest",
  "rand 0.8.8",
  "rand 0.9.5",
  "rand_core 0.6.4",
