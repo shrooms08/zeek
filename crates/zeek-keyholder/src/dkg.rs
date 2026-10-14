@@ -191,8 +191,7 @@ pub async fn run_ceremony(
     tracing::info!(session = %hex::encode(session), identifier = config.identifier, "DKG ceremony starting");
 
     // Round 1: commit to a secret polynomial and broadcast the commitment.
-    let (secret1, package1) =
-        dkg::part1(me, config.signers, config.threshold, rand_core::OsRng)?;
+    let (secret1, package1) = dkg::part1(me, config.signers, config.threshold, rand_core::OsRng)?;
     let package1_bytes = package1.serialize()?;
     let round1_env = protocol::seal(
         identity,
