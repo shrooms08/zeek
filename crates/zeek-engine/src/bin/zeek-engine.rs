@@ -198,6 +198,9 @@ fn settings_url(settings: &EngineSettings) -> String {
     settings.lightwalletd_url.clone()
 }
 
+/// Longest an engine pass may run (a payout proof takes about a minute).
+const PASS_TIMEOUT: Duration = Duration::from_secs(600);
+
 async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()> {
     let settings_ref = settings.clone();
     let scanner = DigScanner::new(config.incoming_viewing_key()?);
@@ -321,7 +324,10 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                 if let Err(e) = coordinator.probe_keyholders(&db).await {
                     tracing::warn!(error = %e, "keyholder health probe failed");
                 }
-                if let Err(e) = coordinator.record_openings(&mut db, &mut source, &config).await {
+                if let Err(e) = coordinator
+                    .record_openings(&mut db, &mut source, &config)
+                    .await
+                {
                     tracing::warn!(error = %e, "recording payout openings failed; retrying next pass");
                 }
             }
@@ -349,8 +355,17 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                 last_board = Some(board);
             }
             Ok::<_, anyhow::Error>(events_out)
-        }
-        .await;
+        };
+        // A backstop: the pass holds the database lock, so a call that never
+        // returns would stall the API too. Dropping the pass rolls back any
+        // open transaction; every step resumes from the database next pass.
+        let pass = tokio::time::timeout(PASS_TIMEOUT, pass)
+            .await
+            .unwrap_or_else(|_| {
+                Err(anyhow::anyhow!(
+                    "engine pass timed out after {PASS_TIMEOUT:?}"
+                ))
+            });
         match pass {
             Ok(events_out) => {
                 for event in events_out {

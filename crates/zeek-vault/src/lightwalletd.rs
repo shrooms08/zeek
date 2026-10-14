@@ -1,5 +1,7 @@
 //! Minimal `lightwalletd` gRPC client helpers.
 
+use std::time::Duration;
+
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use zcash_client_backend::proto::service::compact_tx_streamer_client::CompactTxStreamerClient;
 use zcash_client_backend::proto::service::{
@@ -52,7 +54,16 @@ pub fn check_consensus_support(
 
 /// Connects to `url` (http or https) and checks that it serves testnet.
 pub async fn connect(url: &str) -> Result<Client, VaultError> {
-    let mut endpoint = Endpoint::from_shared(url.to_owned())?;
+    // Without these a dead connection hangs a call forever (seen live: the
+    // engine's pass stalled for an hour holding its database lock). The
+    // request timeout covers unary calls and the start of a stream; the
+    // HTTP/2 keep-alives end a stream whose connection died mid-way.
+    let mut endpoint = Endpoint::from_shared(url.to_owned())?
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(120))
+        .http2_keep_alive_interval(Duration::from_secs(20))
+        .keep_alive_timeout(Duration::from_secs(20))
+        .keep_alive_while_idle(true);
     if url.starts_with("https://") {
         endpoint = endpoint.tls_config(ClientTlsConfig::new().with_webpki_roots())?;
     } else if !url.starts_with("http://") {
