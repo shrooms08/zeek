@@ -93,6 +93,9 @@ pub const CACHE_ODDS: u32 = 625;
 pub const MIN_DIG_ZAT: u64 = COIN / 1000;
 /// ZIP 317 marginal fee per logical action.
 pub const ZIP317_MARGINAL_FEE_ZAT: u64 = 5_000;
+/// Fee charged to every dig for the logical action that spends its note
+/// (rules v2). Equal to the ZIP 317 marginal fee.
+pub const DIG_FEE_ZAT: u64 = ZIP317_MARGINAL_FEE_ZAT;
 /// Spec § 5.3 `PoWMedianBlockSpan`.
 pub const POW_MEDIAN_BLOCK_SPAN: u32 = 11;
 /// Spec § 5.3 `PostBlossomPoWTargetSpacing` (mainnet).
@@ -125,6 +128,11 @@ pub struct GameParams {
     pub min_dig_zat: u64,
     /// Fee charged per payout or refund output (ZIP 317 marginal fee).
     pub marginal_fee_zat: u64,
+    /// Fee charged per dig note for the action that spends it (rules v2).
+    /// Absent in configs and proof bundles written under rules v1, where it
+    /// is zero: with no dig fee the v2 rules reduce exactly to v1.
+    #[serde(default)]
+    pub dig_fee_zat: u64,
     /// drand chain that supplies the treasure randomness.
     pub drand: DrandChain,
     /// Seconds after the *expected* window close at which the round's beacon
@@ -158,6 +166,8 @@ pub enum ParamsError {
     BadDrandPublicKey,
     #[error("reveal_delay_secs is too short: it must cover the mtp_window blocks after the close plus the honest clock skew ({minimum} s), got {actual} s")]
     RevealDelayTooShort { minimum: u64, actual: u64 },
+    #[error("min_dig_zat {min_dig} must exceed dig_fee_zat {dig_fee} so that every valid dig contributes to the pot")]
+    DigFeeNotBelowMinimum { min_dig: u64, dig_fee: u64 },
     #[error("arithmetic overflow in parameters")]
     Overflow,
 }
@@ -198,6 +208,7 @@ impl GameParams {
             cache_odds: CACHE_ODDS,
             min_dig_zat: MIN_DIG_ZAT,
             marginal_fee_zat: ZIP317_MARGINAL_FEE_ZAT,
+            dig_fee_zat: DIG_FEE_ZAT,
             drand: DrandChain::quicknet(),
             reveal_delay_secs: Self::minimum_reveal_delay(
                 target_spacing_secs,
@@ -235,6 +246,12 @@ impl GameParams {
         if self.target_spacing_secs == 0 {
             return Err(ParamsError::ZeroTargetSpacing);
         }
+        if self.min_dig_zat <= self.dig_fee_zat {
+            return Err(ParamsError::DigFeeNotBelowMinimum {
+                min_dig: self.min_dig_zat,
+                dig_fee: self.dig_fee_zat,
+            });
+        }
         if self.drand.period_secs == 0 {
             return Err(ParamsError::ZeroDrandPeriod);
         }
@@ -262,6 +279,15 @@ impl GameParams {
         Ok(())
     }
 
+    /// Rules version the parameters encode: 1 without a dig fee, 2 with one.
+    pub fn rules_version(&self) -> u32 {
+        if self.dig_fee_zat == 0 {
+            1
+        } else {
+            2
+        }
+    }
+
     /// Expected wall-clock length of a round.
     pub fn round_duration_secs(&self) -> Result<u64, ParamsError> {
         u64::from(self.blocks_per_round)
@@ -283,6 +309,8 @@ mod tests {
             assert_eq!(params.cache_odds, 625);
             assert_eq!(params.min_dig_zat, 100_000);
             assert_eq!(params.marginal_fee_zat, 5_000);
+            assert_eq!(params.dig_fee_zat, 5_000);
+            assert_eq!(params.rules_version(), 2);
         }
         assert_eq!(GameParams::testnet(1).reveal_delay_secs, 900);
         assert_eq!(GameParams::mainnet(1).reveal_delay_secs, 2_100);
@@ -314,6 +342,29 @@ mod tests {
         let mut p = GameParams::testnet(1);
         p.blocks_per_round = 0;
         assert_eq!(p.validate(), Err(ParamsError::ZeroBlocksPerRound));
+        let mut p = GameParams::testnet(1);
+        p.dig_fee_zat = p.min_dig_zat;
+        assert_eq!(
+            p.validate(),
+            Err(ParamsError::DigFeeNotBelowMinimum {
+                min_dig: 100_000,
+                dig_fee: 100_000
+            })
+        );
+    }
+
+    #[test]
+    fn rules_v1_params_parse_without_a_dig_fee() {
+        let mut json: serde_json::Value =
+            serde_json::to_value(GameParams::testnet(1)).expect("json");
+        json.as_object_mut()
+            .expect("object")
+            .remove("dig_fee_zat")
+            .expect("present");
+        let p: GameParams = serde_json::from_value(json).expect("parse");
+        assert_eq!(p.dig_fee_zat, 0);
+        assert_eq!(p.rules_version(), 1);
+        p.validate().expect("v1 parameters stay valid");
     }
 
     #[test]

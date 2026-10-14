@@ -14,7 +14,7 @@ use zeek_core::memo::{
 use zeek_core::params::{GameParams, Network};
 use zeek_core::random::{self, CACHE_DOMAIN, TREASURE_DOMAIN};
 use zeek_core::seal::generate_sealing_keypair;
-use zeek_core::settle::{settle, RoundOutcome};
+use zeek_core::settle::{fees_cover, payout_inputs, settle, zip317_fee, RoundOutcome};
 
 fn note(value: u64) -> ReceivedNote {
     ReceivedNote {
@@ -118,10 +118,47 @@ proptest! {
             prop_assert!(s.new_cache >= previous_cache);
             prop_assert_eq!(s.cache_paid, 0);
         }
+        let threshold = p.dig_fee_zat + p.marginal_fee_zat;
         if matches!(outcome, RoundOutcome::Voided) {
-            prop_assert_eq!(s.payouts.len(), digs.valid.iter().filter(|d| d.note.value > p.marginal_fee_zat).count()
-                + digs.refunds.iter().filter(|d| d.note.value > p.marginal_fee_zat).count());
+            prop_assert_eq!(s.payouts.len(), digs.valid.iter().filter(|d| d.note.value > threshold).count()
+                + digs.refunds.iter().filter(|d| d.note.value > threshold).count());
         }
+        // The notes to spend are exactly the charged ones, and the dig fees
+        // are one per spent note.
+        let inputs = payout_inputs(&p, &digs, outcome).expect("inputs");
+        prop_assert_eq!(s.dig_fees, inputs.len() as u64 * p.dig_fee_zat);
+        let charged_refunds = digs.refunds.iter().filter(|d| d.note.value > threshold).count();
+        let charged_valid = match outcome {
+            RoundOutcome::Drawn { .. } => digs.valid.len(),
+            RoundOutcome::Voided => digs.valid.iter().filter(|d| d.note.value > threshold).count(),
+        };
+        prop_assert_eq!(inputs.len(), charged_valid + charged_refunds);
+        prop_assert!(s.total_fees >= s.dig_fees);
+        prop_assert_eq!(s.total_fees - s.dig_fees, s.payouts.len() as u64 * p.marginal_fee_zat);
+        // Whenever there is something to pay, the fees collected cover the
+        // ZIP 317 fee of the transaction that pays it (charged notes in, payouts
+        // plus change out).
+        if !s.payouts.is_empty() {
+            prop_assert!(!inputs.is_empty());
+            let fee = zip317_fee(&p, inputs.len() as u64, s.payouts.len() as u64 + 1).expect("fee");
+            prop_assert!(fee <= s.total_fees, "fee {} > collected {}", fee, s.total_fees);
+            prop_assert!(fees_cover(&p, inputs.len() as u64, 0, s.payouts.len() as u64).expect("cover"));
+        }
+    }
+
+    /// Fee coverage over arbitrary transaction shapes: `n` charged notes,
+    /// `k` operator-float notes, `p` payouts and one change output.
+    #[test]
+    fn fee_coverage_holds_exactly_when_float_notes_do_not_exceed_payouts(
+        n in 1u64..200, k in 0u64..200, p in 1u64..200,
+    ) {
+        let params = GameParams::testnet(1);
+        let fee = zip317_fee(&params, n + k, p + 1).expect("fee");
+        let collected = (n + p) * params.marginal_fee_zat;
+        prop_assert_eq!(fee <= collected, k <= p);
+        prop_assert_eq!(fees_cover(&params, n, k, p).expect("cover"), k <= p);
+        // Without float notes the fee is always covered.
+        prop_assert!(fees_cover(&params, n, 0, p).expect("cover"));
     }
 
     #[test]
