@@ -181,7 +181,15 @@ zeek-keyholder address --config config/keyholder-1.json               # all thre
 # copy .secrets/keyholder-1/payout-sealing.json to the other two nodes and to .secrets/ (engine)
 # then the engine with ZEEK_KEYHOLDERS set (see .env.example) pays settlements automatically
 curl http://127.0.0.1:8787/v1/vault/ledger
+# rebuild both vaults' history from chain data and reconcile it with the engine
+zeek-engine audit > docs/examples/phase4b/audit.txt
 ```
+
+Keyholders refuse with the exact item that failed, for example
+`output 0: recipient does not match the sealed payout receiver for round 7 (amount matches)`,
+`output 2: amount 2,370,000 expected 2,365,000`,
+`input 3: note is not a dig of rounds [7]`, or
+`fee 15,000 exceeds the fees collected by the rules for rounds [7] (10,000)`.
 
 The vault's `ak` is the DKG group key; reddsa's RedPallas ciphersuite negates
 every share when the group key's y-coordinate is odd (`post_dkg`), and each
@@ -191,6 +199,24 @@ address and abort otherwise. Every message between nodes and coordinator is
 an ed25519-signed envelope bound to a session; a coordinator that tampers
 with a payout is refused by every keyholder with the reason logged. The
 `rogue-demo` cargo feature exists only to demonstrate that refusal.
+
+## Privacy: who can learn what
+
+Digs are shielded payments; the only public data is the vault's chain
+footprint. Every dig seals a **fresh diversified address** of the player's
+wallet (one new diversifier index per tile, allocated and persisted by the
+player's wallet), so no receiver is ever reused.
+
+| Party | Sees | Cannot see |
+|---|---|---|
+| Public observer with the UIVK (anyone; the key is in `config/game.testnet.json`) | Every dig's value, round and tile, which digs share a transaction, the vault's payout transactions and their fees (value balance), the number of payout outputs | Who dug (sender identity is shielded), payout recipients and amounts (outputs are encrypted to the recipients), the vault's change (internal scope) |
+| Engine operator (runs the coordinator, holds the sealing key) | Everything above, plus the opened payout receivers of the payouts it builds and the exact amounts paid | Which player a receiver belongs to; with fresh diversified receivers it cannot link two digs of the same player, even when both win |
+| Keyholders (open the sealed receivers of the payouts they sign) | The payout receivers and amounts of the rounds they sign, and the vault's own notes | Whose receivers they are, and that two payouts went to the same wallet: every dig's receiver is a distinct diversified address |
+| Players | Their own digs and payouts (their wallet decrypts them) | Other players' receivers or amounts beyond the public board |
+
+Only the payouts of a round are opened, by the coordinator and by each
+keyholder, in memory; nothing opened is logged, stored or served. The API only
+ever exposes sealed receiver bytes.
 
 ## Game rules (zeek-core)
 
@@ -202,10 +228,18 @@ the round and tile. When the window closes, the drand quicknet round fixed at
 the round's start reveals the treasure tile (rejection-sampled, no modulo
 bias). Diggers on that tile split the pot pro rata after a 5% rake into the
 Deep Cache; an empty treasure tile rolls the pot into the Cache; the Cache
-breaks open with 1-in-625 odds. Every payout and refund is one shielded output
-charged the ZIP 317 marginal fee (5000 zatoshis). Undecodable memos and digs
-under the minimum are forfeited to the Cache; digs for the wrong round,
-outside the window or in a voided round are refunded. A round is voided when
+breaks open with 1-in-625 odds. Fees follow ZIP 317 exactly (rules v2): every
+dig note the payout transaction spends is charged a dig fee of 5000 zatoshis
+before it joins the pot, and every payout or refund is one shielded output
+charged the 5000-zatoshi marginal fee. The payout transaction spends exactly
+the round's charged notes (plus the fewest operator-float notes when a Cache
+payout exceeds them), so its ZIP 317 fee, `5000 · max(2, spends, outputs)`,
+never exceeds the fees collected; see `crates/zeek-core/src/settle.rs`.
+Undecodable memos and digs under the minimum are forfeited to the Cache; digs
+for the wrong round, outside the window or in a voided round are refunded
+minus both fees, or forfeited whole when they cannot cover them. Rounds
+settled before rules v2 keep their recorded results (proof bundle version 1).
+A round is voided when
 the median timestamp of the 11 blocks after its window, plus the assumed
 honest clock skew, is not before the beacon's publication time (see the
 "Timing safety argument" in `crates/zeek-core/src/timing.rs`).
