@@ -32,6 +32,7 @@
 //!    broadcast and recorded in the wallet.
 
 use std::convert::Infallible;
+use std::num::NonZeroU32;
 
 use orchard::circuit::{OrchardCircuitVersion, ProvingKey, VerifyingKey};
 use orchard::keys::{FullViewingKey, Scope};
@@ -53,12 +54,11 @@ use zcash_client_backend::data_api::locking::LockFilter;
 use zcash_client_backend::data_api::wallet::input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, SpendPolicy,
 };
-use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::data_api::wallet::{
     create_pczt_from_proposal, extract_and_store_transaction_from_pczt, propose_transfer,
     ConfirmationsPolicy,
 };
-use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees};
+use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees, WalletRead};
 use zcash_client_backend::fees::zip317::SingleOutputChangeStrategy;
 use zcash_client_backend::fees::DustOutputPolicy;
 use zcash_client_backend::wallet::{Note, OvkPolicy};
@@ -513,27 +513,33 @@ pub struct ShapedOutput {
 ///
 /// Unlike [`prepare_pczt`] nothing is selected or balanced here: the caller
 /// states the full shape and this function refuses anything that does not
-/// balance to the ZIP 317 fee for that shape. Every spent note must be
-/// unspent, mined at or below `anchor_height`, and witnessed in the wallet's
-/// Ironwood commitment tree at that anchor; the builder refuses a note whose
-/// recipient is not derived from `fvk`.
+/// balance to the ZIP 317 fee for that shape. The target height is the
+/// wallet's next block and the anchor is the wallet's newest checkpoint at
+/// least `min_confirmations` below it (the same rule the wallet's own
+/// proposals use; checkpoints only exist at scanned-batch boundaries). Every
+/// spent note must be unspent, mined at or below that anchor, and witnessed
+/// in the wallet's Ironwood commitment tree there; the builder refuses a note
+/// whose recipient is not derived from `fvk`.
 pub fn build_pczt_from_notes(
     db: &mut Db,
     fvk: &FullViewingKey,
     spends: &[NoteId],
     outputs: &[ShapedOutput],
-    target_height: BlockHeight,
-    anchor_height: BlockHeight,
+    min_confirmations: NonZeroU32,
 ) -> Result<PreparedPczt, VaultError> {
     if spends.is_empty() {
         return Err(VaultError::NothingToSign);
     }
+    let (target, anchor_height) = db
+        .get_target_and_anchor_heights(min_confirmations)
+        .map_err(wallet_err)?
+        .ok_or_else(|| VaultError::Wallet("wallet has not been synced yet".into()))?;
+    let target_height = BlockHeight::from_u32(u32::from(target));
     if anchor_height >= target_height {
         return Err(VaultError::Build(format!(
             "anchor height {anchor_height} must be below the target height {target_height}"
         )));
     }
-    let target: TargetHeight = target_height.into();
 
     // Resolve every spend to its note and position.
     let mut notes = Vec::with_capacity(spends.len());
@@ -679,6 +685,40 @@ pub fn build_pczt_from_notes(
         target_height,
         fee,
     })
+}
+
+/// Extracts a fully signed PCZT into a transaction, checks it is V6 on the
+/// expected branch and broadcasts it, without touching the wallet. Callers
+/// that need the wallet to know about it store it afterwards with
+/// [`store_transaction`]; the wallet also learns about it from the chain.
+pub async fn extract_and_broadcast(
+    client: &mut Client,
+    pczt: Pczt,
+    verifying_key: &VerifyingKey,
+    target_height: BlockHeight,
+) -> Result<Transaction, VaultError> {
+    let transaction = TransactionExtractor::new(pczt)
+        .with_orchard(verifying_key)
+        .extract()
+        .map_err(|e| VaultError::Pczt(format!("extract: {e:?}")))?;
+    check_version(&transaction, target_height)?;
+    let raw = serialize(&transaction)?;
+    lightwalletd::broadcast(client, raw).await?;
+    tracing::info!("broadcast accepted: {}", transaction.txid());
+    Ok(transaction)
+}
+
+/// Records a transaction the wallet's keys can decrypt (spent notes, change,
+/// payments it sent) as pending, so balances reflect it before it is mined.
+/// Works for any transaction, not only ones built from a wallet proposal.
+pub fn store_transaction(db: &mut Db, transaction: &Transaction) -> Result<(), VaultError> {
+    zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
+        &NETWORK,
+        db,
+        transaction,
+        None,
+    )
+    .map_err(wallet_err)
 }
 
 /// Extracts a fully signed PCZT into a transaction, checks it is V6 on the

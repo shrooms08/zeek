@@ -34,6 +34,25 @@ enum Command {
     /// Rebuild every vault's history from chain data and reconcile it against
     /// the engine's settlements, payouts and ledger. Prints the report.
     Audit(AuditArgs),
+    /// Complete a payout record stuck in the `signing` state: finds, on the
+    /// chain, the transaction that spent the round's charged dig notes and
+    /// records its txid. Refuses if the notes are unspent or the fee differs
+    /// from the record.
+    PayoutRecover(RecoverArgs),
+}
+
+#[derive(Args)]
+struct RecoverArgs {
+    /// The round whose payout record is stuck.
+    #[arg(long)]
+    round: u32,
+    /// Keyholders that released shares (from their logs), comma-separated;
+    /// required when the record does not name them yet.
+    #[arg(long, value_delimiter = ',')]
+    signers: Vec<u16>,
+    /// First height to scan (default: the vault's birthday).
+    #[arg(long)]
+    from: Option<u32>,
 }
 
 #[derive(Args)]
@@ -65,12 +84,88 @@ fn main() -> anyhow::Result<()> {
         .context("starting async runtime")?;
     match cli.command {
         Some(Command::Audit(args)) => runtime.block_on(run_audit(settings, args)),
+        Some(Command::PayoutRecover(args)) => {
+            let config = GameConfig::load(&settings.game_config_path)
+                .with_context(|| format!("loading {}", settings.game_config_path.display()))?;
+            runtime.block_on(run_recover(settings, config, args))
+        }
         None => {
             let config = GameConfig::load(&settings.game_config_path)
                 .with_context(|| format!("loading {}", settings.game_config_path.display()))?;
             runtime.block_on(run(settings, config))
         }
     }
+}
+
+async fn run_recover(
+    settings: EngineSettings,
+    config: GameConfig,
+    args: RecoverArgs,
+) -> anyhow::Result<()> {
+    let coordinator_settings = CoordinatorSettings::from_env()?.context(
+        "the coordinator environment (ZEEK_KEYHOLDERS, ZEEK_VAULT_SECRETS_DIR) is required",
+    )?;
+    let db = Db::open(&settings.db_path)?;
+    let processor = Processor::new(config);
+    let record = db
+        .payout(args.round)?
+        .with_context(|| format!("round {} has no payout record", args.round))?;
+    anyhow::ensure!(
+        record.state == zeek_engine::db::PayoutState::Signing,
+        "round {} is already {:?}",
+        args.round,
+        record.state
+    );
+    let signers = if record.signers.is_empty() {
+        anyhow::ensure!(
+            !args.signers.is_empty(),
+            "the record names no signers; pass --signers"
+        );
+        args.signers.clone()
+    } else {
+        record.signers.clone()
+    };
+    let row = db
+        .settlement(args.round)?
+        .with_context(|| format!("round {} is not settled", args.round))?;
+    let notes: Vec<(String, u16)> = processor
+        .payout_inputs(&db, &row)?
+        .into_iter()
+        .map(|n| (n.txid, n.output_index))
+        .collect();
+    anyhow::ensure!(
+        !notes.is_empty(),
+        "round {} has no charged notes",
+        args.round
+    );
+    let vault =
+        zeek_vault::store::SecretsDir::new(&coordinator_settings.vault_secrets_dir).load_vault()?;
+    let from = args
+        .from
+        .or(vault.birthday_height)
+        .context("no --from height and the vault file records no birthday")?;
+    let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    let spent = audit::find_spending_tx(
+        &mut source,
+        from,
+        &coordinator_settings.vault_secrets_dir,
+        &notes,
+    )
+    .await?
+    .context("the round's charged notes are not spent on the chain; nothing to recover")?;
+    anyhow::ensure!(
+        i128::from(spent.fee) == i128::from(record.fee),
+        "the spending transaction's fee {} differs from the recorded fee {}",
+        spent.fee,
+        record.fee
+    );
+    db.mark_payout_broadcast(args.round, &spent.txid, spent.height, &signers)?;
+    db.set_plan_status(args.round, zeek_engine::db::PlanStatus::Paid)?;
+    println!(
+        "round {}: payout {} mined at {} (fee {}) recorded as broadcast, signers {:?}",
+        args.round, spent.txid, spent.height, spent.fee, signers
+    );
+    Ok(())
 }
 
 async fn run_audit(settings: EngineSettings, args: AuditArgs) -> anyhow::Result<()> {

@@ -12,10 +12,14 @@
 //! Retry safety: a payout record in state `signing` is written before the
 //! keyholders are asked for shares, and a round with a record is never
 //! rebuilt automatically; the operator inspects it. A transaction is
-//! broadcast only after the record exists, so no round is ever paid twice.
+//! broadcast only after the record exists, so no round is ever paid twice. A
+//! record left in `signing` after a broadcast (a crash between the two
+//! steps) is completed by `zeek-engine payout-recover`, which finds the
+//! transaction that spent the round's charged notes on the chain.
 
 use std::collections::BTreeMap;
 use std::env;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -387,19 +391,15 @@ impl Coordinator {
             "payout transaction planned"
         );
 
-        // Build at the next height, anchored where every input has the
-        // confirmations the policy requires.
-        let target_height = BlockHeight::from_u32(report.chain_tip) + 1;
-        let anchor_height = BlockHeight::from_u32(
-            report
-                .chain_tip
-                .checked_add(1)
-                .and_then(|t| t.checked_sub(report.min_confirmations))
-                .ok_or(EngineError::Overflow("anchor height"))?,
-        );
-        let circuit = send::circuit_version_for(target_height)?;
+        // Build at the wallet's next height, anchored at its newest checkpoint
+        // that gives every input the confirmations the policy requires.
+        let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
+        let circuit = send::circuit_version_for(expected_target)?;
         let proving_key = ProvingKey::build(circuit);
         let verifying_key = VerifyingKey::build(circuit);
+        let min_confirmations = NonZeroU32::new(report.min_confirmations).ok_or_else(|| {
+            EngineError::Config("confirmations policy requires at least 1".into())
+        })?;
         let PreparedPczt {
             pczt,
             target_height,
@@ -409,9 +409,15 @@ impl Coordinator {
             &self.fvk,
             &plan.spends,
             &outputs,
-            target_height,
-            anchor_height,
+            min_confirmations,
         )?;
+        if send::circuit_version_for(target_height)? != circuit {
+            return Err(zeek_vault::VaultError::CircuitMismatch {
+                built: format!("{circuit:?}"),
+                required: format!("{:?}", send::circuit_version_for(target_height)?),
+            }
+            .into());
+        }
         if fee.into_u64() != plan.fee {
             return Err(EngineError::Server(format!(
                 "builder fee {} differs from the planned fee {}",
@@ -449,19 +455,21 @@ impl Coordinator {
             }
         };
         let (pczt, signers) = signed;
+        // The record names the signers before anything leaves this process,
+        // and the broadcast is recorded before the wallet is told about it: a
+        // wallet storage failure must never hide a transaction that is on
+        // the network (the wallet learns about it from the chain anyway).
+        db.set_payout_signers(round, &signers)?;
         let client = self.client().await?;
-        let transaction = send::extract_broadcast_store(
-            &mut wallet_db,
-            client,
-            pczt,
-            &verifying_key,
-            target_height,
-        )
-        .await?;
+        let transaction =
+            send::extract_and_broadcast(client, pczt, &verifying_key, target_height).await?;
         let txid = transaction.txid().to_string();
         db.mark_payout_broadcast(round, &txid, report.chain_tip, &signers)?;
         db.set_plan_status(round, PlanStatus::Paid)?;
         tracing::info!(round, %txid, ?signers, "payout broadcast");
+        if let Err(e) = send::store_transaction(&mut wallet_db, &transaction) {
+            tracing::warn!(round, %txid, error = %e, "the vault wallet could not record the payout yet; it will pick it up from the chain");
+        }
         Ok(Some(PayoutReport {
             round,
             txid,

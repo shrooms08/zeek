@@ -716,6 +716,35 @@ impl Db {
         Ok(())
     }
 
+    /// Records which keyholders signed, before the transaction is broadcast.
+    pub fn set_payout_signers(&self, round: u32, signers: &[u16]) -> Result<(), EngineError> {
+        self.conn.execute(
+            "UPDATE payouts SET signers = ?1 WHERE round = ?2",
+            params![
+                serde_json::to_string(signers).map_err(|e| EngineError::Corrupt(e.to_string()))?,
+                round
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Payout records still in the signing state.
+    pub fn payouts_in_signing(&self) -> Result<Vec<PayoutRecord>, EngineError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT round FROM payouts WHERE state = 'signing' ORDER BY round")?;
+        let rounds: Vec<u32> = stmt
+            .query_map([], |r| r.get::<_, u32>(0))?
+            .collect::<Result<_, _>>()?;
+        let mut out = Vec::with_capacity(rounds.len());
+        for round in rounds {
+            if let Some(record) = self.payout(round)? {
+                out.push(record);
+            }
+        }
+        Ok(out)
+    }
+
     /// Marks the round's payout as broadcast.
     pub fn mark_payout_broadcast(
         &self,

@@ -526,6 +526,61 @@ pub async fn run(
     Ok(AuditOutcome { report, mismatches })
 }
 
+/// What the chain says about the transaction that spent a set of notes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpendingTx {
+    pub txid: String,
+    pub height: u32,
+    pub fee: i64,
+}
+
+/// Finds the transaction that spent **all** of `notes` (display txid, action
+/// index) of the vault in `secrets_dir`, scanning chain data from `from`.
+/// Returns `None` if none of them is spent yet; errors if they were spent by
+/// different transactions.
+pub async fn find_spending_tx(
+    source: &mut dyn ChainSource,
+    from: u32,
+    secrets_dir: &Path,
+    notes: &[(String, u16)],
+) -> Result<Option<SpendingTx>, EngineError> {
+    let vault = SecretsDir::new(secrets_dir).load_vault()?;
+    let mut histories = vec![VaultHistory::new(&vault)?];
+    rebuild(source, from, Network::Test, &mut histories).await?;
+    let history = &histories[0];
+    let mut found: Option<SpendingTx> = None;
+    for (txid, index) in notes {
+        let key: NoteKey = (Pool::Ironwood, txid.clone(), *index);
+        let note = history.notes.get(&key).ok_or_else(|| {
+            EngineError::Corrupt(format!("note {txid}:{index} is not a note of this vault"))
+        })?;
+        let Some((height, spender)) = &note.spent_in else {
+            return Ok(None);
+        };
+        let tx = history
+            .txs
+            .iter()
+            .find(|t| &t.txid == spender)
+            .ok_or_else(|| EngineError::Corrupt(format!("spending tx {spender} vanished")))?;
+        let this = SpendingTx {
+            txid: spender.clone(),
+            height: *height,
+            fee: tx.fee,
+        };
+        match &found {
+            None => found = Some(this),
+            Some(f) if *f == this => {}
+            Some(f) => {
+                return Err(EngineError::Corrupt(format!(
+                    "notes were spent by different transactions: {} and {}",
+                    f.txid, this.txid
+                )))
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn pool_name(pool: Pool) -> &'static str {
     match pool {
         Pool::Ironwood => "ironwood",
