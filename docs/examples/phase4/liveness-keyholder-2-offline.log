@@ -1,0 +1,5 @@
+# Liveness test: keyholder 2 stopped before round 8 settled; keyholders 1 and 3 completed the payout
+[2m2026-10-14T00:27:10.442973Z[0m [32m INFO[0m approved the payout [3mkeyholder[0m[2m=[0m1
+[2m2026-10-14T00:27:10.443004Z[0m [33m WARN[0m keyholder did not approve [3mkeyholder[0m[2m=[0m2 [3merror[0m[2m=[0mrelay request failed: http://127.0.0.1:9102/v1/sign/request: error sending request for url (http://127.0.0.1:9102/v1/sign/request)
+[2m2026-10-14T00:27:10.443096Z[0m [32m INFO[0m approved the payout [3mkeyholder[0m[2m=[0m3
+[2m2026-10-14T00:27:11.025588Z[0m [32m INFO[0m payout broadcast [3mround[0m[2m=[0m8 [3mtxid[0m[2m=[0mdbcefc218cdf270d0b98339277f2e76fe96d60b5119be74f3583673f2faf18b1 [3msigners[0m[2m=[0m[1, 3]
