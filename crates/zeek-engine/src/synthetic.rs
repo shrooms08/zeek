@@ -172,6 +172,57 @@ impl SyntheticChain {
         }
     }
 
+    /// A payment to any Orchard-protocol address (for wallets under test).
+    pub fn payment_to(
+        &self,
+        recipient: orchard::Address,
+        value: u64,
+        pool: Pool,
+        memo: [u8; 512],
+    ) -> TxSpec {
+        TxSpec {
+            recipient,
+            value,
+            pool,
+            memo,
+        }
+    }
+
+    /// Appends a block holding one real, serialized V6 transaction (for
+    /// example one a wallet under test built); returns its height.
+    pub fn push_raw_transaction(&mut self, raw: Vec<u8>) -> Result<u32, EngineError> {
+        let tx = zcash_primitives::transaction::Transaction::read(&raw[..], BranchId::Nu6_3)
+            .map_err(|e| EngineError::Server(format!("raw transaction: {e}")))?;
+        let txid: [u8; 32] = *tx.txid().as_ref();
+        let actions =
+            |bundle: Option<&orchard::Bundle<orchard::bundle::Authorized, ZatBalance>>| {
+                bundle
+                    .map(|b| {
+                        b.actions()
+                            .iter()
+                            .map(|action| CompactOrchardAction {
+                                nullifier: action.nullifier().to_bytes().to_vec(),
+                                cmx: action.cmx().to_bytes().to_vec(),
+                                ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
+                                ciphertext: action.encrypted_note().enc_ciphertext[..52].to_vec(),
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            };
+        let compact = CompactTx {
+            index: 0,
+            txid: txid.to_vec(),
+            actions: actions(tx.orchard_bundle()),
+            ironwood_actions: actions(tx.ironwood_bundle()),
+            ..CompactTx::default()
+        };
+        self.transactions.insert(txid, raw);
+        let height = self.next_height;
+        self.push_compact_block(vec![compact]);
+        Ok(height)
+    }
+
     /// Change to the vault's internal address (invisible to the external IVK).
     pub fn change(&self, value: u64) -> TxSpec {
         TxSpec {
@@ -192,11 +243,6 @@ impl SyntheticChain {
     /// Appends a block containing one transaction per spec; returns its height.
     pub fn push_block(&mut self, specs: Vec<TxSpec>) -> u32 {
         let height = self.next_height;
-        let prev_hash = self
-            .blocks
-            .get(&(height.wrapping_sub(1)))
-            .map(|b| b.hash.clone())
-            .unwrap_or_else(|| vec![0u8; 32]);
         let mut vtx = Vec::new();
         for (index, spec) in specs.into_iter().enumerate() {
             let (txid, raw, compact) = self.build_transaction(height, &spec);
@@ -207,6 +253,16 @@ impl SyntheticChain {
                 ..compact
             });
         }
+        self.push_compact_block(vtx)
+    }
+
+    fn push_compact_block(&mut self, vtx: Vec<CompactTx>) -> u32 {
+        let height = self.next_height;
+        let prev_hash = self
+            .blocks
+            .get(&(height.wrapping_sub(1)))
+            .map(|b| b.hash.clone())
+            .unwrap_or_else(|| vec![0u8; 32]);
         self.nonce += 1;
         let mut hash = vec![0u8; 32];
         hash[..8].copy_from_slice(&self.nonce.to_le_bytes());

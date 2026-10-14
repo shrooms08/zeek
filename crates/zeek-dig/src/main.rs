@@ -39,6 +39,21 @@ enum Command {
     },
     /// Dig: pay the vault with a sealed dig memo.
     Dig(DigArgs),
+    /// Send shielded funds to any address with an Orchard-protocol receiver.
+    Send {
+        name: String,
+        #[arg(long)]
+        to: String,
+        /// Amount in ZEC, e.g. 0.01.
+        #[arg(long)]
+        amount: String,
+        /// Optional text memo.
+        #[arg(long)]
+        memo: Option<String>,
+    },
+    /// Pay a ZIP 321 payment request URI exactly as an external wallet
+    /// would (every payment, amounts and memo bytes as given).
+    PayUri { name: String, uri: String },
 }
 
 #[derive(Args)]
@@ -141,6 +156,46 @@ fn main() -> anyhow::Result<()> {
                     note.memo
                 );
             }
+            Ok(())
+        }),
+        Command::Send {
+            name,
+            to,
+            amount,
+            memo,
+        } => runtime.block_on(async {
+            let player = Player::new(secrets.path(), &name)?;
+            let destination = zeek_vault::send::parse_destination(&to)?;
+            let amount = zeek_vault::send::parse_zec(&amount)?;
+            let memo = zeek_vault::send::parse_memo(memo.as_deref())?;
+            let payment = zip321::Payment::new(destination, Some(amount), memo, None, None, vec![])
+                .map_err(|e| anyhow::anyhow!("payment: {e}"))?;
+            let request = zip321::TransactionRequest::new(vec![payment])
+                .map_err(|e| anyhow::anyhow!("payment request: {e}"))?;
+            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut db = player.open_db()?;
+            player.ensure_account(&mut db, &mut client).await?;
+            let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
+            println!(
+                "Sent {} zatoshis (fee {})",
+                outcome.total_zat, outcome.fee_zat
+            );
+            println!("txid: {}", outcome.txid);
+            Ok(())
+        }),
+        Command::PayUri { name, uri } => runtime.block_on(async {
+            let player = Player::new(secrets.path(), &name)?;
+            let request = zip321::TransactionRequest::from_uri(uri.trim())
+                .map_err(|e| anyhow::anyhow!("not a valid ZIP 321 request: {e:?}"))?;
+            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut db = player.open_db()?;
+            player.ensure_account(&mut db, &mut client).await?;
+            let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
+            println!(
+                "Paid {} payment(s) totalling {} zatoshis (fee {})",
+                outcome.payments, outcome.total_zat, outcome.fee_zat
+            );
+            println!("txid: {}", outcome.txid);
             Ok(())
         }),
         Command::Dig(args) => runtime.block_on(async {

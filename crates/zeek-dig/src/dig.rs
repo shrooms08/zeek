@@ -266,6 +266,63 @@ pub async fn dig(
     })
 }
 
+/// What a plain payment produced.
+pub struct PaymentOutcome {
+    pub txid: String,
+    pub payments: usize,
+    pub total_zat: u64,
+    pub fee_zat: u64,
+}
+
+/// Pays a ZIP 321 request exactly as an external wallet would: every payment
+/// with its amount and its memo bytes as given (text memos stay text).
+pub async fn pay_request(
+    player: &Player,
+    db: &mut Db,
+    client: &mut Client,
+    request: zip321::TransactionRequest,
+) -> Result<PaymentOutcome, DigError> {
+    let payments = request.payments().len();
+    let total_zat = request
+        .total()
+        .map_err(|e| DigError::Game(format!("request total: {e:?}")))?
+        .ok_or_else(|| DigError::Game("every payment in the request needs an amount".into()))?
+        .into_u64();
+    let usk = player.spending_key()?;
+    let account = player
+        .find_account(db)?
+        .ok_or_else(|| DigError::PlayerMissing(player.name().to_owned()))?;
+    wallet::sync(db, client).await?;
+    let report = wallet::balance(db, account)?;
+    let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
+    let circuit = send::circuit_version_for(expected_target)?;
+    tracing::info!("building Orchard proving key for {circuit:?}");
+    let proving_key = ProvingKey::build(circuit);
+    let verifying_key = VerifyingKey::build(circuit);
+    let PreparedPczt {
+        pczt,
+        target_height,
+        fee,
+    } = send::prepare_pczt(db, account, request, &report)?;
+    if send::circuit_version_for(target_height)? != circuit {
+        return Err(VaultError::CircuitMismatch {
+            built: format!("{circuit:?}"),
+            required: format!("{:?}", send::circuit_version_for(target_height)?),
+        }
+        .into());
+    }
+    let pczt = send::prove(pczt, &proving_key)?;
+    let pczt = sign_with_key(pczt, &usk)?;
+    let transaction =
+        send::extract_broadcast_store(db, client, pczt, &verifying_key, target_height).await?;
+    Ok(PaymentOutcome {
+        txid: transaction.txid().to_string(),
+        payments,
+        total_zat,
+        fee_zat: fee.into_u64(),
+    })
+}
+
 /// Signs every pending spend with the player's Orchard spend authorizing key.
 fn sign_with_key(pczt: Pczt, usk: &UnifiedSpendingKey) -> Result<Pczt, DigError> {
     let ask = SpendAuthorizingKey::from(usk.orchard());
