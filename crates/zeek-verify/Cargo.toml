@@ -55,9 +55,6 @@ cli = [
     "zcash_client_backend/lightwalletd-tonic-tls-webpki-roots",
 ]
 
-[dev-dependencies]
-zeek-engine = { path = "../zeek-engine", features = ["testkit"] }
-tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

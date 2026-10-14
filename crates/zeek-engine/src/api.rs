@@ -40,6 +40,53 @@ pub struct AppState {
     pub coordinator: Option<Arc<Mutex<Coordinator>>>,
     /// Present when this engine relays chain data to browser wallets.
     pub relay: Option<Arc<crate::relay::RelayState>>,
+    /// Campfire display filter.
+    pub campfire_filter: crate::campfire::Filter,
+    /// Rate limit of win proof submissions (verification costs about a
+    /// second of CPU each).
+    pub proof_limiter: crate::relay::RateLimiter,
+}
+
+/// Win proof submissions per minute per client address.
+pub const PROOF_SUBMISSIONS_PER_MIN: u32 = 10;
+/// Largest accepted submission body (a proof is about 7.5 kB, 10 kB as base64url).
+pub const MAX_PROOF_BODY: usize = 32 * 1024;
+
+/// `GET /v1/campfire` query.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CampfireQuery {
+    /// Only messages mined below this height (pagination).
+    pub before: Option<u32>,
+    pub limit: Option<usize>,
+    /// `1` to include the text of filtered messages.
+    pub include_hidden: Option<u8>,
+}
+
+/// `GET /v1/campfire`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CampfireResponse {
+    pub messages: Vec<crate::campfire::CampfireMessage>,
+    /// Pass as `before` for the next page (absent at the end).
+    pub next_before: Option<u32>,
+}
+
+/// `POST /v1/proofs` body.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SubmitProof {
+    /// The win proof, base64url (no padding).
+    pub proof: String,
+}
+
+/// `POST /v1/proofs` and `GET /v1/proofs/{id}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredProof {
+    pub id: String,
+    pub round: u32,
+    pub created_at: u64,
+    /// The proof, base64url.
+    pub proof: String,
+    /// The engine's verdict (anyone can recheck with `zeek-verify win`).
+    pub verdict: zeek_verify::win::WinVerdict,
 }
 
 /// `GET /v1/config`.
@@ -90,6 +137,12 @@ pub struct SettledRound {
     pub dig_fees: u64,
     pub total_paid: u64,
     pub forfeited: u64,
+    /// Shouts (rules v4): their value minus `shout_fees` went to the Cache.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shouts: u64,
+    /// Dig fees reserved for spending the shout notes later.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shout_fees: u64,
     /// Rules the round was settled under (1 or 2; views saved before the
     /// field existed are rules v1).
     #[serde(default = "rules_v1")]
@@ -102,6 +155,10 @@ pub struct SettledRound {
 
 fn rules_v1() -> u32 {
     1
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// `GET /v1/rounds/{n}`.
@@ -166,6 +223,10 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/vault/ledger", get(vault_ledger))
         .route("/v1/stream", get(stream))
+        .route("/v1/campfire", get(campfire))
+        .route("/v1/proofs", axum::routing::post(submit_proof))
+        .route("/v1/proofs/{id}", get(get_proof))
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_PROOF_BODY))
         .with_state(state.clone());
     if let Some(relay) = &state.relay {
         router = router.merge(crate::relay::router(relay.clone()));
@@ -262,6 +323,8 @@ pub fn round_response(
             dig_fees: s.dig_fees,
             total_paid: s.total_paid,
             forfeited: s.forfeited,
+            shouts: s.shouts,
+            shout_fees: s.shout_fees,
             rules_version: row.rules_version,
             plan_status: row.status,
             settled_at_height: row.settled_at_height,
@@ -332,6 +395,155 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<HealthResponse>
         tip_height: db.tip()?.map(|b| b.height),
         settled_rounds: db.settled_rounds()?.len(),
         uptime_secs: state.started.elapsed().as_secs(),
+    }))
+}
+
+async fn campfire(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<CampfireQuery>,
+) -> ApiResult<CampfireResponse> {
+    let limit = q.limit.unwrap_or(50);
+    let db = lock(&state).await;
+    let messages = crate::campfire::messages(
+        &db,
+        &state.processor.config().params,
+        &state.campfire_filter,
+        q.before,
+        limit,
+        q.include_hidden == Some(1),
+    )?;
+    let next_before = (messages.len() >= limit.clamp(1, crate::campfire::MAX_LIMIT))
+        .then(|| messages.last().map(|m| m.height))
+        .flatten();
+    Ok(Json(CampfireResponse {
+        messages,
+        next_before,
+    }))
+}
+
+fn bad(status: StatusCode, message: impl Into<String>) -> ApiError {
+    ApiError(status, message.into())
+}
+
+/// Validates a win proof completely (against this engine's bundle of the
+/// round and the payout transaction fetched from its chain source) before
+/// storing it; proofs are public data.
+async fn submit_proof(
+    State(state): State<Arc<AppState>>,
+    connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    Json(body): Json<SubmitProof>,
+) -> Result<(StatusCode, Json<StoredProof>), ApiError> {
+    use base64::Engine;
+    let address = connect.map_or(std::net::IpAddr::from([0, 0, 0, 0]), |c| c.0 .0.ip());
+    if !state.proof_limiter.allow(address, Instant::now()).await {
+        return Err(bad(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many proof submissions; retry in a minute",
+        ));
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(body.proof.trim())
+        .map_err(|_| bad(StatusCode::BAD_REQUEST, "the proof is not base64url"))?;
+    let proof = zeek_verify::win::WinProof::decode(&bytes)
+        .map_err(|e| bad(StatusCode::BAD_REQUEST, e.to_string()))?;
+    let id = zeek_verify::win::WinProof::id(&bytes);
+    let bundle = {
+        let db = lock(&state).await;
+        let row = db.settlement(proof.round)?.ok_or_else(|| {
+            bad(
+                StatusCode::NOT_FOUND,
+                format!("round {} is not settled", proof.round),
+            )
+        })?;
+        state.processor.proof_bundle(&db, &row)?
+    };
+    let relay = state.relay.as_ref().ok_or_else(|| {
+        bad(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "this engine has no chain source for verification",
+        )
+    })?;
+    let txid = zeek_verify::chain::txid_bytes(&proof.payout_txid)
+        .ok_or_else(|| bad(StatusCode::BAD_REQUEST, "malformed payout txid"))?;
+    let raw = relay
+        .backend()
+        .transaction(txid)
+        .await
+        .map_err(|e| bad(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let height = u32::try_from(raw.height).unwrap_or(0);
+    let blocks = relay
+        .backend()
+        .blocks(height, height)
+        .await
+        .map_err(|e| bad(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let included = height > 0 && zeek_verify::chain::Blocks::new(blocks).contains_tx(height, &txid);
+    let mined = zeek_verify::chain::MinedTx {
+        raw: raw.data,
+        height,
+    };
+    let verdict = tokio::task::spawn_blocking(move || {
+        zeek_verify::win::verify(&proof, &bundle, &mined, included)
+    })
+    .await
+    .map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let round = verdict_round(&bytes);
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let stored = StoredProof {
+        id: id.clone(),
+        round,
+        created_at,
+        proof: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes),
+        verdict: verdict.clone(),
+    };
+    if !verdict.valid {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(stored)));
+    }
+    lock(&state)
+        .await
+        .insert_win_proof(&id, round, created_at, &bytes)?;
+    Ok((StatusCode::CREATED, Json(stored)))
+}
+
+fn verdict_round(bytes: &[u8]) -> u32 {
+    zeek_verify::win::WinProof::decode(bytes).map_or(0, |p| p.round)
+}
+
+async fn get_proof(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<StoredProof>, ApiError> {
+    use base64::Engine;
+    if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(bad(
+            StatusCode::BAD_REQUEST,
+            "a proof id is 32 hex characters",
+        ));
+    }
+    let (round, created_at, bytes) = lock(&state)
+        .await
+        .win_proof(&id)?
+        .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))?;
+    // Stored proofs were fully verified on submission; the stored verdict
+    // is restated here (the claim depends only on public data).
+    let proof = zeek_verify::win::WinProof::decode(&bytes)
+        .map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(StoredProof {
+        id,
+        round,
+        created_at,
+        proof: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes),
+        verdict: zeek_verify::win::WinVerdict {
+            valid: true,
+            claim: format!(
+                "Verified on submission: the holder controls the address that received round {}'s treasure payout {} (transaction {}).",
+                proof.round, proof.payout_index, proof.payout_txid
+            ),
+            reason: None,
+            steps: Vec::new(),
+        },
     }))
 }
 

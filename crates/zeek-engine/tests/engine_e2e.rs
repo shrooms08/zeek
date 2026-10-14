@@ -390,6 +390,8 @@ async fn http_api_serves_the_round() {
         started: std::time::Instant::now(),
         coordinator: None,
         relay: None,
+        campfire_filter: zeek_engine::campfire::Filter::default(),
+        proof_limiter: zeek_engine::relay::RateLimiter::new(10),
     });
     let app = router(state, &["http://localhost:5173".to_owned()]);
 
@@ -771,4 +773,149 @@ async fn relay_serves_chain_data_with_limits() {
     let stats: RelayStatsResponse = serde_json::from_slice(&body).expect("json");
     assert_eq!(stats.rate_per_minute, 600);
     assert_eq!(stats.max_block_range, MAX_BLOCK_RANGE);
+}
+
+/// Rules v4 end to end: a dig with a nicknamed message, a shout and a
+/// filtered message; the shout reaches the Cache minus its reserved dig fee,
+/// the format 4 bundle recomputes, and `/v1/campfire` serves the messages
+/// newest first, hiding the filtered one unless asked.
+#[tokio::test]
+async fn campfire_messages_and_shouts() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use std::sync::Arc;
+    use tokio::sync::{broadcast, Mutex};
+    use tower::ServiceExt;
+    use zeek_engine::api::{router, AppState, CampfireResponse};
+
+    let vault = TestVault::new(79);
+    let mut config = vault.config(GENESIS);
+    config.params.text_memo_activation_height = Some(GENESIS);
+    config.params.campfire = Some(zeek_core::params::CampfireParams {
+        activation_height: GENESIS,
+        min_shout_zat: zeek_core::params::MIN_SHOUT_ZAT,
+    });
+    config.validate().expect("valid v4 config");
+    let mut chain = SyntheticChain::new(&vault, GENESIS, start_time(&config.params));
+    let dig = vault
+        .dig_memo(0, 4, 1)
+        .with_message("[ember] warm hands")
+        .expect("message");
+    let shout = zeek_core::memo::ShoutMemo::new("the night is long").expect("shout");
+    let spam = zeek_core::memo::ShoutMemo::new("free giveaway, dm me").expect("shout");
+    let small = zeek_core::memo::ShoutMemo::new("too small to count").expect("shout");
+    chain.push_block(vec![chain.payment(100_000, Pool::Ironwood, dig.encode())]);
+    chain.push_block(vec![chain.payment(60_000, Pool::Ironwood, shout.encode())]);
+    chain.push_block(vec![
+        chain.payment(50_000, Pool::Ironwood, spam.encode()),
+        chain.payment(10_000, Pool::Ironwood, small.encode()),
+    ]);
+    while chain.next_height() < GENESIS + config.params.blocks_per_round {
+        chain.advance(1);
+    }
+    chain.advance(config.params.mtp_window + SETTLE_CONFIRMATIONS);
+    let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
+    let mut db = Db::open_in_memory().expect("db");
+    let mut processor = Processor::new(config.clone());
+    ingest(&mut chain, &mut db, &scanner, &config)
+        .await
+        .expect("ingest");
+    let beacon_time = start_time(&config.params) + 600 + 900;
+    processor
+        .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+        .await
+        .expect("process");
+    let row = db.settlement(0).expect("row").expect("settled");
+    assert_eq!(row.rules_version, 4);
+    assert_eq!(row.settlement.shouts, 110_000);
+    assert_eq!(row.settlement.shout_fees, 10_000);
+    assert_eq!(row.settlement.forfeited, 10_000, "the undersized shout");
+    let bundle = proof_response(&processor, &db, 0)
+        .expect("proof")
+        .expect("settled");
+    assert_eq!(bundle.rules_version, Some(4));
+    assert!(bundle.params.campfire.is_some());
+    assert_eq!(
+        proof::recompute(&bundle).expect("recompute"),
+        bundle.settlement
+    );
+
+    let (events, _) = broadcast::channel(8);
+    let filter: zeek_engine::campfire::Filter = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/campfire-filter.json"
+        ))
+        .expect("filter file"),
+    )
+    .expect("filter");
+    let app = router(
+        Arc::new(AppState {
+            processor,
+            db: Mutex::new(db),
+            events,
+            started: std::time::Instant::now(),
+            coordinator: None,
+            relay: None,
+            campfire_filter: filter,
+            proof_limiter: zeek_engine::relay::RateLimiter::new(10),
+        }),
+        &[],
+    );
+    let get = |path: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response
+                .into_body()
+                .collect()
+                .await
+                .expect("body")
+                .to_bytes();
+            serde_json::from_slice::<CampfireResponse>(&body).expect("json")
+        }
+    };
+    let feed = get("/v1/campfire").await;
+    let summary: Vec<(String, Option<String>, bool)> = feed
+        .messages
+        .iter()
+        .map(|m| (m.kind.clone(), m.text.clone(), m.hidden))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("shout".to_owned(), None, true),
+            (
+                "shout".to_owned(),
+                Some("the night is long".to_owned()),
+                false
+            ),
+            ("dig".to_owned(), Some("warm hands".to_owned()), false),
+        ],
+        "newest first; the undersized shout is not shown"
+    );
+    assert_eq!(
+        feed.messages[0].reason.as_deref(),
+        Some("contains a filtered word (giveaway)")
+    );
+    assert_eq!(feed.messages[2].nickname.as_deref(), Some("ember"));
+    assert_eq!(feed.messages[2].tile, Some(4));
+    let with_hidden = get("/v1/campfire?include_hidden=1").await;
+    assert_eq!(
+        with_hidden.messages[0].text.as_deref(),
+        Some("free giveaway, dm me")
+    );
+    let page = get("/v1/campfire?limit=1").await;
+    assert_eq!(page.messages.len(), 1);
+    assert!(page.next_before.is_some());
 }

@@ -53,6 +53,9 @@ pub enum Event {
         txid: String,
         signers: Vec<u16>,
     },
+    /// A new Campfire message was mined (filtered ones arrive hidden, with
+    /// their text omitted).
+    Campfire(crate::campfire::CampfireMessage),
 }
 
 /// The public board.

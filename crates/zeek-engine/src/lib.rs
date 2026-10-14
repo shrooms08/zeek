@@ -19,6 +19,7 @@
 pub mod api;
 pub mod audit;
 pub mod beacon;
+pub mod campfire;
 pub mod chain;
 pub mod config;
 pub mod coordinator;

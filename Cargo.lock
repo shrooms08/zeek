@@ -4713,6 +4713,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "clap",
  "dotenvy",
  "ed25519-dalek",
@@ -4749,6 +4750,7 @@ dependencies = [
  "zeek-core",
  "zeek-engine",
  "zeek-vault",
+ "zeek-verify",
  "zip321",
 ]
 
@@ -4912,7 +4914,6 @@ dependencies = [
  "zcash_primitives",
  "zcash_protocol",
  "zeek-core",
- "zeek-engine",
 ]
 
 [[package]]

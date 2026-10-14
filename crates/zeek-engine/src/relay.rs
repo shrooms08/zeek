@@ -285,6 +285,11 @@ impl RelayState {
         }
     }
 
+    /// The chain backend (also used to verify submitted win proofs).
+    pub fn backend(&self) -> &dyn RelayBackend {
+        self.backend.as_ref()
+    }
+
     /// Reads the rate limit from the environment.
     pub fn rate_from_env() -> u32 {
         std::env::var(RATE_VAR)

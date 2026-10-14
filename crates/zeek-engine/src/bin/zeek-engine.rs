@@ -235,6 +235,10 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
             )),
             RelayState::rate_from_env(),
         ))),
+        campfire_filter: zeek_engine::campfire::Filter::from_env()?,
+        proof_limiter: zeek_engine::relay::RateLimiter::new(
+            zeek_engine::api::PROOF_SUBMISSIONS_PER_MIN,
+        ),
     });
 
     let listener = tokio::net::TcpListener::bind(&settings.bind)
@@ -255,6 +259,8 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
 
     let mut processor = Processor::new(config.clone());
     let mut last_board = None;
+    // Campfire events announce messages mined after startup.
+    let mut last_campfire_height = state.db.lock().await.tip()?.map_or(0, |b| b.height);
     loop {
         if server.is_finished() {
             break;
@@ -304,6 +310,24 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                 if let Err(e) = coordinator.record_openings(&mut db, &mut source, &config).await {
                     tracing::warn!(error = %e, "recording payout openings failed; retrying next pass");
                 }
+            }
+            if report.new_notes > 0 {
+                let mut fresh: Vec<_> = zeek_engine::campfire::messages(
+                    &db,
+                    &config.params,
+                    &state.campfire_filter,
+                    None,
+                    zeek_engine::campfire::MAX_LIMIT,
+                    false,
+                )?
+                .into_iter()
+                .filter(|m| m.height > last_campfire_height)
+                .collect();
+                fresh.reverse();
+                if let Some(newest) = fresh.last() {
+                    last_campfire_height = newest.height;
+                }
+                events_out.extend(fresh.into_iter().map(Event::Campfire));
             }
             let board = processor.board(&db)?;
             if last_board.as_ref() != Some(&board) {

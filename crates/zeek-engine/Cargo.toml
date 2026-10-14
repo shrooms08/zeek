@@ -16,6 +16,8 @@ path = "src/bin/zeek-engine.rs"
 
 [dependencies]
 zeek-core = { path = "../zeek-core" }
+zeek-verify = { path = "../zeek-verify" }
+base64.workspace = true
 zeek-vault = { path = "../zeek-vault" }
 
 orchard.workspace = true

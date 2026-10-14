@@ -1,0 +1,8 @@
+{
+  "words": ["giveaway", "airdrop", "seed phrase", "private key", "dm me", "telegram", "whatsapp", "double your", "guaranteed profit", "investment opportunity"],
+  "hide_links": true,
+  "max_repeated_char": 10,
+  "max_uppercase_percent": 80,
+  "uppercase_min_letters": 16,
+  "duplicate_window": 20
+}
