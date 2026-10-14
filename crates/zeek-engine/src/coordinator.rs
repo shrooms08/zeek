@@ -319,6 +319,42 @@ impl Coordinator {
         })
     }
 
+    /// Probes every keyholder's health endpoint and records the result.
+    pub async fn probe_keyholders(&self, db: &Db) -> Result<(), EngineError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        for keyholder in &self.settings.keyholders {
+            let url = format!("{}/v1/health", keyholder.url);
+            let outcome = self
+                .http
+                .get(&url)
+                .timeout(Duration::from_secs(5))
+                .send()
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r.error_for_status().map_err(|e| e.to_string()));
+            match outcome {
+                Ok(_) => db.set_keyholder_health(keyholder.identifier, now, true, "")?,
+                Err(e) => db.set_keyholder_health(keyholder.identifier, now, false, &e)?,
+            }
+        }
+        Ok(())
+    }
+
+    /// Identifiers of the configured keyholders and the signing threshold.
+    pub fn keyholder_ids(&self) -> (Vec<u16>, u16) {
+        (
+            self.settings
+                .keyholders
+                .iter()
+                .map(|k| k.identifier)
+                .collect(),
+            self.settings.threshold,
+        )
+    }
+
     /// The vault's address.
     pub fn vault_address(&self) -> &str {
         &self.vault.address
@@ -573,10 +609,14 @@ impl Coordinator {
             fee: fee.into_u64(),
             signers: vec![],
         })?;
-        let signed = match self
-            .sign_with_keyholders(&session, pczt, &pending, sighash, &[round])
-            .await
-        {
+        let mut events = Vec::new();
+        let result = self
+            .sign_with_keyholders(&session, pczt, &pending, sighash, &[round], &mut events)
+            .await;
+        for event in &events {
+            db.insert_keyholder_event(event)?;
+        }
+        let signed = match result {
             Ok(s) => s,
             Err(e) => {
                 // Nothing was broadcast: forget the attempt so it can be retried.
@@ -639,8 +679,24 @@ impl Coordinator {
         pending: &[PendingSpend],
         sighash: [u8; 32],
         rounds: &[u32],
+        events: &mut Vec<crate::db::KeyholderEvent>,
     ) -> Result<(Pczt, Vec<u16>), EngineError> {
+        use crate::db::{KeyholderEvent, KeyholderOutcome};
         let needed = usize::from(self.settings.threshold);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut record = |keyholder: u16, outcome: KeyholderOutcome, reason: String| {
+            events.push(KeyholderEvent {
+                time: now,
+                session: hex::encode(session),
+                keyholder,
+                rounds: rounds.to_vec(),
+                outcome,
+                reason,
+            });
+        };
         let request = protocol::seal(
             &self.identity,
             session,
@@ -685,24 +741,62 @@ impl Coordinator {
                                     keyholder = keyholder.identifier,
                                     "approved the payout"
                                 );
+                                record(
+                                    keyholder.identifier,
+                                    KeyholderOutcome::Approved,
+                                    String::new(),
+                                );
                                 approvals.insert(keyholder.identifier, c);
                             }
-                            Ok(c) => details.push(format!(
-                                "keyholder {}: {} commitments for {} spends",
-                                keyholder.identifier,
-                                c.len(),
-                                pending.len()
-                            )),
-                            Err(e) => details.push(format!(
-                                "keyholder {}: bad commitments: {e}",
-                                keyholder.identifier
-                            )),
+                            Ok(c) => {
+                                let reason =
+                                    format!("{} commitments for {} spends", c.len(), pending.len());
+                                record(
+                                    keyholder.identifier,
+                                    KeyholderOutcome::Unreachable,
+                                    reason.clone(),
+                                );
+                                details
+                                    .push(format!("keyholder {}: {reason}", keyholder.identifier));
+                            }
+                            Err(e) => {
+                                record(
+                                    keyholder.identifier,
+                                    KeyholderOutcome::Unreachable,
+                                    format!("bad commitments: {e}"),
+                                );
+                                details.push(format!(
+                                    "keyholder {}: bad commitments: {e}",
+                                    keyholder.identifier
+                                ));
+                            }
                         }
                     }
-                    Err(e) => details.push(format!("keyholder {}: {e}", keyholder.identifier)),
+                    Err(e) => {
+                        record(
+                            keyholder.identifier,
+                            KeyholderOutcome::Unreachable,
+                            e.to_string(),
+                        );
+                        details.push(format!("keyholder {}: {e}", keyholder.identifier));
+                    }
                 },
                 Err(e) => {
                     tracing::warn!(keyholder = keyholder.identifier, error = %e, "keyholder did not approve");
+                    match &e {
+                        EngineError::Refused { reason, .. } => {
+                            record(
+                                keyholder.identifier,
+                                KeyholderOutcome::Refused,
+                                reason.clone(),
+                            );
+                        }
+                        other => record(
+                            keyholder.identifier,
+                            KeyholderOutcome::Unreachable,
+                            other.to_string(),
+                        ),
+                    }
                     details.push(format!("keyholder {}: {e}", keyholder.identifier));
                 }
             }

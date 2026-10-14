@@ -32,6 +32,7 @@ pub mod processor;
 pub mod proof;
 pub mod protocol;
 pub mod relay;
+pub mod share;
 #[cfg(any(test, feature = "testkit"))]
 pub mod synthetic;
 

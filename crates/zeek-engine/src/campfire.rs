@@ -29,10 +29,23 @@ pub const DEFAULT_FILTER_PATH: &str = "config/campfire-filter.json";
 /// Most messages one request returns.
 pub const MAX_LIMIT: usize = 100;
 
+/// Where a part of the wordlist comes from (attribution).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterSource {
+    pub name: String,
+    pub url: String,
+    pub license: String,
+    pub words: usize,
+}
+
 /// The display filter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Filter {
-    /// Words and phrases (case-insensitive) that hide a message.
+    /// Attribution of the wordlist.
+    #[serde(default)]
+    pub sources: Vec<FilterSource>,
+    /// Words and phrases (case-insensitive, matched as whole words) that
+    /// hide a message.
     pub words: Vec<String>,
     /// Hide messages containing links (`http://`, `https://`, `www.`).
     pub hide_links: bool,
@@ -49,6 +62,7 @@ pub struct Filter {
 impl Default for Filter {
     fn default() -> Self {
         Filter {
+            sources: Vec::new(),
             words: Vec::new(),
             hide_links: true,
             max_repeated_char: 10,
@@ -86,7 +100,7 @@ impl Filter {
         if let Some(word) = self
             .words
             .iter()
-            .find(|w| !w.is_empty() && lower.contains(&w.to_lowercase()))
+            .find(|w| !w.is_empty() && contains_word(&lower, &w.to_lowercase()))
         {
             return Some(format!("contains a filtered word ({word})"));
         }
@@ -118,6 +132,17 @@ impl Filter {
         }
         None
     }
+}
+
+/// Whether `needle` occurs in `haystack` as a whole word or phrase: the
+/// characters around the match are not letters or digits (so a short entry
+/// never hides a longer innocent word, e.g. "ass" does not hide "class").
+pub fn contains_word(haystack: &str, needle: &str) -> bool {
+    haystack.match_indices(needle).any(|(start, _)| {
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[start + needle.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
 }
 
 /// One Campfire message.
@@ -321,5 +346,25 @@ mod tests {
             Some("mostly capital letters")
         );
         assert_eq!(filter.reason("Short CAPS"), None);
+        assert_eq!(filter.reason("giveaways galore"), None, "whole words only");
+        assert!(contains_word("a free giveaway!", "giveaway"));
+        assert!(!contains_word("classic", "ass"));
+        assert!(contains_word("dm me now", "dm me"));
+        // The shipped wordlist loads, cites its sources and hides abuse
+        // without hiding ordinary words.
+        let shipped = Filter::load(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/campfire-filter.json"
+        )))
+        .expect("shipped filter");
+        assert!(shipped.words.len() > 400);
+        assert!(shipped
+            .sources
+            .iter()
+            .any(|s| s.license.starts_with("CC BY 4.0")));
+        assert!(shipped
+            .reason("what a classic assessment of the scunthorpe pass")
+            .is_none());
+        assert!(shipped.reason("free giveaway").is_some());
     }
 }

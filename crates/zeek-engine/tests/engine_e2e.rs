@@ -392,6 +392,11 @@ async fn http_api_serves_the_round() {
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),
+        keyholder_ids: vec![1, 2, 3],
+        threshold: 2,
+        share_cache: zeek_engine::share::ShareCache::default(),
+        app_url: "http://app".to_owned(),
+        public_url: "http://engine".to_owned(),
     });
     let app = router(state, &["http://localhost:5173".to_owned()]);
 
@@ -451,6 +456,47 @@ async fn http_api_serves_the_round() {
     assert_eq!(status, StatusCode::OK);
     let (status, _) = get(&app, "/v1/config").await;
     assert_eq!(status, StatusCode::OK);
+
+    // Phase 7a: past rounds, memo digests, keyholder status, share previews.
+    let (status, body) = get(&app, "/v1/rounds").await;
+    assert_eq!(status, StatusCode::OK);
+    let rounds: zeek_engine::api::RoundsResponse = serde_json::from_slice(&body).expect("json");
+    assert_eq!(rounds.rounds.len(), 1, "round 0 had digs");
+    assert_eq!(rounds.rounds[0].round, 0);
+    assert!(["paying", "no_winner", "paid"].contains(&rounds.rounds[0].status.as_str()));
+    for player in 1u8..=4 {
+        assert!(!String::from_utf8_lossy(&body).contains(&hex::encode([player; 43])));
+    }
+    let (status, body) = get(&app, "/v1/rounds/0/digests").await;
+    assert_eq!(status, StatusCode::OK);
+    let digests: zeek_engine::api::DigestsResponse = serde_json::from_slice(&body).expect("json");
+    assert!(!digests.notes.is_empty());
+    assert!(digests.notes.iter().all(|n| n.memo_sha256.len() == 64));
+    let (status, body) = get(&app, "/v1/keyholders/status").await;
+    assert_eq!(status, StatusCode::OK);
+    let keys: zeek_engine::api::KeyholdersResponse = serde_json::from_slice(&body).expect("json");
+    assert_eq!(keys.threshold, 2);
+    assert_eq!(keys.keyholders.len(), 3);
+    assert_eq!(keys.keyholders[0].label, "Keyholder A");
+    assert_eq!(
+        keys.keyholders[0].reachable, None,
+        "never probed in this test"
+    );
+    let (status, body) = get(&app, "/share/round/0").await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(
+        html.contains(r#"<meta property="og:image" content="http://engine/share/round/0.png">"#)
+    );
+    assert!(html.contains(r#"<meta name="twitter:card" content="summary_large_image">"#));
+    assert!(html.contains("http://app/rounds/0"));
+    let (status, png) = get(&app, "/share/round/0.png").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&png[1..4], b"PNG");
+    let (status, _) = get(&app, "/share/round/1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = get(&app, &format!("/share/win/{}", "0".repeat(32))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// Rules v3: from the activation height a dig may carry the `zeek1:` text
@@ -860,6 +906,11 @@ async fn campfire_messages_and_shouts() {
             relay: None,
             campfire_filter: filter,
             proof_limiter: zeek_engine::relay::RateLimiter::new(10),
+            keyholder_ids: vec![],
+            threshold: 0,
+            share_cache: zeek_engine::share::ShareCache::default(),
+            app_url: "http://app".to_owned(),
+            public_url: "http://engine".to_owned(),
         }),
         &[],
     );

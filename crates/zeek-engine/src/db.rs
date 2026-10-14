@@ -138,6 +138,61 @@ impl PlanStatus {
 
 pub use zeek_core::proof::{PayoutRecord, PayoutState};
 
+/// How a keyholder answered a signing request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyholderOutcome {
+    Approved,
+    Refused,
+    /// No valid answer (unreachable, timed out, or a malformed reply).
+    Unreachable,
+}
+
+impl KeyholderOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            KeyholderOutcome::Approved => "approved",
+            KeyholderOutcome::Refused => "refused",
+            KeyholderOutcome::Unreachable => "unreachable",
+        }
+    }
+
+    fn parse(s: &str) -> Result<Self, EngineError> {
+        match s {
+            "approved" => Ok(KeyholderOutcome::Approved),
+            "refused" => Ok(KeyholderOutcome::Refused),
+            "unreachable" => Ok(KeyholderOutcome::Unreachable),
+            other => Err(EngineError::Corrupt(format!(
+                "unknown keyholder outcome `{other}`"
+            ))),
+        }
+    }
+}
+
+/// One keyholder's answer to one signing request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyholderEvent {
+    /// Unix seconds.
+    pub time: u64,
+    /// Signing session id (hex).
+    pub session: String,
+    pub keyholder: u16,
+    pub rounds: Vec<u32>,
+    pub outcome: KeyholderOutcome,
+    /// The keyholder's refusal text, or the error; empty when approved.
+    pub reason: String,
+}
+
+/// The last health probe of a keyholder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyholderHealth {
+    pub keyholder: u16,
+    pub last_check: u64,
+    pub last_seen: Option<u64>,
+    pub reachable: bool,
+    pub error: String,
+}
+
 fn payout_state_str(state: PayoutState) -> &'static str {
     match state {
         PayoutState::Signing => "signing",
@@ -255,6 +310,22 @@ impl Db {
                  round INTEGER PRIMARY KEY,
                  openings TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS keyholder_events (
+                 id INTEGER PRIMARY KEY,
+                 time INTEGER NOT NULL,
+                 session TEXT NOT NULL,
+                 keyholder INTEGER NOT NULL,
+                 rounds TEXT NOT NULL,
+                 outcome TEXT NOT NULL,
+                 reason TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS keyholder_health (
+                 keyholder INTEGER PRIMARY KEY,
+                 last_check INTEGER NOT NULL,
+                 last_seen INTEGER,
+                 reachable INTEGER NOT NULL,
+                 error TEXT NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS win_proofs (
                  id TEXT PRIMARY KEY,
                  round INTEGER NOT NULL,
@@ -332,6 +403,122 @@ impl Db {
         )?;
         let rows = stmt
             .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    // ---- keyholder records (no secrets: outcomes and reasons only) ----
+
+    /// Records one keyholder's answer to a signing request.
+    pub fn insert_keyholder_event(&self, event: &KeyholderEvent) -> Result<(), EngineError> {
+        self.conn.execute(
+            "INSERT INTO keyholder_events (time, session, keyholder, rounds, outcome, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                i64::try_from(event.time).unwrap_or(i64::MAX),
+                event.session,
+                event.keyholder,
+                serde_json::to_string(&event.rounds)
+                    .map_err(|e| EngineError::Corrupt(e.to_string()))?,
+                event.outcome.as_str(),
+                event.reason,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Keyholder events, newest first.
+    pub fn keyholder_events(&self, limit: u32) -> Result<Vec<KeyholderEvent>, EngineError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT time, session, keyholder, rounds, outcome, reason FROM keyholder_events
+             ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, u16>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(time, session, keyholder, rounds, outcome, reason)| {
+                Ok(KeyholderEvent {
+                    time: u64::try_from(time).unwrap_or(0),
+                    session,
+                    keyholder,
+                    rounds: serde_json::from_str(&rounds)
+                        .map_err(|e| EngineError::Corrupt(e.to_string()))?,
+                    outcome: KeyholderOutcome::parse(&outcome)?,
+                    reason,
+                })
+            })
+            .collect()
+    }
+
+    /// Per keyholder: (approved, refused) counts over all recorded requests.
+    pub fn keyholder_counts(&self) -> Result<Vec<(u16, u64, u64)>, EngineError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT keyholder,
+                    SUM(CASE WHEN outcome = 'approved' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN outcome = 'refused' THEN 1 ELSE 0 END)
+             FROM keyholder_events GROUP BY keyholder ORDER BY keyholder",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, u16>(0)?,
+                    u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                    u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Records a health probe of a keyholder.
+    pub fn set_keyholder_health(
+        &self,
+        keyholder: u16,
+        now: u64,
+        reachable: bool,
+        error: &str,
+    ) -> Result<(), EngineError> {
+        let now = i64::try_from(now).unwrap_or(i64::MAX);
+        self.conn.execute(
+            "INSERT INTO keyholder_health (keyholder, last_check, last_seen, reachable, error)
+             VALUES (?1, ?2, CASE WHEN ?3 THEN ?2 ELSE NULL END, ?3, ?4)
+             ON CONFLICT(keyholder) DO UPDATE SET
+                 last_check = excluded.last_check,
+                 last_seen = CASE WHEN excluded.reachable THEN excluded.last_check ELSE keyholder_health.last_seen END,
+                 reachable = excluded.reachable,
+                 error = excluded.error",
+            params![keyholder, now, reachable, error],
+        )?;
+        Ok(())
+    }
+
+    /// Health of every probed keyholder: (id, last_check, last_seen, reachable, error).
+    pub fn keyholder_health(&self) -> Result<Vec<KeyholderHealth>, EngineError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT keyholder, last_check, last_seen, reachable, error FROM keyholder_health ORDER BY keyholder",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(KeyholderHealth {
+                    keyholder: r.get(0)?,
+                    last_check: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+                    last_seen: r
+                        .get::<_, Option<i64>>(2)?
+                        .map(|t| u64::try_from(t).unwrap_or(0)),
+                    reachable: r.get(3)?,
+                    error: r.get(4)?,
+                })
+            })?
             .collect::<Result<_, _>>()?;
         Ok(rows)
     }

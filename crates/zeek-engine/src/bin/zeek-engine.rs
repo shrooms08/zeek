@@ -223,7 +223,18 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         }
         None => None,
     };
+    let (keyholder_ids, threshold) = match &coordinator {
+        Some(c) => c.lock().await.keyholder_ids(),
+        None => (Vec::new(), 0),
+    };
     let state = Arc::new(AppState {
+        keyholder_ids,
+        threshold,
+        share_cache: zeek_engine::share::ShareCache::default(),
+        app_url: std::env::var("ZEEK_APP_URL")
+            .unwrap_or_else(|_| "http://localhost:5174".to_owned()),
+        public_url: std::env::var("ZEEK_PUBLIC_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8787".to_owned()),
         processor: Processor::new(config.clone()),
         db: Mutex::new(db),
         events: events.clone(),
@@ -306,6 +317,9 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     }),
                     Ok(None) => {}
                     Err(e) => tracing::error!(error = %e, "payout attempt failed"),
+                }
+                if let Err(e) = coordinator.probe_keyholders(&db).await {
+                    tracing::warn!(error = %e, "keyholder health probe failed");
                 }
                 if let Err(e) = coordinator.record_openings(&mut db, &mut source, &config).await {
                     tracing::warn!(error = %e, "recording payout openings failed; retrying next pass");

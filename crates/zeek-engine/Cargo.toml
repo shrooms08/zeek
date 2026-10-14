@@ -18,6 +18,8 @@ path = "src/bin/zeek-engine.rs"
 zeek-core = { path = "../zeek-core" }
 zeek-verify = { path = "../zeek-verify" }
 base64.workspace = true
+sha2 = { workspace = true, features = ["std"] }
+resvg = { version = "0.48.1", default-features = false, features = ["text"] }
 zeek-vault = { path = "../zeek-vault" }
 
 orchard.workspace = true

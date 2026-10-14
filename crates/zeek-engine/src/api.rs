@@ -42,6 +42,16 @@ pub struct AppState {
     pub relay: Option<Arc<crate::relay::RelayState>>,
     /// Campfire display filter.
     pub campfire_filter: crate::campfire::Filter,
+    /// Configured keyholder identifiers and the signing threshold (empty
+    /// when this engine does not coordinate payouts).
+    pub keyholder_ids: Vec<u16>,
+    pub threshold: u16,
+    /// Rendered share images, by path (see [`crate::share`]).
+    pub share_cache: crate::share::ShareCache,
+    /// Public base URL of the web app, for share links and redirects.
+    pub app_url: String,
+    /// Public base URL of this engine, for absolute image URLs in share pages.
+    pub public_url: String,
     /// Rate limit of win proof submissions (verification costs about a
     /// second of CPU each).
     pub proof_limiter: crate::relay::RateLimiter,
@@ -224,6 +234,11 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         .route("/v1/vault/ledger", get(vault_ledger))
         .route("/v1/stream", get(stream))
         .route("/v1/campfire", get(campfire))
+        .route("/v1/rounds", get(rounds_list))
+        .route("/v1/rounds/{round}/digests", get(round_digests))
+        .route("/v1/keyholders/status", get(keyholders_status))
+        .route("/share/round/{name}", get(crate::share::round_page))
+        .route("/share/win/{name}", get(crate::share::win_page))
         .route("/v1/proofs", axum::routing::post(submit_proof))
         .route("/v1/proofs/{id}", get(get_proof))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_PROOF_BODY))
@@ -395,6 +410,270 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<HealthResponse>
         tip_height: db.tip()?.map(|b| b.height),
         settled_rounds: db.settled_rounds()?.len(),
         uptime_secs: state.started.elapsed().as_secs(),
+    }))
+}
+
+/// `GET /v1/rounds` query.
+#[derive(Clone, Debug, Deserialize)]
+pub struct RoundsQuery {
+    /// Only rounds below this one (pagination).
+    pub before: Option<u32>,
+    pub limit: Option<u32>,
+    /// `1` to include rounds nobody dug in.
+    pub include_empty: Option<u8>,
+}
+
+/// One past round, amounts only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoundSummary {
+    pub round: u32,
+    /// `paid` (winners paid), `paying` (payout being signed or not yet
+    /// broadcast), `no_winner` (nobody dug the treasure tile: the prize went
+    /// to the Deep Cache), `voided` (closed too late to be safe: refunded).
+    pub status: String,
+    pub treasure_tile: Option<u8>,
+    pub cache_triggered: bool,
+    /// Sum of the valid digs after dig fees.
+    pub pot: u64,
+    /// What the winners split (after the rake).
+    pub prize: u64,
+    pub total_paid: u64,
+    pub winners: usize,
+    pub refunds: usize,
+    /// Unix time of the window's last block, if stored.
+    pub closed_time: Option<u64>,
+    /// Unix time the beacon was published.
+    pub revealed_time: u64,
+    pub payout_txid: Option<String>,
+    pub rules_version: u32,
+}
+
+/// `GET /v1/rounds`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoundsResponse {
+    pub rounds: Vec<RoundSummary>,
+    pub next_before: Option<u32>,
+}
+
+/// Summarises a settled round.
+pub fn round_summary(
+    db: &Db,
+    processor: &Processor,
+    row: &crate::db::SettlementRow,
+) -> Result<RoundSummary, EngineError> {
+    let s = &row.settlement;
+    let (treasure_tile, cache_triggered) = match row.outcome {
+        RoundOutcome::Voided => (None, false),
+        RoundOutcome::Drawn {
+            treasure_tile,
+            cache_triggered,
+        } => (Some(treasure_tile), cache_triggered),
+    };
+    let payout = db.payout(row.round)?;
+    let refunds = s
+        .payouts
+        .iter()
+        .filter(|p| matches!(p.reason, zeek_core::settle::PayoutReason::Refund(_)))
+        .count();
+    let status = match row.outcome {
+        RoundOutcome::Voided => "voided",
+        RoundOutcome::Drawn { .. } if s.payouts.is_empty() => "no_winner",
+        RoundOutcome::Drawn { .. } if s.winners == 0 => "no_winner",
+        RoundOutcome::Drawn { .. } => match &payout {
+            Some(p) if p.state == crate::db::PayoutState::Broadcast => "paid",
+            _ => "paying",
+        },
+    };
+    let window = zeek_core::rounds::round_window(&processor.config().params, row.round)?;
+    Ok(RoundSummary {
+        round: row.round,
+        status: status.to_owned(),
+        treasure_tile,
+        cache_triggered,
+        pot: s.pot,
+        prize: s.distributable,
+        total_paid: s.total_paid,
+        winners: s.winners,
+        refunds,
+        closed_time: db.block(window.last())?.map(|b| b.time),
+        revealed_time: row.beacon_time,
+        payout_txid: payout.and_then(|p| p.txid),
+        rules_version: row.rules_version,
+    })
+}
+
+async fn rounds_list(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<RoundsQuery>,
+) -> ApiResult<RoundsResponse> {
+    let limit = q.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let include_empty = q.include_empty == Some(1);
+    let db = lock(&state).await;
+    let Some(last) = db.last_settled_round()? else {
+        return Ok(Json(RoundsResponse {
+            rounds: Vec::new(),
+            next_before: None,
+        }));
+    };
+    let mut round = q
+        .before
+        .map_or(Some(last), |b| b.checked_sub(1).map(|r| r.min(last)));
+    let mut rounds = Vec::new();
+    while let Some(r) = round {
+        if rounds.len() == limit {
+            break;
+        }
+        if let Some(row) = db.settlement(r)? {
+            let s = &row.settlement;
+            let empty = s.pot == 0 && s.forfeited == 0 && s.shouts == 0 && s.payouts.is_empty();
+            if include_empty || !empty {
+                rounds.push(round_summary(&db, &state.processor, &row)?);
+            }
+        }
+        round = r.checked_sub(1);
+    }
+    let next_before = if rounds.len() == limit {
+        rounds.last().map(|r| r.round)
+    } else {
+        None
+    };
+    Ok(Json(RoundsResponse {
+        rounds,
+        next_before,
+    }))
+}
+
+/// One note the vault received in a round, as anyone with the public UIVK
+/// sees it, with its memo reduced to a digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteDigest {
+    pub height: u32,
+    pub value: u64,
+    /// SHA-256 of the 512-byte memo field (hex): lets a wallet that knows
+    /// its memo confirm the payment landed without the engine learning
+    /// anything new.
+    pub memo_sha256: String,
+}
+
+/// `GET /v1/rounds/{n}/digests`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigestsResponse {
+    pub round: u32,
+    pub notes: Vec<NoteDigest>,
+}
+
+async fn round_digests(
+    State(state): State<Arc<AppState>>,
+    Path(round): Path<u32>,
+) -> ApiResult<DigestsResponse> {
+    use sha2::{Digest, Sha256};
+    let window = zeek_core::rounds::round_window(&state.processor.config().params, round)
+        .map_err(|e| bad(StatusCode::BAD_REQUEST, e.to_string()))?;
+    let db = lock(&state).await;
+    // Late payments land after the window; include the next round's window
+    // too so a wallet can see where its payment went.
+    let notes = db
+        .notes_in_range(
+            window.start,
+            window.end.saturating_add(window.end - window.start),
+        )?
+        .into_iter()
+        .map(|n| NoteDigest {
+            height: n.height,
+            value: n.value,
+            memo_sha256: hex::encode(Sha256::digest(&n.memo)),
+        })
+        .collect();
+    Ok(Json(DigestsResponse { round, notes }))
+}
+
+/// One keyholder's public status.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyholderStatus {
+    pub identifier: u16,
+    /// "Keyholder A", "B", …
+    pub label: String,
+    pub operator: String,
+    pub reachable: Option<bool>,
+    /// Unix seconds of the last successful health check.
+    pub last_seen: Option<u64>,
+    /// Unix seconds of the last health check.
+    pub last_check: Option<u64>,
+    /// Signing requests it approved / refused (recorded since Phase 7a).
+    pub approved: u64,
+    pub refused: u64,
+}
+
+/// A refused payout attempt (one signing session).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefusedAttempt {
+    pub time: u64,
+    pub rounds: Vec<u32>,
+    /// What the keyholders said.
+    pub reason: String,
+    /// How many keyholders refused it.
+    pub refusals: usize,
+}
+
+/// `GET /v1/keyholders/status`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyholdersResponse {
+    pub threshold: u16,
+    pub keyholders: Vec<KeyholderStatus>,
+    pub refused_attempts: Vec<RefusedAttempt>,
+}
+
+async fn keyholders_status(State(state): State<Arc<AppState>>) -> ApiResult<KeyholdersResponse> {
+    let db = lock(&state).await;
+    let health = db.keyholder_health()?;
+    let counts = db.keyholder_counts()?;
+    let keyholders = state
+        .keyholder_ids
+        .iter()
+        .map(|id| {
+            let h = health.iter().find(|h| h.keyholder == *id);
+            let (approved, refused) = counts
+                .iter()
+                .find(|c| c.0 == *id)
+                .map_or((0, 0), |c| (c.1, c.2));
+            let letter =
+                char::from(b'A'.saturating_add(u8::try_from(id.saturating_sub(1)).unwrap_or(25)));
+            KeyholderStatus {
+                identifier: *id,
+                label: format!("Keyholder {letter}"),
+                operator: "Zeek team".to_owned(),
+                reachable: h.map(|h| h.reachable),
+                last_seen: h.and_then(|h| h.last_seen),
+                last_check: h.map(|h| h.last_check),
+                approved,
+                refused,
+            }
+        })
+        .collect();
+    let mut refused_attempts: Vec<RefusedAttempt> = Vec::new();
+    let mut sessions: Vec<String> = Vec::new();
+    for event in db.keyholder_events(500)? {
+        if event.outcome != crate::db::KeyholderOutcome::Refused {
+            continue;
+        }
+        match sessions.iter().position(|s| *s == event.session) {
+            Some(i) => refused_attempts[i].refusals += 1,
+            None => {
+                sessions.push(event.session.clone());
+                refused_attempts.push(RefusedAttempt {
+                    time: event.time,
+                    rounds: event.rounds.clone(),
+                    reason: event.reason.clone(),
+                    refusals: 1,
+                });
+            }
+        }
+    }
+    refused_attempts.truncate(50);
+    Ok(Json(KeyholdersResponse {
+        threshold: state.threshold,
+        keyholders,
+        refused_attempts,
     }))
 }
 
