@@ -1,0 +1,49 @@
+DEV HARNESS (not the product UI). Engine: http://127.0.0.1:8787. Cross-origin isolated: true
+dig finished in 62 s
+{
+  "txid": "11700ccafc5307ab643da5ea831a51304d0c48fb9e8871bc29731be68954e468",
+  "round": 74,
+  "tiles": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24
+  ],
+  "amountEachZat": 100000,
+  "feeZat": 130000,
+  "provingMs": 46930
+}
+{
+  "status": "unlocked, scanned to 4501135",
+  "address": "utest190k48sysfa4hehec7yl6hvyapfq0mwn252k8ce4q8m5qfm7ayxm66lhaylxqvpf22f5uvfv07k6tsja222egzc788xzaem9aryj4d6kp",
+  "balance": "spendable 0.00000000 ZEC, pending 0.00155000, total 0.00155000 (scanned 4501135)",
+  "progress": "",
+  "history": [
+    "sent (broadcast)4501136fee 0.00130000dig round 74 tiles 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24 x 0.0010000011700ccafc5307ab643da5ea831a51304d0c48fb9e8871bc29731be68954e468",
+    "sent (mined)4500745fee 0.00015000dig round 58 tiles 5,12 x 0.001000006a505dfd67099a9c31906e3d5913df6d4117590c2f06f6e845dee81b9e42bf57",
+    "received45001160.02000000Pocket funding for the 25-tile round825c23ae7bb723ff638ba7048433cf4c6abe0f3eb0103aa3726bfe860216aafe",
+    "received45000980.01000000Pocket funding from alice450035e3afa14925809cdd015d83374b3e1e8098a20b79cb0969bf70691fbbd4"
+  ]
+}
+screenshot /Users/minos/Projects/zeek/docs/examples/phase5/05-pocket-dig-25.png

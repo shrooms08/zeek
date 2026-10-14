@@ -30,6 +30,8 @@ const SYNC_BATCH = 200;
 const DECOYS_PER_WANTED = 3;
 /** Rewinds attempted on one sync before giving up. */
 const MAX_REWINDS = 20;
+/** Syncs attempted before building, when blocks keep arriving meanwhile. */
+const MAX_CATCH_UP = 5;
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 const storage = new WalletStorage();
@@ -132,6 +134,23 @@ async function sync(id: number): Promise<Balance> {
   await persist();
   progress("done");
   return c.balance() as Balance;
+}
+
+/**
+ * Syncs, then reads the chain tip again and syncs once more if a block
+ * arrived meanwhile, so a transaction is built against the tip the wallet
+ * has scanned. Returns that tip.
+ */
+async function syncToTip(id: number): Promise<number> {
+  const c = needCore();
+  for (let attempt = 0; attempt < MAX_CATCH_UP; attempt += 1) {
+    await sync(id);
+    const tip = (await needRelay().tip()).height;
+    if (c.scannedHeight() >= tip) {
+      return tip;
+    }
+  }
+  throw new PocketError("not_synced", "the chain kept advancing while syncing; try again");
 }
 
 async function fetchMemos(c: PocketCore, client: RelayClient): Promise<void> {
@@ -240,12 +259,8 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   async dig({ tiles, amountEachZat }, id) {
     const c = needCore();
     const client = needRelay();
-    await sync(id);
-    const [{ json }, board, tip] = await Promise.all([
-      client.config(),
-      client.board(),
-      client.tip(),
-    ]);
+    const chainTip = await syncToTip(id);
+    const [{ json }, board] = await Promise.all([client.config(), client.board()]);
     const built = c.buildDig(
       json,
       JSON.stringify({
@@ -253,7 +268,7 @@ const handlers: { [M in MethodName]: Handler<M> } = {
         amountEachZat,
         round: board.round,
         blocksRemaining: board.blocks_remaining,
-        chainTip: tip.height,
+        chainTip,
       }),
     ) as BuiltTransaction;
     await broadcastBuilt(c, built);
@@ -268,10 +283,9 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   },
   async send({ to, amountZat, memo }, id) {
     const c = needCore();
-    await sync(id);
-    const tip = await needRelay().tip();
+    const chainTip = await syncToTip(id);
     const built = c.buildSend(
-      JSON.stringify({ to, amountZat, memo: memo ?? null, chainTip: tip.height }),
+      JSON.stringify({ to, amountZat, memo: memo ?? null, chainTip }),
     ) as BuiltTransaction;
     await broadcastBuilt(c, built);
     return { txid: built.txid, amountZat, feeZat: built.feeZat, provingMs: built.provingMs };
