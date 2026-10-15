@@ -7,8 +7,10 @@
  *   tree   sways and drops a few ink leaves      lamp  flickers off and on
  *   cart   rolls along its rails and back        rock  wobbles
  *   mine   press and hold: rumbles, shows the Deep Cache in a bubble
- *   camp   the fire and Zeb by it, one button: sparks fly, Zeb hops, and
- *          the Campfire chat opens (when the screen gives `onCampfire`).
+ *   fire   sparks fly and the Campfire chat opens (when the screen gives
+ *          `onCampfire`; otherwise just the sparks)
+ *   Zeb    a random pictogram; five quick taps: he digs a hole and pops
+ *          out of it.
  * Props sit outside the tile diamond, so they never take a tile pick. They
  * are buttons (Tab reaches them; the field's arrow keys skip them), are
  * disabled during the reveal and while a dig is sealing, and with reduced
@@ -24,11 +26,21 @@ import { VIEWBOX_WORLD } from "../../art/ink";
 import { prefersReducedMotion } from "../../lib/useNow";
 import { PictoBubble } from "../PictoBubble";
 
-export type PropReaction = "sway" | "flicker" | "roll" | "wobble" | "rumble" | "poke" | "zeb";
+export type PropReaction =
+  "sway" | "flicker" | "roll" | "wobble" | "rumble" | "poke" | "zeb" | "egg";
 
 /** Where Zeb and his campfire sit: behind the field, between the pines. */
 const CAMP = { x: 4, y: -58, scale: 0.34 } as const;
 const ZEB_AT = { x: -40, y: -96, scale: 0.36 } as const;
+
+const ZEB_BUBBLES: readonly IconName[][] = [
+  ["shovel", "tile", "chest"],
+  ["eye", "nobody"],
+  ["dice", "sparkle"],
+  ["fire", "chat"],
+  ["hourglass", "sparkle"],
+  ["mine", "coin"],
+];
 
 interface Active {
   reaction: PropReaction;
@@ -151,6 +163,8 @@ function propGroup(prop: PropDef, markup: string, active: Active | undefined): s
 }
 
 function zebGroup(p: string, active: Active | undefined): string {
+  if (active?.reaction === "egg")
+    return `<g class="zk-act zk-act-egg-${active.n % 2}">${zeb("peek", p, false)}</g>`;
   return `<g class="zk-prop ${actClass(active)}">${zeb("campfire", p, false)}</g>`;
 }
 
@@ -307,9 +321,6 @@ export function usePropReactions(onReact?: (r: PropReaction) => void) {
   return { active, fire };
 }
 
-/** The camp's hit area: the fire and Zeb sitting by it. */
-const CAMP_HIT = { cx: -12, cy: -76, r: 32 } as const;
-
 export function PropButtons({
   interactive,
   cacheLabel,
@@ -321,7 +332,7 @@ export function PropButtons({
   cacheLabel: string;
   fire: (id: string, reaction: PropReaction, ms: number) => void;
   active: Record<string, Active>;
-  /** Opens the Campfire chat; without it the camp only reacts. */
+  /** Opens the Campfire chat; without it the fire only throws sparks. */
   onCampfire?: (() => void) | undefined;
 }) {
   const [bubble, setBubble] = useState<{
@@ -329,6 +340,7 @@ export function PropButtons({
     icons: IconName[];
     text: string;
   } | null>(null);
+  const zebTaps = useRef<number[]>([]);
   const hold = useRef<number | null>(null);
   const reduce = prefersReducedMotion();
 
@@ -353,10 +365,27 @@ export function PropButtons({
     });
   };
 
-  const pokeCamp = () => {
+  const pokeFire = () => {
     fire("fire", "poke", 900);
-    fire("zeb", "zeb", 700);
     onCampfire?.();
+  };
+
+  const tapZeb = () => {
+    const now = Date.now();
+    zebTaps.current = [...zebTaps.current.filter((t) => now - t < 2000), now];
+    if (zebTaps.current.length >= 5) {
+      zebTaps.current = [];
+      fire("zeb", "egg", 2400);
+      setBubble({
+        at: { x: ZEB_AT.x + 20, y: ZEB_AT.y - 10 },
+        icons: ["shovel", "sparkle"],
+        text: "Found you!",
+      });
+      return;
+    }
+    fire("zeb", "zeb", 700);
+    const icons = ZEB_BUBBLES[Math.floor(Math.random() * ZEB_BUBBLES.length)] ?? ["sparkle"];
+    setBubble({ at: { x: ZEB_AT.x + 20, y: ZEB_AT.y - 10 }, icons: [...icons], text: "" });
   };
 
   const disabled = !interactive;
@@ -393,14 +422,25 @@ export function PropButtons({
       <button
         type="button"
         className="zk-prop-button zk-camp-button absolute"
-        style={hitBox(CAMP_HIT.cx, CAMP_HIT.cy, CAMP_HIT.r)}
+        style={hitBox(CAMP.x, CAMP.y - 12, 16)}
         aria-label={onCampfire === undefined ? "Poke the campfire" : "Open the Campfire chat"}
         title={onCampfire === undefined ? undefined : "Campfire chat"}
         disabled={disabled}
         data-prop="fire"
         data-testid="campfire-open"
         data-active={active.fire !== undefined}
-        onClick={pokeCamp}
+        onClick={pokeFire}
+      />
+      <button
+        type="button"
+        className="zk-prop-button absolute"
+        style={hitBox(ZEB_AT.x + 20, ZEB_AT.y + 26, 20)}
+        aria-label="Zeb the zebra miner"
+        disabled={disabled}
+        data-prop="zeb"
+        data-testid="zeb"
+        data-active={active.zeb !== undefined}
+        onClick={tapZeb}
       />
       {bubble !== null && (
         <div

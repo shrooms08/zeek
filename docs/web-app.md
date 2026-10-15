@@ -27,15 +27,15 @@ send `Cross-Origin-Resource-Policy: cross-origin`. The smoke e2e test checks
 
 ## Layout
 
-| Path | What |
-| --- | --- |
-| `src/styles/index.css` | Design tokens in Tailwind 4's `@theme`: colours, type, spacing, borders, shadow, easings. Also the base component classes. |
-| `src/lib/` | Pure logic: money (bigint zatoshis), dig plan and fees, address checks, time, passphrase, depth stages |
-| `src/api/` | Engine client, TanStack Query hooks, one live WebSocket (`LiveProvider`), Pocket provider |
-| `src/machines/` | The explicit state machines (see below) |
-| `src/components/` | Design-system components: `BigStat`, `DigButton`, `AmountPicker`, `Panel`, `Modal`, `StepList`, `BatchProgress`, `QrCard`, `CheckRow`, `MessageRow`, `NetBadge`, `RevealLine`, `MenuRow`, `ResultCard`, `Field`/`Tile` |
-| `src/screens/` | One file per screen, lazily loaded |
-| `e2e/` | Playwright: `smoke.spec.ts`, `live/0N-*.spec.ts`, `screenshots.spec.ts` |
+| Path                   | What                                                                                                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/styles/index.css` | Design tokens in Tailwind 4's `@theme`: colours, type, spacing, borders, shadow, easings. Also the base component classes.                                                                                             |
+| `src/lib/`             | Pure logic: money (bigint zatoshis), dig plan and fees, address checks, time, passphrase, depth stages                                                                                                                 |
+| `src/api/`             | Engine client, TanStack Query hooks, one live WebSocket (`LiveProvider`), Pocket provider                                                                                                                              |
+| `src/machines/`        | The explicit state machines (see below)                                                                                                                                                                                |
+| `src/components/`      | Design-system components: `BigStat`, `DigButton`, `AmountPicker`, `Panel`, `Modal`, `StepList`, `BatchProgress`, `QrCard`, `CheckRow`, `MessageRow`, `NetBadge`, `RevealLine`, `MenuRow`, `ResultCard`, `Field`/`Tile` |
+| `src/screens/`         | One file per screen, lazily loaded                                                                                                                                                                                     |
+| `e2e/`                 | Playwright: `smoke.spec.ts`, `live/0N-*.spec.ts`, `screenshots.spec.ts`                                                                                                                                                |
 
 ## State machines
 
@@ -114,13 +114,13 @@ when the Zeek engine is back."
   minutes and paused while hidden; when it answers, the field goes live.
 - **Verify this round here** runs `zeek_verify::offline` in the browser:
 
-  | Check | Without the engine |
-  | --- | --- |
-  | Beacon | rules, BLS signature, drand's own public copy (its public relays allow browsers), the draw |
-  | Beacon round bound by the first block's time | needs the live engine |
-  | Digs, Timing | need the live engine |
-  | Settlement | recomputed in full |
-  | Payout | openings against the settlement; the mined transaction needs the live engine |
+  | Check                                        | Without the engine                                                                         |
+  | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+  | Beacon                                       | rules, BLS signature, drand's own public copy (its public relays allow browsers), the draw |
+  | Beacon round bound by the first block's time | needs the live engine                                                                      |
+  | Digs, Timing                                 | need the live engine                                                                       |
+  | Settlement                                   | recomputed in full                                                                         |
+  | Payout                                       | openings against the settlement; the mined transaction needs the live engine               |
 
   A part that needs chain data shows "Needs the live engine" and never a
   tick. No public testnet chain source can be read from a browser on this
@@ -206,14 +206,14 @@ The dig panel has a Lite / Pro switch, remembered in this browser.
 The design's art is generated at runtime by `zeek-art.js` (identical in
 all six design files). It is ported to typed modules under `src/art/`:
 
-| Module | Contents |
-| --- | --- |
-| `ink.ts` | palette, iso projection, seeded RNG, defs, boil variants |
-| `field.ts` | slab, tiles, holes, burst, puff, cracks, star |
-| `props.ts` | pines, rocks, lamps, rails and cart, chest, mine stages 1–5 and eruption, Zeb's six poses, campfire |
-| `world.ts` | the prop table |
-| `icons.ts` | the 57 pictograms, verbatim |
-| `logoGeometry.ts` | the Z mark |
+| Module            | Contents                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------- |
+| `ink.ts`          | palette, iso projection, seeded RNG, defs, boil variants                                            |
+| `field.ts`        | slab, tiles, holes, burst, puff, cracks, star                                                       |
+| `props.ts`        | pines, rocks, lamps, rails and cart, chest, mine stages 1–5 and eruption, Zeb's six poses, campfire |
+| `world.ts`        | the prop table                                                                                      |
+| `icons.ts`        | the 57 pictograms, verbatim                                                                         |
+| `logoGeometry.ts` | the Z mark                                                                                          |
 
 React wrappers live in `InkSvg.tsx`, `Characters.tsx` and `Logo.tsx`.
 
@@ -237,12 +237,12 @@ Fixes from the design file:
 
 Every animation touches only transform, opacity or stroke-dashoffset.
 
-| Technique | Used for |
-| --- | --- |
-| CSS keyframes | Loops (flicker, blink, sway, nod, flame frames, sparks, fireflies, stars, hourglass, seeking outline) and one-shots (pin drop, puff with steps(6), tremble, burst, chest, star, eruption, prop reactions) |
-| `stroke-dashoffset` (`pathLength=1`) | Hole rim, cracks, treasure split, seal ring, fuse, ink check and X, ink flight |
-| Framer Motion | Modals, menu, sheet, result card, count-ups (integer zatoshis), pulses, stamps, note unfold, shout spark, bubbles |
-| Line-variant swap | Boiling lines |
+| Technique                            | Used for                                                                                                                                                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CSS keyframes                        | Loops (flicker, blink, sway, nod, flame frames, sparks, fireflies, stars, hourglass, seeking outline) and one-shots (pin drop, puff with steps(6), tremble, burst, chest, star, eruption, prop reactions) |
+| `stroke-dashoffset` (`pathLength=1`) | Hole rim, cracks, treasure split, seal ring, fuse, ink check and X, ink flight                                                                                                                            |
+| Framer Motion                        | Modals, menu, sheet, result card, count-ups (integer zatoshis), pulses, stamps, note unfold, shout spark, bubbles                                                                                         |
+| Line-variant swap                    | Boiling lines                                                                                                                                                                                             |
 
 Boiling lines use three seeded vertex-jitter variants on stacked SVGs,
 each its own compositor layer, swapped at 9 fps. This replaces the
@@ -250,12 +250,12 @@ design's `feTurbulence` filters, which would re-filter the art every frame.
 
 The reveal is one timeline on the existing reveal machine:
 
-| Stage | Time | What happens |
-| --- | --- | --- |
-| draw | 0–860 ms | dim and star |
-| shake | 860–1700 ms | cracks and tremble |
-| burst | 1700–2600 ms | split, glint, burst |
-| result | from 2600 ms | card and count-up |
+| Stage  | Time         | What happens        |
+| ------ | ------------ | ------------------- |
+| draw   | 0–860 ms     | dim and star        |
+| shake  | 860–1700 ms  | cracks and tremble  |
+| burst  | 1700–2600 ms | split, glint, burst |
+| result | from 2600 ms | card and count-up   |
 
 Under `prefers-reduced-motion`:
 
@@ -273,9 +273,9 @@ The props are buttons over the island, kept outside the tile diamond:
 - **The cart** rolls along its rails.
 - **Rocks** wobble.
 - **The mine:** holding it rumbles and shows the Deep Cache.
-- **The camp** (the fire and Zeb sitting by it) is one button: sparks fly,
-  Zeb hops, and the Campfire chat opens. It takes Enter and Space, shows a
-  focus ring, and glows white on hover.
+- **The campfire** opens the Campfire chat (sparks fly first). It takes
+  Enter and Space, shows a focus ring, and glows white on hover.
+- **Zeb** answers in pictograms; five quick taps make him pop out of a hole.
 
 Tab reaches the props, but the field's arrow keys skip them. They are
 disabled during the reveal and while sealing, and they never touch the

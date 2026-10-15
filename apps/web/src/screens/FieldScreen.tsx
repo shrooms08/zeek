@@ -46,6 +46,7 @@ function cryptoRandom(): number {
 const REACTION_SOUND: Partial<Record<PropReaction, Parameters<typeof play>[0]>> = {
   rumble: "rumble",
   poke: "crackle",
+  egg: "thunk",
 };
 
 export function FieldScreen() {
