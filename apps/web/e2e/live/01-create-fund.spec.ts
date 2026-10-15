@@ -143,5 +143,7 @@ test("create a Pocket and fund it from alice", async ({ page }) => {
     await page.waitForTimeout(60_000);
   }
   await expect(page.getByTestId("history-row").first()).toBeVisible();
-  await expect(page.getByTestId("wallet-history")).toContainText("Zeek Pocket funding from alice");
+  await expect(page.getByTestId("wallet-history")).toContainText(
+    IS_PUBLIC ? "Zeek Pocket funding on playzeek.pages.dev" : "Zeek Pocket funding from alice",
+  );
 });
