@@ -360,6 +360,13 @@ impl Db {
                  round INTEGER PRIMARY KEY,
                  openings TEXT NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS unclaimable_payouts (
+                 round INTEGER NOT NULL,
+                 payout_index INTEGER NOT NULL,
+                 net INTEGER NOT NULL,
+                 reason TEXT NOT NULL,
+                 PRIMARY KEY (round, payout_index)
+             );
              CREATE TABLE IF NOT EXISTS keyholder_events (
                  id INTEGER PRIMARY KEY,
                  time INTEGER NOT NULL,
@@ -455,6 +462,58 @@ impl Db {
             .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<_, _>>()?;
         Ok(rows)
+    }
+
+    /// Records the payouts of `round` that have no payable receiver.
+    pub fn set_unclaimable(
+        &self,
+        round: u32,
+        payouts: &[zeek_core::proof::UnclaimablePayout],
+    ) -> Result<(), EngineError> {
+        for p in payouts {
+            self.conn.execute(
+                "INSERT OR REPLACE INTO unclaimable_payouts (round, payout_index, net, reason)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    round,
+                    p.payout_index,
+                    i64::try_from(p.net).map_err(|_| EngineError::Overflow("net"))?,
+                    p.reason
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The unclaimable payouts of `round`, in payout order.
+    pub fn unclaimable(
+        &self,
+        round: u32,
+    ) -> Result<Vec<zeek_core::proof::UnclaimablePayout>, EngineError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT payout_index, net, reason FROM unclaimable_payouts
+             WHERE round = ?1 ORDER BY payout_index",
+        )?;
+        let rows = stmt
+            .query_map(params![round], |r| {
+                Ok(zeek_core::proof::UnclaimablePayout {
+                    payout_index: r.get(0)?,
+                    net: r.get::<_, i64>(1)?.try_into().unwrap_or(0),
+                    reason: r.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Total value of every unclaimable payout (held in the vault).
+    pub fn unclaimable_total(&self) -> Result<u64, EngineError> {
+        let total: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(net), 0) FROM unclaimable_payouts",
+            [],
+            |r| r.get(0),
+        )?;
+        u64::try_from(total).map_err(|_| EngineError::Corrupt("negative unclaimable total".into()))
     }
 
     // ---- keyholder records (no secrets: outcomes and reasons only) ----
@@ -1135,6 +1194,11 @@ impl Db {
             let rows = stmt.query_map(params![height], |r| r.get::<_, u32>(0))?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
+        tx.execute(
+            "DELETE FROM unclaimable_payouts WHERE round IN
+             (SELECT round FROM settlements WHERE settled_at_height >= ?1)",
+            params![height],
+        )?;
         tx.execute(
             "DELETE FROM settlements WHERE settled_at_height >= ?1",
             params![height],

@@ -142,6 +142,14 @@ export default function KeysScreen() {
                   </dd>
                 </div>
               )}
+              {ledger.data.unclaimable > 0 && (
+                <div className="flex justify-between px-5 py-3 text-fog text-sm border-b hair">
+                  <dt>Unclaimable payouts (malformed dig memos), held in the vault</dt>
+                  <dd className="font-mono">
+                    {formatZec(zat(ledger.data.unclaimable), { decimals: 8 })}
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between px-5 py-3 text-fog text-sm">
                 <dt>Owed, not yet paid · vault balance</dt>
                 <dd className="font-mono">

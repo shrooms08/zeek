@@ -156,6 +156,8 @@ export interface Ledger {
   cache: number;
   unpaid_obligations: number;
   reserved_fees: number;
+  /** Payouts whose sealed receiver does not open; held in the vault. */
+  unclaimable: number;
   operator_float: number;
   shortfall: number;
 }

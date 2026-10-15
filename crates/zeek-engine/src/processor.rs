@@ -356,6 +356,7 @@ impl Processor {
             version: PROOF_VERSION,
             rules_version: Some(row.rules_version),
             payout_openings: db.payout_openings(row.round)?,
+            unclaimable_payouts: db.unclaimable(row.round)?,
             params,
             round: row.round,
             window,

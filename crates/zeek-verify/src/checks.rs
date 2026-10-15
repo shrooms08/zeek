@@ -645,11 +645,47 @@ pub fn verify_ironwood_bundle(tx: &Transaction) -> Result<usize, String> {
     Ok(bundle.actions().len())
 }
 
+/// The payouts a bundle reports as unclaimable, with an explanation line
+/// each; an error when an entry does not match the settlement.
+fn unclaimable_payouts(bundle: &ProofBundle) -> Result<(BTreeSet<u32>, Vec<String>), &'static str> {
+    let mut indices = BTreeSet::new();
+    let mut notes = Vec::new();
+    for u in &bundle.unclaimable_payouts {
+        let Some(payout) = bundle.settlement.payouts.get(u.payout_index as usize) else {
+            return Err("An unclaimable entry names a payout the settlement does not have.");
+        };
+        if u.net != payout.net || !indices.insert(u.payout_index) {
+            return Err("An unclaimable entry does not match the settlement.");
+        }
+        notes.push(format!(
+            "payout {} ({} zatoshis) was not paid: {}. Its value stayed in the vault. This needs the vault's sealing key to confirm; the coordinator and every keyholder apply the same rule with it before signing.",
+            u.payout_index, u.net, u.reason
+        ));
+    }
+    Ok((indices, notes))
+}
+
 fn check_payout(input: &RoundInput<'_>) -> CheckResult {
     let id = CheckId::Payout;
     let bundle = input.bundle;
     let settlement = &bundle.settlement;
+    // Unclaimable payouts (malformed sealed receivers) have no output.
+    let (unclaimable, notes) = match unclaimable_payouts(bundle) {
+        Ok(v) => v,
+        Err(why) => return fail(id, why),
+    };
     let Some(openings) = &bundle.payout_openings else {
+        if !settlement.payouts.is_empty() && unclaimable.len() == settlement.payouts.len() {
+            let mut result = CheckResult::new(
+                id,
+                CheckStatus::Pass,
+                "No settled payout has a payable receiver, so there is no payout transaction.",
+            );
+            for note in notes {
+                result = result.with(note);
+            }
+            return result;
+        }
         let why = if bundle.version < 4 {
             format!("Not available for this bundle version ({}): payout openings were added in version 4.", bundle.version)
         } else if settlement.payouts.is_empty() {
@@ -714,7 +750,7 @@ fn check_payout(input: &RoundInput<'_>) -> CheckResult {
             )
             .with(format!("payout index {}", opening.payout_index));
         };
-        if !covered.insert(opening.payout_index) {
+        if !covered.insert(opening.payout_index) || unclaimable.contains(&opening.payout_index) {
             return fail(id, "Two openings claim the same payout.");
         }
         if opening.value != payout.net {
@@ -750,7 +786,7 @@ fn check_payout(input: &RoundInput<'_>) -> CheckResult {
             Err(e) => return fail(id, "An opening is malformed.").with(e),
         }
     }
-    if covered.len() != settlement.payouts.len() {
+    if covered.len() + unclaimable.len() != settlement.payouts.len() {
         return fail(
             id,
             "Some settled payouts have no output in the transaction.",
@@ -765,14 +801,13 @@ fn check_payout(input: &RoundInput<'_>) -> CheckResult {
         id,
         CheckStatus::Pass,
         format!(
-            "The payout transaction is mined at block {} and valid, and it pays every settled amount ({} output(s), {} zatoshis).",
+            "The payout transaction is mined at block {} and valid, and it pays every payable settled amount ({} output(s)).",
             openings.mined_height,
-            settlement.payouts.len(),
-            settlement.total_paid
+            covered.len()
         ),
     )
     .with(format!("txid {}, {actions} actions; Halo2 proof, spend authorization and binding signatures verified", openings.txid));
-    for line in lines {
+    for line in lines.into_iter().chain(notes) {
         result = result.with(line);
     }
     result
@@ -790,4 +825,57 @@ pub fn check_window(bundle: &ProofBundle) -> Result<(), VerifyError> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zeek_core::proof::UnclaimablePayout;
+
+    /// A real settled bundle (round 84) with two payouts added to its
+    /// settlement: a labelled test fixture for the unclaimable rule.
+    fn bundle_with_payouts() -> ProofBundle {
+        let mut bundle: ProofBundle = serde_json::from_str(include_str!(
+            "../../../docs/examples/phase6/round-84.proof.json"
+        ))
+        .expect("fixture");
+        let payout = |net: u64| zeek_core::settle::Payout {
+            sealed_receiver: zeek_core::memo::SealedReceiver::from_bytes(&[0x42; 92])
+                .expect("92 bytes"),
+            memo_round: 84,
+            memo_tile: 3,
+            gross: net + 5_000,
+            fee: 5_000,
+            net,
+            reason: zeek_core::settle::PayoutReason::Refund(
+                zeek_core::digs::RefundReason::RoundVoided,
+            ),
+        };
+        bundle.settlement.payouts = vec![payout(100_000), payout(200_000)];
+        bundle
+    }
+
+    fn unclaimable(index: u32, net: u64) -> UnclaimablePayout {
+        UnclaimablePayout {
+            payout_index: index,
+            net,
+            reason: "the sealed receiver does not open".into(),
+        }
+    }
+
+    #[test]
+    fn unclaimable_entries_must_match_the_settlement() {
+        let mut bundle = bundle_with_payouts();
+        bundle.unclaimable_payouts = vec![unclaimable(1, 200_000)];
+        let (indices, notes) = unclaimable_payouts(&bundle).expect("valid");
+        assert_eq!(indices.into_iter().collect::<Vec<_>>(), vec![1]);
+        assert!(notes[0].contains("payout 1 (200000 zatoshis) was not paid"));
+
+        bundle.unclaimable_payouts = vec![unclaimable(1, 199_999)];
+        assert!(unclaimable_payouts(&bundle).is_err(), "amount differs");
+        bundle.unclaimable_payouts = vec![unclaimable(2, 1)];
+        assert!(unclaimable_payouts(&bundle).is_err(), "no such payout");
+        bundle.unclaimable_payouts = vec![unclaimable(0, 100_000), unclaimable(0, 100_000)];
+        assert!(unclaimable_payouts(&bundle).is_err(), "listed twice");
+    }
 }

@@ -72,6 +72,23 @@ pub struct ProofBundle {
     /// once the transaction is mined.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_openings: Option<PayoutOpenings>,
+    /// Settled payouts that could not be paid because their sealed receiver
+    /// does not open to a valid address (a malformed dig memo). Their value
+    /// stayed in the vault. Only the sealing key's holders (the keyholders,
+    /// each of whom checks it before signing) can confirm this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unclaimable_payouts: Vec<UnclaimablePayout>,
+}
+
+/// A settled payout with no payable receiver.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnclaimablePayout {
+    /// Index of the payout in `settlement.payouts`.
+    pub payout_index: u32,
+    /// Its net amount, which stayed in the vault.
+    pub net: u64,
+    /// Why it cannot be paid.
+    pub reason: String,
 }
 
 impl ProofBundle {

@@ -1,5 +1,5 @@
 //! The vault ledger: `vault balance = Cache + unpaid obligations + reserved
-//! fees + operator float`.
+//! fees + unclaimable payouts + operator float`.
 //!
 //! Obligations are the net amounts of settlements that have no payout
 //! transaction yet; reserved fees are the per-output fees those settlements
@@ -26,7 +26,11 @@ pub struct Ledger {
     /// Per-output fees already deducted from those payouts, reserved for
     /// their transaction fees.
     pub reserved_fees: u64,
-    /// `vault_balance − cache − unpaid_obligations − reserved_fees`, floored at 0.
+    /// Payouts that could not be paid (their digger's sealed receiver does
+    /// not open); held in the vault, never counted as operator float.
+    pub unclaimable: u64,
+    /// `vault_balance − cache − unpaid_obligations − reserved_fees −
+    /// unclaimable`, floored at 0.
     pub operator_float: u64,
     /// How far the vault is short of covering everything above (0 when sound).
     pub shortfall: u64,
@@ -74,9 +78,11 @@ pub fn compute(
         unpaid_rounds.push(round);
     }
     let cache = processor.cache_balance(db)?;
+    let unclaimable = db.unclaimable_total()?;
     let owed = cache
         .checked_add(unpaid_obligations)
         .and_then(|v| v.checked_add(reserved_fees))
+        .and_then(|v| v.checked_add(unclaimable))
         .ok_or(EngineError::Overflow("owed"))?;
     let (operator_float, shortfall) = match vault_balance.checked_sub(owed) {
         Some(float) => (float, 0),
@@ -87,6 +93,7 @@ pub fn compute(
         cache,
         unpaid_obligations,
         reserved_fees,
+        unclaimable,
         operator_float,
         shortfall,
         unpaid_rounds,

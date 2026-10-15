@@ -579,15 +579,16 @@ fn honest_payout_is_approved_and_tampered_ones_are_refused() {
         "{reason}"
     );
 
-    // Wrong sealing key: receivers do not open.
+    // Wrong sealing key: no receiver opens, so this node expects no payout
+    // outputs at all and refuses to sign any.
     let wrong_key = VerifyContext {
         sealing: &other.sealing,
         ..ctx
     };
+    let reason = refusal(verify_payout(&wrong_key, &honest_bytes, &[0]));
     assert!(
-        refusal(verify_payout(&wrong_key, &honest_bytes, &[0])).starts_with(
-            "round 0 payout 0: the sealed receiver does not open with this node's sealing key ("
-        )
+        reason.starts_with("output ") && reason.contains("unexpected output"),
+        "{reason}"
     );
 
     // Already signed.
@@ -599,6 +600,89 @@ fn honest_payout_is_approved_and_tampered_ones_are_refused() {
 
     // Garbage is refused, not a crash.
     assert!(refusal(verify_payout(&ctx, b"not a pczt", &[0])).starts_with("PCZT does not parse: "));
+}
+
+/// A winning dig whose sealed receiver is junk (security review H1) must not
+/// block the round: its payout is unclaimable, the honest winner is paid,
+/// and the junk payout's value stays in the vault's change.
+#[test]
+fn a_junk_receiver_is_left_in_the_vault_and_the_round_still_pays() {
+    let v = vault(5);
+    let processor = processor(&v);
+    let (alice, alice_memo) = player(&v, 12, 0, 3);
+    let (mallory, _) = player(&v, 31, 0, 3);
+    let junk_memo = DigMemo {
+        round: 0,
+        tile: 3,
+        sealed_receiver: zeek_core::memo::SealedReceiver::from_bytes(&[0x42; 92])
+            .expect("92 bytes"),
+        message: None,
+    };
+    let (notes, anchor) = vault_notes(
+        &v.fvk,
+        &[
+            (Scope::External, 500_000, alice_memo.encode()),
+            (Scope::External, 300_000, junk_memo.encode()),
+        ],
+    );
+    let chain = Db::open_in_memory().expect("db");
+    let node = NodeDb::open_in_memory().expect("node db");
+    let settlement = settle_round(
+        &chain,
+        &processor,
+        &[
+            Dig {
+                value: 500_000,
+                memo: alice_memo.encode(),
+                note: &notes[0],
+                height: GENESIS + 1,
+            },
+            Dig {
+                value: 300_000,
+                memo: junk_memo.encode(),
+                note: &notes[1],
+                height: GENESIS + 2,
+            },
+        ],
+        drawn(3, false),
+        0,
+        2,
+    );
+    assert_eq!(
+        settlement.payouts.len(),
+        2,
+        "the junk dig is a valid winner"
+    );
+    let (alice_net, junk_net) = (settlement.payouts[0].net, settlement.payouts[1].net);
+    assert!(zeek_engine::coordinator::payable_receiver(
+        Network::Test,
+        &v.sealing,
+        &settlement.payouts[1]
+    )
+    .is_err());
+    let ctx = VerifyContext {
+        processor: &processor,
+        fvk: &v.fvk,
+        sealing: &v.sealing,
+        chain: &chain,
+        node: &node,
+    };
+    let digs = [&notes[0], &notes[1]];
+
+    // Alice is paid; the junk payout's value stays in the change output.
+    let honest = payout_pczt(&v, &digs, anchor, &[(alice, alice_net)]);
+    let approved = verify_payout(&ctx, &honest.serialize().expect("ser"), &[0]).expect("approved");
+    assert_eq!(approved.payouts, 1);
+
+    // Nobody may collect the unclaimable amount.
+    let stolen = payout_pczt(
+        &v,
+        &digs,
+        anchor,
+        &[(alice, alice_net), (mallory, junk_net)],
+    );
+    let reason = refusal(verify_payout(&ctx, &stolen.serialize().expect("ser"), &[0]));
+    assert!(reason.contains("unexpected output"), "{reason}");
 }
 
 #[test]

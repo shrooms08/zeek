@@ -37,6 +37,7 @@ use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::Zatoshis;
 use zeek_core::memo::DigMemo;
 use zeek_core::params::GameParams;
+use zeek_core::proof::UnclaimablePayout;
 use zeek_core::seal::SealingPrivateKey;
 use zeek_core::settle::{self, PayoutReason};
 use zeek_vault::frost::{self, PublicKeyPackage, SigningCommitments, SigningPackage};
@@ -151,6 +152,32 @@ pub struct Coordinator {
     sealing: SealingPrivateKey,
     http: reqwest::Client,
     pool: Arc<Pool>,
+    retry: RetryBackoff,
+}
+
+/// The address a settled payout is paid to, or why it cannot be paid.
+///
+/// The coordinator and every keyholder apply this same rule with the same
+/// sealing key, so they agree on which payouts a transaction must contain:
+/// a payout whose sealed receiver does not open, or opens to bytes that are
+/// not a valid Orchard address, is unclaimable (its digger sent a malformed
+/// memo) and its value stays in the vault instead of blocking the round.
+pub fn payable_receiver(
+    network: zeek_core::params::Network,
+    sealing: &SealingPrivateKey,
+    payout: &settle::Payout,
+) -> Result<orchard::Address, String> {
+    let memo = DigMemo {
+        round: payout.memo_round,
+        tile: payout.memo_tile,
+        sealed_receiver: payout.sealed_receiver.clone(),
+        message: None,
+    };
+    let receiver = memo
+        .open(network, sealing)
+        .map_err(|e| format!("the sealed receiver does not open ({e})"))?;
+    Option::from(orchard::Address::from_raw_address_bytes(&receiver.orchard))
+        .ok_or_else(|| "the opened receiver is not a valid Orchard address".to_owned())
 }
 
 /// How long the API reuses a computed ledger (it opens the wallet database).
@@ -234,6 +261,7 @@ impl Coordinator {
             sealing,
             http,
             pool,
+            retry: RetryBackoff::default(),
         })
     }
 
@@ -327,21 +355,15 @@ impl Coordinator {
         let mut outputs = Vec::with_capacity(settlement.payouts.len());
         let mut used = vec![false; recovered.len()];
         for (payout_index, payout) in settlement.payouts.iter().enumerate() {
-            let memo = DigMemo {
-                round: payout.memo_round,
-                tile: payout.memo_tile,
-                sealed_receiver: payout.sealed_receiver.clone(),
-                message: None,
+            // Unclaimable payouts have no output (see `payable_receiver`).
+            let Ok(address) = payable_receiver(game.params.network, &self.sealing, payout) else {
+                continue;
             };
-            let receiver = memo.open(game.params.network, &self.sealing).map_err(|e| {
-                EngineError::Corrupt(format!(
-                    "payout {payout_index}: receiver does not open: {e}"
-                ))
-            })?;
+            let receiver = address.to_raw_address_bytes();
             let found = recovered
                 .iter()
                 .enumerate()
-                .find(|(i, r)| !used[*i] && r.1 == receiver.orchard && r.2 == payout.net);
+                .find(|(i, r)| !used[*i] && r.1 == receiver && r.2 == payout.net);
             let Some((i, (action_index, recipient, value, rseed, version))) = found else {
                 return Err(EngineError::Corrupt(format!(
                     "payout {payout_index} of {txid} has no matching output"
@@ -448,9 +470,35 @@ impl Coordinator {
         processor: &Processor,
         game: &GameConfig,
     ) -> Result<Option<PayoutReport>, EngineError> {
-        let Some(round) = store.read(next_payable_round)? else {
+        let rounds = store.read(payable_rounds)?;
+        let now = std::time::Instant::now();
+        let Some(round) = self.retry.next(&rounds, now) else {
             return Ok(None);
         };
+        match self.pay_round(round, store, processor, game).await {
+            Ok(report) => {
+                self.retry.succeeded(round);
+                Ok(report)
+            }
+            Err(e) => {
+                let wait = self.retry.failed(round, now);
+                tracing::warn!(
+                    round,
+                    retry_in_secs = wait.as_secs(),
+                    "payout attempt failed; later rounds are tried meanwhile"
+                );
+                Err(e)
+            }
+        }
+    }
+
+    async fn pay_round(
+        &mut self,
+        round: u32,
+        store: &Store,
+        processor: &Processor,
+        game: &GameConfig,
+    ) -> Result<Option<PayoutReport>, EngineError> {
         let row = store
             .read(|db| db.settlement(round))?
             .ok_or_else(|| EngineError::Corrupt(format!("settlement {round} vanished")))?;
@@ -463,26 +511,26 @@ impl Coordinator {
             return Err(EngineError::AlreadyPaid(vec![existing.round]));
         }
 
-        // Outputs: one per payout, memo naming the round and reason.
+        // Outputs: one per payable payout, memo naming the round and reason.
+        // A payout whose receiver cannot be paid is left in the vault (the
+        // keyholders apply the same rule; see `payable_receiver`).
         let mut outputs = Vec::with_capacity(row.settlement.payouts.len() + 1);
-        for payout in &row.settlement.payouts {
-            let memo = DigMemo {
-                round: payout.memo_round,
-                tile: payout.memo_tile,
-                sealed_receiver: payout.sealed_receiver.clone(),
-                message: None,
-            };
+        let mut unclaimable = Vec::new();
+        for (index, payout) in row.settlement.payouts.iter().enumerate() {
             // Opened only here, in memory; never stored or logged.
-            let receiver = memo.open(game.params.network, &self.sealing).map_err(|e| {
-                EngineError::Config(format!("round {round}: sealed receiver does not open: {e}"))
-            })?;
-            let recipient =
-                Option::from(orchard::Address::from_raw_address_bytes(&receiver.orchard))
-                    .ok_or_else(|| {
-                        EngineError::Config(format!(
-                            "round {round}: an opened receiver is not a valid Orchard address"
-                        ))
-                    })?;
+            let recipient = match payable_receiver(game.params.network, &self.sealing, payout) {
+                Ok(address) => address,
+                Err(reason) => {
+                    tracing::warn!(round, payout = index, %reason, net = payout.net, "payout has no payable receiver; its value stays in the vault");
+                    unclaimable.push(UnclaimablePayout {
+                        payout_index: u32::try_from(index)
+                            .map_err(|_| EngineError::Overflow("payout index"))?,
+                        net: payout.net,
+                        reason,
+                    });
+                    continue;
+                }
+            };
             let text = match payout.reason {
                 PayoutReason::Win { .. } => format!("Zeek round {round}: treasure"),
                 PayoutReason::Refund(_) => format!("Zeek round {round}: refund"),
@@ -495,6 +543,19 @@ impl Coordinator {
                     .map_err(|e| EngineError::Config(format!("memo: {e}")))?,
                 is_change: false,
             });
+        }
+        if outputs.is_empty() {
+            store.write(|db| {
+                db.transaction(|tx| {
+                    tx.set_unclaimable(round, &unclaimable)?;
+                    tx.set_plan_status(round, PlanStatus::NothingToPay)
+                })
+            })?;
+            tracing::warn!(
+                round,
+                "no payout of this round is payable; marked nothing_to_pay"
+            );
+            return Ok(None);
         }
         #[cfg(feature = "rogue-demo")]
         self.rogue_tamper(&mut outputs, round)?;
@@ -577,7 +638,7 @@ impl Coordinator {
                 value: n.value.into_u64(),
             })
             .collect();
-        let nets: Vec<u64> = row.settlement.payouts.iter().map(|p| p.net).collect();
+        let nets: Vec<u64> = outputs.iter().map(|o| o.value.into_u64()).collect();
         let plan = plan_inputs(&game.params, &charged, &nets, &float_candidates)
             .map_err(|e| e.for_rounds(vec![round]))?;
         let collected = row.settlement.total_fees;
@@ -710,6 +771,7 @@ impl Coordinator {
         store.write(|db| {
             db.transaction(|tx| {
                 tx.mark_payout_broadcast(round, &txid, report.chain_tip, &signers)?;
+                tx.set_unclaimable(round, &unclaimable)?;
                 tx.set_plan_status(round, PlanStatus::Paid)
             })
         })?;
@@ -1159,8 +1221,9 @@ pub fn plan_inputs(
     }
 }
 
-/// The earliest settled round that is owed and has no payout record.
-pub fn next_payable_round(db: &Db) -> Result<Option<u32>, EngineError> {
+/// Settled rounds that are owed and have no payout record, earliest first.
+pub fn payable_rounds(db: &Db) -> Result<Vec<u32>, EngineError> {
+    let mut rounds = Vec::new();
     for round in db.settled_rounds()? {
         let row = db
             .settlement(round)?
@@ -1172,9 +1235,49 @@ pub fn next_payable_round(db: &Db) -> Result<Option<u32>, EngineError> {
             // In progress or stuck: leave it to the operator.
             continue;
         }
-        return Ok(Some(round));
+        rounds.push(round);
     }
-    Ok(None)
+    Ok(rounds)
+}
+
+/// Retry schedule of rounds whose payout attempt failed, so that one round
+/// that keeps failing never holds up the rounds after it.
+#[derive(Default)]
+pub struct RetryBackoff {
+    failed: BTreeMap<u32, (u32, std::time::Instant)>,
+}
+
+impl RetryBackoff {
+    /// First wait after a failure; it doubles per failure up to `MAX`.
+    const FIRST: Duration = Duration::from_secs(60);
+    const MAX: Duration = Duration::from_secs(30 * 60);
+
+    /// The first of `rounds` that may be attempted at `now`.
+    pub fn next(&self, rounds: &[u32], now: std::time::Instant) -> Option<u32> {
+        rounds
+            .iter()
+            .copied()
+            .find(|r| self.failed.get(r).is_none_or(|(_, at)| *at <= now))
+    }
+
+    /// Records a failed attempt of `round` at `now`.
+    pub fn failed(&mut self, round: u32, now: std::time::Instant) -> Duration {
+        let failures = self
+            .failed
+            .get(&round)
+            .map_or(0, |(n, _)| *n)
+            .saturating_add(1);
+        let wait = Self::FIRST
+            .saturating_mul(1u32 << failures.saturating_sub(1).min(5))
+            .min(Self::MAX);
+        self.failed.insert(round, (failures, now + wait));
+        wait
+    }
+
+    /// Forgets `round` after a successful attempt.
+    pub fn succeeded(&mut self, round: u32) {
+        self.failed.remove(&round);
+    }
 }
 
 #[cfg(test)]
@@ -1241,6 +1344,27 @@ mod tests {
             plan_inputs(&params(), &charged, &[100_000], &[]),
             Err(PlanError::ZeroChange)
         );
+    }
+
+    #[test]
+    fn a_failing_round_backs_off_and_later_rounds_go_first() {
+        let start = std::time::Instant::now();
+        let mut retry = RetryBackoff::default();
+        let rounds = [4, 5, 6];
+        assert_eq!(retry.next(&rounds, start), Some(4));
+        assert_eq!(retry.failed(4, start), Duration::from_secs(60));
+        assert_eq!(retry.next(&rounds, start), Some(5));
+        assert_eq!(
+            retry.next(&rounds, start + Duration::from_secs(61)),
+            Some(4)
+        );
+        assert_eq!(retry.failed(4, start), Duration::from_secs(120));
+        for _ in 0..10 {
+            retry.failed(4, start);
+        }
+        assert_eq!(retry.failed(4, start), Duration::from_secs(1_800), "capped");
+        retry.succeeded(4);
+        assert_eq!(retry.next(&rounds, start), Some(4));
     }
 
     #[test]

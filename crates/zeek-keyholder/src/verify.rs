@@ -40,10 +40,11 @@ use pczt::roles::verifier::Verifier;
 use pczt::Pczt;
 use zcash_primitives::transaction::TxVersion;
 use zcash_protocol::consensus::{BranchId, MAIN_NETWORK, TEST_NETWORK};
-use zeek_core::memo::{DigMemo, ORCHARD_RECEIVER_LEN};
+use zeek_core::memo::ORCHARD_RECEIVER_LEN;
 use zeek_core::params::Network;
 use zeek_core::seal::SealingPrivateKey;
 use zeek_core::settle;
+use zeek_engine::coordinator::payable_receiver;
 use zeek_engine::db::Db;
 use zeek_engine::processor::Processor;
 use zeek_vault::send::{self, PendingSpend};
@@ -194,21 +195,19 @@ pub fn verify_payout(
             )));
         }
         for (index, payout) in row.settlement.payouts.iter().enumerate() {
-            let memo = DigMemo {
-                round: payout.memo_round,
-                tile: payout.memo_tile,
-                sealed_receiver: payout.sealed_receiver.clone(),
-                message: None,
-            };
-            let receiver = memo
-                .open(params.network, ctx.sealing)
-                .map_err(|e| refuse(format!("round {round} payout {index}: the sealed receiver does not open with this node's sealing key ({e})")))?;
-            expected_payouts.push(ExpectedPayout {
-                round: *round,
-                index,
-                receiver: receiver.orchard,
-                net: payout.net,
-            });
+            // The coordinator's own rule: a payout with no payable receiver
+            // is not paid and its value stays in the change output.
+            match payable_receiver(params.network, ctx.sealing, payout) {
+                Ok(address) => expected_payouts.push(ExpectedPayout {
+                    round: *round,
+                    index,
+                    receiver: address.to_raw_address_bytes(),
+                    net: payout.net,
+                }),
+                Err(reason) => {
+                    tracing::info!(round, payout = index, %reason, "unclaimable payout: expecting its value in the change");
+                }
+            }
         }
         collected_fees = collected_fees
             .checked_add(row.settlement.total_fees)
