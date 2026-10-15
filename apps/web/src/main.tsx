@@ -5,7 +5,9 @@ import { App } from "./App";
 import "./styles/index.css";
 
 const client = new QueryClient({
-  defaultOptions: { queries: { retry: 2, refetchOnWindowFocus: true, staleTime: 5_000 } },
+  // No refetch on focus: the live stream keeps engine data fresh, and on the
+  // public site every refetch is a request of its free daily allowance.
+  defaultOptions: { queries: { retry: 2, refetchOnWindowFocus: false, staleTime: 5_000 } },
 });
 
 const root = document.getElementById("root");

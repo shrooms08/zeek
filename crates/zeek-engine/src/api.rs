@@ -443,13 +443,29 @@ pub fn proof_response(
     }
 }
 
+/// Cache policy of data that can never change again.
+pub const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+
+/// A proof bundle is final once its payout is mined (its openings are in)
+/// or when it pays nothing; until then it may still gain the openings.
+pub fn bundle_is_final(bundle: &ProofBundle) -> bool {
+    bundle.payout_openings.is_some() || bundle.settlement.payouts.is_empty()
+}
+
 async fn proof(
     State(state): State<Arc<AppState>>,
     Path(round): Path<u32>,
-) -> ApiResult<ProofBundle> {
+) -> Result<Response, ApiError> {
     let db = reader(&state)?;
     match proof_response(&state.processor, &db, round)? {
-        Some(bundle) => Ok(Json(bundle)),
+        Some(bundle) => {
+            let cache = if bundle_is_final(&bundle) {
+                IMMUTABLE
+            } else {
+                "no-store"
+            };
+            Ok(([(axum::http::header::CACHE_CONTROL, cache)], Json(bundle)).into_response())
+        }
         None => Err(ApiError(
             StatusCode::NOT_FOUND,
             format!("round {round} is not settled yet"),
@@ -960,15 +976,16 @@ fn stored_proof(state: &AppState, id: &str) -> Result<Option<StoredProof>, ApiEr
 async fn get_proof(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<StoredProof>, ApiError> {
+) -> Result<Response, ApiError> {
     if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(bad(
             StatusCode::BAD_REQUEST,
             "a proof id is 32 hex characters",
         ));
     }
+    // A stored proof was verified once and never changes.
     stored_proof(&state, &id)?
-        .map(Json)
+        .map(|p| ([(axum::http::header::CACHE_CONTROL, IMMUTABLE)], Json(p)).into_response())
         .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))
 }
 

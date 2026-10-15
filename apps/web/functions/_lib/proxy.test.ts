@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type Env, allowed, forward, subpath, validUpstream } from "./proxy";
+import {
+  type EdgeCache,
+  type Env,
+  allowed,
+  edgeCacheable,
+  forward,
+  subpath,
+  validUpstream,
+} from "./proxy";
 
 describe("proxy", () => {
   it("forwards only the listed routes and methods", () => {
@@ -73,6 +81,114 @@ describe("proxy", () => {
       // The stale address is forgotten: the next request reads KV again.
       await forward(request, env, "engine", "/share/round/1");
       expect(kv).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("the edge cache", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    function fakeEdge(): EdgeCache & { store: Map<string, Response>; pending: Promise<unknown>[] } {
+      const store = new Map<string, Response>();
+      const pending: Promise<unknown>[] = [];
+      return {
+        store,
+        pending,
+        cache: {
+          match: (key: string) => Promise.resolve(store.get(key)?.clone()),
+          put: (key: string, value: Response) => {
+            store.set(key, value);
+            return Promise.resolve();
+          },
+        } as unknown as Cache,
+        waitUntil: (p) => {
+          pending.push(p);
+        },
+      };
+    }
+    const env = (url: string | null) =>
+      ({
+        ZEEK: { get: vi.fn(() => Promise.resolve(url === null ? null : { url, updated: 1 })) },
+        ZEEK_PROXY_SECRET: "s",
+      }) as unknown as Env;
+    const request = (path: string) =>
+      new Request(`https://playzeek.pages.dev${path}`, {
+        headers: { "CF-Connecting-IP": "203.0.113.9" },
+      });
+    const upstream = (body: string, type: string, cacheControl: string) =>
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": type, "cache-control": cacheControl },
+          }),
+        ),
+      );
+
+    it("keeps what the engine marks public, and serves it without the tunnel", async () => {
+      const fetchMock = upstream("<html>card</html>", "text/html", "public, max-age=86400");
+      vi.stubGlobal("fetch", fetchMock);
+      const edge = fakeEdge();
+      const e = env("https://a-b-c.trycloudflare.com");
+      const first = await forward(
+        request("/share/round/251"),
+        e,
+        "engine",
+        "/share/round/251",
+        edge,
+      );
+      expect(await first.text()).toBe("<html>card</html>");
+      await Promise.all(edge.pending);
+      expect(edge.store.size).toBe(1);
+      const second = await forward(
+        request("/share/round/251"),
+        e,
+        "engine",
+        "/share/round/251",
+        edge,
+      );
+      expect(await second.text()).toBe("<html>card</html>");
+      expect(second.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("still serves a kept share page while the engine is offline", async () => {
+      vi.stubGlobal("fetch", upstream("<html>card</html>", "text/html", "public, max-age=86400"));
+      const edge = fakeEdge();
+      await forward(
+        request("/share/win/78ea3288c9ef4fea6c07ec9eeb26c9e0"),
+        env("https://a-b-c.trycloudflare.com"),
+        "engine",
+        "/share/win/78ea3288c9ef4fea6c07ec9eeb26c9e0",
+        edge,
+      );
+      await Promise.all(edge.pending);
+      const offline = await forward(
+        request("/share/win/78ea3288c9ef4fea6c07ec9eeb26c9e0"),
+        env(null),
+        "engine",
+        "/share/win/78ea3288c9ef4fea6c07ec9eeb26c9e0",
+        edge,
+      );
+      expect(offline.status).toBe(200);
+    });
+
+    it("never keeps a bundle that may still change, or live data", async () => {
+      vi.stubGlobal("fetch", upstream("{}", "application/json", "no-store"));
+      const edge = fakeEdge();
+      const e = env("https://a-b-c.trycloudflare.com");
+      await forward(request("/api/v1/rounds/252/proof"), e, "engine", "/v1/rounds/252/proof", edge);
+      vi.stubGlobal("fetch", upstream("{}", "application/json", "public, max-age=60"));
+      await forward(request("/api/v1/board"), e, "engine", "/v1/board", edge);
+      await Promise.all(edge.pending);
+      expect(edge.store.size).toBe(0);
+    });
+
+    it("reads Cache-Control strictly", () => {
+      expect(edgeCacheable("public, max-age=31536000, immutable")).toBe(true);
+      expect(edgeCacheable("public, max-age=0")).toBe(false);
+      expect(edgeCacheable("no-store")).toBe(false);
+      expect(edgeCacheable("private, max-age=60")).toBe(false);
+      expect(edgeCacheable(null)).toBe(false);
     });
   });
 });

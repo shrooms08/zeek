@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Only the proxy routes run Pages Functions; everything else (the app, its assets, Replay mode's saved rounds) is static and costs no Functions request.",
+  "include": ["/api/*", "/share/*", "/relay/*"],
+  "exclude": []
+}

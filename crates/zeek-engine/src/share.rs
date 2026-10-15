@@ -30,6 +30,11 @@ pub const TAGLINE: &str = "Everyone sees the field. No one sees you.";
 const ARCHIVO_BLACK: &[u8] = include_bytes!("../../../config/share/fonts/ArchivoBlack-Regular.ttf");
 const JETBRAINS_MONO: &[u8] = include_bytes!("../../../config/share/fonts/JetBrainsMono-wght.ttf");
 
+/// Share pages and cards are only served for settled rounds and stored
+/// proofs, which never change: browsers, link unfurlers and the site's edge
+/// may keep them a day.
+pub const SHARE_CACHE: &str = "public, max-age=86400";
+
 /// Rendered PNGs by cache key; round cards are only rendered once a round is
 /// settled and win cards once a proof is stored, so entries never go stale.
 #[derive(Default)]
@@ -249,7 +254,7 @@ async fn png_response(state: &AppState, key: String, card: Card) -> Response {
     (
         [
             (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "public, max-age=86400"),
+            (header::CACHE_CONTROL, SHARE_CACHE),
             (
                 header::HeaderName::from_static("cross-origin-resource-policy"),
                 "cross-origin",
@@ -304,13 +309,16 @@ pub async fn round_page(State(state): State<Arc<AppState>>, Path(name): Path<Str
     }
     let image = format!("{}/share/round/{round}.png", state.public_url);
     let app = format!("{}/rounds/{round}", state.app_url);
-    Html(share_html(
-        &format!("Zeek round {round}: {headline}"),
-        TAGLINE,
-        &image,
-        &app,
-    ))
-    .into_response()
+    (
+        [(header::CACHE_CONTROL, SHARE_CACHE)],
+        Html(share_html(
+            &format!("Zeek round {round}: {headline}"),
+            TAGLINE,
+            &image,
+            &app,
+        )),
+    )
+        .into_response()
 }
 
 /// `GET /share/win/{id}` and `/share/win/{id}.png`: only for proofs the
@@ -342,7 +350,11 @@ pub async fn win_page(State(state): State<Arc<AppState>>, Path(name): Path<Strin
     }
     let image = format!("{}/share/win/{id}.png", state.public_url);
     let app = format!("{}/win/{id}", state.app_url);
-    Html(share_html(&headline, TAGLINE, &image, &app)).into_response()
+    (
+        [(header::CACHE_CONTROL, SHARE_CACHE)],
+        Html(share_html(&headline, TAGLINE, &image, &app)),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

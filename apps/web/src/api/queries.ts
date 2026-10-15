@@ -2,12 +2,24 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useContext } from "react";
-import { engine } from "./engine";
+import { engine, EngineError } from "./engine";
 import { LiveContext } from "./LiveProvider";
 
-/** Polls only while the WebSocket is down (it pushes changes when up). */
-function useFallbackInterval(ms: number): number | false {
-  return useContext(LiveContext) === "open" ? false : ms;
+/**
+ * Polls only while the WebSocket is down for an ordinary reason: never while
+ * it is open (it pushes changes) or paused (the tab is hidden), and never
+ * while the engine is offline or the site is busy, when Replay mode's one
+ * health probe decides when to come back. Every poll on the public site is
+ * one request of its free daily allowance.
+ */
+function useFallbackInterval(ms: number) {
+  const live = useContext(LiveContext);
+  return (query: { state: { error: unknown } }): number | false => {
+    if (live === "open" || live === "paused") return false;
+    const e = query.state.error;
+    if (e instanceof EngineError && (e.kind === "offline" || e.kind === "busy")) return false;
+    return ms;
+  };
 }
 
 export const keys = {
@@ -68,11 +80,12 @@ export function useLedger() {
 }
 
 export function useKeyholders() {
-  // Reachability comes from the engine's probes; refresh it regardless.
+  // Reachability comes from the engine's probes (once a minute); refresh it
+  // at that pace regardless of the stream.
   return useQuery({
     queryKey: keys.keyholders,
     queryFn: engine.keyholders,
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
   });
 }
 

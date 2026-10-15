@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { onVisibilityChange, isHidden } from "../lib/visibility";
 import { engine } from "./engine";
+import { resumeLive } from "./LiveProvider";
 
 export const PROBE_FIRST_MS = 15_000;
 export const PROBE_MAX_MS = 120_000;
@@ -28,6 +29,7 @@ export function useEngineComeback(): { nextAt: number | null; checkNow: () => vo
     try {
       const h = await engine.health();
       if (h.ok) {
+        resumeLive();
         await client.invalidateQueries();
         return true;
       }

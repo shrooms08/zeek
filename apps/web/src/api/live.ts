@@ -1,14 +1,17 @@
 /**
  * The one WebSocket to the engine (`/v1/stream`), with reconnection and
- * exponential backoff (1 s doubling to 30 s, with jitter). Events are handed
- * to a listener (which merges them into the query cache); connection state
- * is published so the UI can say "Reconnecting…" instead of showing stale
- * numbers silently.
+ * exponential backoff (1 s doubling to 30 s, then 1, 2 and 5 minutes while
+ * the engine stays away, with jitter). Events are handed to a listener
+ * (which merges them into the query cache); connection state is published
+ * so the UI can say "Reconnecting…" instead of showing stale numbers
+ * silently. Every connection attempt is one request on the public site's
+ * free daily allowance, so a hidden tab pauses the stream (`pause`) and
+ * picks it up again on return (`resume`).
  */
 
 import type { LiveEvent } from "./types";
 
-export type LiveState = "connecting" | "open" | "reconnecting";
+export type LiveState = "connecting" | "open" | "reconnecting" | "paused";
 
 export interface LiveOptions {
   url: string;
@@ -21,7 +24,10 @@ export interface LiveOptions {
 
 /** Delay before reconnect attempt `attempt` (0-based), in ms. */
 export function backoffMs(attempt: number, random: () => number): number {
-  const base = Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5));
+  const base =
+    attempt < 6
+      ? Math.min(30_000, 1_000 * 2 ** attempt)
+      : Math.min(300_000, 60_000 * 2 ** Math.min(attempt - 6, 3));
   return Math.round(base * (0.75 + random() * 0.5));
 }
 
@@ -55,6 +61,23 @@ export class LiveClient {
     this.stopped = true;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.socket?.close();
+  }
+
+  /** Closes the stream without reconnecting (the tab is hidden). */
+  pause(): void {
+    this.stop();
+    this.options.onState("paused");
+  }
+
+  /** Reconnects now, with the backoff reset (tab visible again, engine back). */
+  resume(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    const open = this.socket?.readyState === 1 && !this.stopped;
+    if (open) return;
+    this.socket?.close();
+    this.attempt = 0;
+    this.stopped = false;
+    this.connect();
   }
 
   private connect(): void {

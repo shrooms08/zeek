@@ -15,6 +15,13 @@
  *
  * `_headers` does not apply to Function responses, so the isolation headers
  * the app needs (COOP/COEP, CORP) are set here too.
+ *
+ * Responses the engine marks `public` on cacheable routes (share pages and
+ * cards, final proof bundles, stored win proofs: data that never changes)
+ * are kept in this Cloudflare location's cache (Cache API) and served from
+ * it first. That spares the Mac and keeps those links working while it is
+ * off; it does not save Functions requests (a cache hit still runs the
+ * Function), which is why the app itself requests so little.
  */
 
 export interface Env {
@@ -43,6 +50,8 @@ interface Rule {
   /** Largest request body accepted (POST only). */
   maxBody?: number;
   websocket?: boolean;
+  /** Kept in the edge cache when the engine marks the answer `public`. */
+  cache?: boolean;
 }
 
 /** Media types each kind of route may return. */
@@ -76,8 +85,9 @@ const ENGINE_RULES: Rule[] = [
   },
   { method: "GET", pattern: /^\/v1\/keyholders\/status$/, kind: "json" },
   { method: "GET", pattern: /^\/v1\/rounds(\/pending)?$/, kind: "json" },
-  { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}(/proof|/digests)?$`), kind: "json" },
-  { method: "GET", pattern: /^\/v1\/proofs\/[0-9a-f]{32}$/, kind: "json" },
+  { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}(/digests)?$`), kind: "json" },
+  { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}/proof$`), kind: "json", cache: true },
+  { method: "GET", pattern: /^\/v1\/proofs\/[0-9a-f]{32}$/, kind: "json", cache: true },
   { method: "POST", pattern: /^\/v1\/proofs$/, kind: "json", maxBody: 32 * 1024 },
   { method: "GET", pattern: /^\/v1\/chain\/tip$/, kind: "json" },
   // Tree states and compact blocks are protobuf.
@@ -86,7 +96,12 @@ const ENGINE_RULES: Rule[] = [
   { method: "POST", pattern: /^\/v1\/tx\/broadcast$/, kind: "json", maxBody: 256 * 1024 },
   { method: "GET", pattern: /^\/v1\/relay\/stats$/, kind: "json" },
   { method: "GET", pattern: /^\/v1\/stream$/, kind: "json", websocket: true },
-  { method: "GET", pattern: /^\/share\/(round|win)\/[0-9a-z.]{1,48}$/, kind: "share" },
+  {
+    method: "GET",
+    pattern: /^\/share\/(round|win)\/[0-9a-z.]{1,48}$/,
+    kind: "share",
+    cache: true,
+  },
 ];
 
 /** The second-source relay's routes (`zeek-verify relay`). */
@@ -175,16 +190,36 @@ export function allowed(service: Service, method: string, path: string): Rule | 
  * Forwards `request` (whose path, after the site prefix, is `path`) to
  * `service`.
  */
+/** Whether an upstream Cache-Control lets the edge keep the answer. */
+export function edgeCacheable(cacheControl: string | null): boolean {
+  if (cacheControl === null) return false;
+  const c = cacheControl.toLowerCase();
+  return c.includes("public") && /max-age=\d*[1-9]/.test(c) && !c.includes("no-store");
+}
+
+/** Optional edge cache (`caches.default`) and `waitUntil` of the request. */
+export interface EdgeCache {
+  cache: Cache;
+  waitUntil: (p: Promise<unknown>) => void;
+}
+
 export async function forward(
   request: Request,
   env: Env,
   service: Service,
   path: string,
+  edge?: EdgeCache,
 ): Promise<Response> {
   const url = new URL(request.url);
   const rule = allowed(service, request.method, path);
   if (rule === undefined) {
     return json(404, { error: "not found" });
+  }
+  // Cacheable answers are keyed by their public URL, without any headers.
+  const cacheKey = rule.cache === true && edge !== undefined ? url.toString() : undefined;
+  if (cacheKey !== undefined && edge !== undefined) {
+    const hit = await edge.cache.match(cacheKey);
+    if (hit !== undefined) return hit;
   }
   const upstream = await upstreamOf(env, service);
   if (upstream === null) {
@@ -260,7 +295,16 @@ export async function forward(
   out.set("Content-Type", response.headers.get("content-type") ?? type);
   out.set("Content-Security-Policy", PROXY_CSP[rule.kind]);
   if (!out.has("cache-control")) out.set("Cache-Control", "no-store");
-  return new Response(response.body, { status: response.status, headers: out });
+  const answer = new Response(response.body, { status: response.status, headers: out });
+  if (
+    cacheKey !== undefined &&
+    edge !== undefined &&
+    response.status === 200 &&
+    edgeCacheable(response.headers.get("cache-control"))
+  ) {
+    edge.waitUntil(edge.cache.put(cacheKey, answer.clone()));
+  }
+  return answer;
 }
 
 /** The path below the site prefix, from a `[[path]]` route parameter. */

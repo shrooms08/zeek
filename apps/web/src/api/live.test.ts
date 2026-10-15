@@ -13,11 +13,52 @@ class FakeSocket {
 }
 
 describe("LiveClient", () => {
-  it("backs off exponentially with jitter, capped at 30 s", () => {
+  it("backs off exponentially with jitter: 30 s, then minutes while the engine is away", () => {
     expect(backoffMs(0, () => 0.5)).toBe(1_000);
     expect(backoffMs(3, () => 0.5)).toBe(8_000);
-    expect(backoffMs(20, () => 0.5)).toBe(30_000);
+    expect(backoffMs(5, () => 0.5)).toBe(30_000);
+    expect(backoffMs(6, () => 0.5)).toBe(60_000);
+    expect(backoffMs(7, () => 0.5)).toBe(120_000);
+    expect(backoffMs(8, () => 0.5)).toBe(240_000);
+    expect(backoffMs(20, () => 0.5)).toBe(300_000);
     expect(backoffMs(0, () => 0)).toBe(750);
+  });
+
+  it("an engine away for an hour costs about 20 connection attempts, not 120", () => {
+    let t = 0;
+    let n = 0;
+    while (t < 3_600_000) {
+      t += backoffMs(n, () => 0.5);
+      n += 1;
+    }
+    expect(n).toBeLessThanOrEqual(22);
+  });
+
+  it("pauses without reconnecting, and resumes at once", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const states: string[] = [];
+    const client = new LiveClient({
+      url: "ws://x/v1/stream",
+      onEvent: () => undefined,
+      onState: (s) => states.push(s),
+      createSocket: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+      random: () => 0.5,
+    });
+    client.start();
+    sockets[0]?.onopen?.();
+    client.pause();
+    vi.advanceTimersByTime(600_000);
+    expect(sockets).toHaveLength(1);
+    expect(states.at(-1)).toBe("paused");
+    client.resume();
+    expect(sockets).toHaveLength(2);
+    client.stop();
+    vi.useRealTimers();
   });
 
   it("reports state, parses events and reconnects", () => {

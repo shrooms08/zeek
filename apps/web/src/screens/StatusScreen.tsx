@@ -101,7 +101,8 @@ export default function StatusScreen() {
   const status = useQuery({
     queryKey: keys.status,
     queryFn: engine.status,
-    refetchInterval: 15_000,
+    // Every 30 s is enough to watch an outage, and spares the free quota.
+    refetchInterval: 30_000,
     retry: false,
   });
   const relay = useQuery({
@@ -131,7 +132,7 @@ export default function StatusScreen() {
   return (
     <Screen title="Status" kicker="Is everything working?" testId="status-screen">
       <p className="text-mist">
-        Live checks of each part of Zeek, refreshed every 15 seconds. Zeek’s engine and keyholders
+        Live checks of each part of Zeek, refreshed every 30 seconds. Zeek’s engine and keyholders
         run on one computer operated by the Zeek team; this site reaches the engine through a
         Cloudflare tunnel.
       </p>
