@@ -156,6 +156,15 @@ async function upstreamOf(env: Env, service: Service): Promise<Upstream | null> 
   return upstream;
 }
 
+/**
+ * Statuses Cloudflare's edge itself returns when it cannot reach the origin
+ * behind a tunnel host (520-527; 530 with error 1033 once the tunnel has
+ * stopped). The engine and relay never send them.
+ */
+export function tunnelUnreachable(status: number): boolean {
+  return status >= 520 && status <= 530;
+}
+
 /** The rule allowing `method path` for `service`, if any. */
 export function allowed(service: Service, method: string, path: string): Rule | undefined {
   const rules = service === "engine" ? ENGINE_RULES : RELAY_RULES;
@@ -232,6 +241,12 @@ export async function forward(
     });
   } catch {
     return json(502, { error: `The Zeek ${service} did not answer.`, offline: true });
+  }
+  if (tunnelUnreachable(response.status)) {
+    // A tunnel that has just stopped (KV still names it here); read KV again
+    // next time instead of reusing the stale address.
+    remembered.delete(service);
+    return json(503, { error: `The Zeek ${service} is offline right now.`, offline: true });
   }
   const type = (response.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
   if (type === undefined || !TYPES[rule.kind].includes(type)) {

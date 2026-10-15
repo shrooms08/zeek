@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { allowed, subpath, validUpstream } from "./proxy";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Env, allowed, forward, subpath, validUpstream } from "./proxy";
 
 describe("proxy", () => {
   it("forwards only the listed routes and methods", () => {
@@ -42,5 +42,37 @@ describe("proxy", () => {
     expect(subpath("", ["v1", "board"])).toBe("/v1/board");
     expect(subpath("/share", ["win", "x.png"])).toBe("/share/win/x.png");
     expect(subpath("", undefined)).toBe("");
+  });
+
+  describe("a tunnel that has stopped", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("reports the service offline instead of Cloudflare's own error page", async () => {
+      const kv = vi.fn(() =>
+        Promise.resolve({ url: "https://gone.trycloudflare.com", updated: 1 }),
+      );
+      const env = { ZEEK: { get: kv }, ZEEK_PROXY_SECRET: "s" } as unknown as Env;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve(
+            new Response("error code: 1033", {
+              status: 530,
+              headers: { "content-type": "text/plain; charset=UTF-8" },
+            }),
+          ),
+        ),
+      );
+      const request = new Request("https://playzeek.pages.dev/share/round/1", {
+        headers: { "CF-Connecting-IP": "203.0.113.7" },
+      });
+
+      const first = await forward(request, env, "engine", "/share/round/1");
+      expect(first.status).toBe(503);
+      expect(await first.json()).toMatchObject({ offline: true });
+      // The stale address is forgotten: the next request reads KV again.
+      await forward(request, env, "engine", "/share/round/1");
+      expect(kv).toHaveBeenCalledTimes(2);
+    });
   });
 });

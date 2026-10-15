@@ -112,7 +112,7 @@ test.describe("at 390 wide", () => {
 
   test("with the live stream down the menu stays on screen", async ({ page }) => {
     await page.routeWebSocket(/\/v1\/stream/, (ws) => {
-      ws.close();
+      void ws.close();
     });
     await page.addInitScript(() => {
       localStorage.setItem("zeek.seenOnboarding", "1");
