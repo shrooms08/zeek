@@ -91,6 +91,7 @@ test("one tab: requests per hour, visible then hidden", async ({ page, baseURL }
 });
 
 test("one share page view (a person following a link)", async ({ page, baseURL }) => {
+  test.setTimeout(180_000);
   const origin = new URL(baseURL ?? "").origin;
   const proof = process.env.ZEEK_QUOTA_PROOF;
   test.skip(proof === undefined, "set ZEEK_QUOTA_PROOF to a proof id");

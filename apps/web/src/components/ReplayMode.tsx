@@ -152,7 +152,8 @@ function ReplayPlayer({
   const burst = phase === "burst" ? 2 : phase === "result" ? 3 : 0;
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-      <div className="relative">
+      {/* The reveal's light stays inside the field (it must not cover the status above). */}
+      <div className="relative overflow-hidden">
         <Field
           stages={moment.stages}
           selected={[]}
