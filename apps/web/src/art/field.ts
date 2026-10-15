@@ -93,8 +93,8 @@ export function hole(i: number, d: number, p: string): string {
       : `<polygon points="${pts(fl)}" fill="${und(d + 1)}"/><polygon points="${pts(fl)}" fill="url(#${p}x${d})"/>`;
   const w1 = [lf, tp, dn(tp), dn(lf)];
   const w2 = [tp, rt, dn(rt), dn(tp)];
-  g += `<g data-hatch><polygon points="${pts(w1)}" fill="${und(d)}"/><polygon points="${pts(w1)}" fill="url(#${p}h${d})" stroke="${INK}" stroke-width="1.2"/><polygon points="${pts(w2)}" fill="${und(d + 1)}"/><polygon points="${pts(w2)}" fill="url(#${p}x${d})" stroke="${INK}" stroke-width="1.2"/></g></g>`;
-  g += `<polygon data-rim pathLength="1" points="${pts(o)}" fill="none" stroke="${INK}" stroke-width="${RIM[d] ?? 1}" stroke-linejoin="round"/>`;
+  g += `<g data-hatch=""><polygon points="${pts(w1)}" fill="${und(d)}"/><polygon points="${pts(w1)}" fill="url(#${p}h${d})" stroke="${INK}" stroke-width="1.2"/><polygon points="${pts(w2)}" fill="${und(d + 1)}"/><polygon points="${pts(w2)}" fill="url(#${p}x${d})" stroke="${INK}" stroke-width="1.2"/></g></g>`;
+  g += `<polygon data-rim="" pathLength="1" points="${pts(o)}" fill="none" stroke="${INK}" stroke-width="${RIM[d] ?? 1}" stroke-linejoin="round"/>`;
   const rc = rng(i * 13 + d);
   let cd = "";
   for (let k = 0; k < 2 + d * 3; k++) {

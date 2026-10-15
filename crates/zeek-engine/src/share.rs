@@ -62,6 +62,25 @@ pub fn zec(zat: u64) -> String {
     text.to_owned()
 }
 
+/// The ink art on a card's left, generated from the web app's art kit
+/// (`node scripts/share-art.mjs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardArt {
+    /// Zeb holding the open gold chest (prove-a-win).
+    Win,
+    /// The open gold chest (a round's result).
+    Round,
+}
+
+const ART_WIN: &str = include_str!("../../../config/share/art-win.svg");
+const ART_ROUND: &str = include_str!("../../../config/share/art-round.svg");
+const LOCKUP: &str = include_str!("../../../config/share/lockup.svg");
+/// The sparkle pictogram (design system icon set, 24 grid).
+const SPARKLE: &str =
+    "M12 3v5 M12 16v5 M3 12h5 M16 12h5 M6 6l2.5 2.5 M15.5 15.5L18 18 M18 6l-2.5 2.5 M8.5 15.5L6 18";
+/// The chest pictogram.
+const CHEST: &str = "M3 10h18v10H3z M3 10c0-4 3-6 9-6s9 2 9 6 M10 11h4v4h-4z M3 14h7 M14 14h7";
+
 /// What a card shows.
 pub struct Card {
     pub kicker: String,
@@ -69,37 +88,100 @@ pub struct Card {
     /// Big gold amount (ZEC), if any.
     pub amount: Option<String>,
     pub check_label: String,
+    pub art: CardArt,
 }
 
-/// The card as SVG (Mono: Night ground, White panel lines, Gold only on
-/// treasure amounts).
+/// Greedy word wrap so each line's estimated width at `size` px fits `max_px`.
+fn wrap(text: &str, size: f32, max_px: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if advance(&format!("{line} {word}"), size) <= max_px => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    lines
+}
+
+/// Approximate advance of `text` in Archivo Black at `size` px.
+fn advance(text: &str, size: f32) -> f32 {
+    text.chars()
+        .map(|c| match c {
+            '.' | ',' => 0.3,
+            '+' | '-' => 0.6,
+            ' ' => 0.27,
+            'i' | 'l' | 'I' | 'j' | 't' | 'f' | 'r' => 0.42,
+            'm' | 'w' | 'M' | 'W' => 0.98,
+            _ => 0.68,
+        })
+        .sum::<f32>()
+        * size
+}
+
+/// The card as SVG, in the Mono style of the design's prove-a-win card
+/// (10A): ink art on the left in a soft glow (gold: treasure), the round,
+/// a big headline, the gold amount, the check link, the tagline and the
+/// lockup.
 pub fn card_svg(card: &Card) -> String {
+    let (art, art_transform) = match card.art {
+        CardArt::Win => (ART_WIN, "translate(104 150) scale(3.25)"),
+        CardArt::Round => (ART_ROUND, "translate(92 236) scale(3.4)"),
+    };
+    let (size, lines) = [80.0_f32, 68.0, 58.0]
+        .into_iter()
+        .map(|size| (size, wrap(&card.headline, size, 540.0)))
+        .find(|(_, lines)| lines.len() <= 3)
+        .unwrap_or_else(|| (52.0, wrap(&card.headline, 52.0, 540.0)));
+    let line_h = size * 0.98;
+    let top = 250.0;
+    let headline: String = lines
+        .iter()
+        .enumerate()
+        .map(|(k, l)| {
+            format!(
+                r##"<text x="600" y="{:.0}" font-family="Archivo Black" font-size="{size}" fill="#FFFFFF">{}</text>"##,
+                top + line_h * k as f32,
+                escape(l)
+            )
+        })
+        .collect();
+    let after = top + line_h * (lines.len() as f32 - 1.0);
     let amount = card.amount.as_ref().map_or(String::new(), |a| {
+        let y = after + 104.0;
+        let x_unit = 652.0 + advance(a, 84.0) + 12.0;
         format!(
-            r##"<text x="88" y="470" font-family="Archivo Black" font-size="128" fill="#E8B54A">{}</text>
-<text x="{}" y="470" font-family="Archivo Black" font-size="40" fill="#FFFFFF">ZEC</text>"##,
+            r##"<g transform="translate(600 {:.0}) scale(1.6)" fill="none" stroke="#E8B54A" stroke-width="2.25" stroke-linecap="square"><path d="{CHEST}"/></g>
+<text x="652" y="{:.0}" font-family="Archivo Black" font-size="84" fill="#E8B54A">{}</text>
+<text x="{x_unit:.0}" y="{:.0}" font-family="Archivo Black" font-size="34" fill="#FFFFFF">ZEC</text>"##,
+            y - 52.0,
+            y,
             escape(a),
-            // Archivo Black at 128 px: digits and signs ≈ 0.72 em, the dot ≈ 0.33 em.
-            100 + a.chars().map(|c| if c == '.' { 42 } else { 92 }).sum::<usize>(),
+            y,
         )
     });
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">
+<defs><radialGradient id="glow"><stop offset="0" stop-color="#E8B54A" stop-opacity=".42"/><stop offset=".5" stop-color="#FFFFFF" stop-opacity=".08"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient></defs>
 <rect width="{WIDTH}" height="{HEIGHT}" fill="#0D0D0D"/>
-<rect x="40" y="40" width="1120" height="595" fill="none" stroke="#FFFFFF" stroke-width="3"/>
-<path d="M88 96 h58 l-40 46 h40 v14 h-62 l40 -46 h-36 z" fill="#FFFFFF"/>
-<text x="166" y="140" font-family="Archivo Black" font-size="40" fill="#FFFFFF">Zeek</text>
-<text x="88" y="236" font-family="JetBrains Mono" font-size="26" letter-spacing="4" fill="#A6A6A6">{kicker}</text>
-<text x="88" y="318" font-family="Archivo Black" font-size="60" fill="#FFFFFF">{headline}</text>
+<circle cx="300" cy="410" r="290" fill="url(#glow)"/>
+<g transform="{art_transform}">{art}</g>
+<g transform="translate(600 136) scale(1.15)" fill="none" stroke="#FFFFFF" stroke-width="2.25" stroke-linecap="square"><path d="{SPARKLE}"/></g>
+<text x="640" y="160" font-family="Archivo Black" font-size="24" letter-spacing="4" fill="#FFFFFF">{kicker}</text>
+{headline}
 {amount}
-<line x1="88" y1="532" x2="1112" y2="532" stroke="#3A3A3A" stroke-width="1.5"/>
-<text x="88" y="586" font-family="JetBrains Mono" font-size="24" fill="#D6D6D6">CHECK IT · {check}</text>
-<text x="1112" y="586" text-anchor="end" font-family="Archivo Black" font-size="24" fill="#FFFFFF">{tagline}</text>
+<line x1="600" y1="560" x2="1140" y2="560" stroke="#FFFFFF" stroke-width="3"/>
+<text x="600" y="598" font-family="JetBrains Mono" font-size="16" letter-spacing="3" fill="#A6A6A6">CHECK IT</text>
+<text x="600" y="630" font-family="JetBrains Mono" font-size="24" fill="#FFFFFF">{check}</text>
+<text x="1012" y="604" text-anchor="end" font-family="JetBrains Mono" font-size="16" fill="#D6D6D6">Everyone sees the field.</text>
+<text x="1012" y="628" text-anchor="end" font-family="JetBrains Mono" font-size="16" fill="#D6D6D6">No one sees you.</text>
+<g transform="translate(1030 574) scale(0.23) translate(-128 -282)">{LOCKUP}</g>
+<rect x="9" y="9" width="1182" height="657" fill="none" stroke="#FFFFFF" stroke-width="6"/>
 </svg>"##,
         kicker = escape(&card.kicker),
-        headline = escape(&card.headline),
         check = escape(&card.check_label),
-        tagline = escape(TAGLINE),
     )
 }
 
@@ -205,6 +287,7 @@ pub async fn round_page(State(state): State<Arc<AppState>>, Path(name): Path<Str
         headline: headline.clone(),
         amount: (prize > 0).then(|| zec(prize)),
         check_label: format!("check round {round}"),
+        art: CardArt::Round,
     };
     if png {
         return png_response(&state, format!("round/{round}"), card).await;
@@ -242,6 +325,7 @@ pub async fn win_page(State(state): State<Arc<AppState>>, Path(name): Path<Strin
         headline: headline.clone(),
         amount: Some(format!("+{}", zec(proof.opening.value))),
         check_label: format!("win {}", &id[..8]),
+        art: CardArt::Win,
     };
     if png {
         return png_response(&state, format!("win/{id}"), card).await;
@@ -265,6 +349,7 @@ mod tests {
             headline: "I found the treasure in round 74".into(),
             amount: Some("+0.0225".into()),
             check_label: "win 8a4696ec".into(),
+            art: CardArt::Win,
         };
         let png = render_png(&card).expect("render");
         assert_eq!(&png[1..4], b"PNG");

@@ -26,13 +26,13 @@ test("the app is cross-origin isolated and every asset loads under COEP", async 
   expect(response?.headers()["cross-origin-embedder-policy"]).toBe("require-corp");
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   await expect(page.getByTestId("field")).toBeVisible({ timeout: 30_000 });
-  // Fonts: every face the page uses is loaded (no blocked font request).
-  await page.evaluate(() => document.fonts.ready);
-  const fonts = await page.evaluate(() =>
-    ["900 20px 'Archivo Variable'", "20px 'Archivo Black'", "14px 'JetBrains Mono'"].map((f) =>
-      document.fonts.check(f),
-    ),
-  );
+  // Fonts: load every face the app uses (a blocked font request would fail
+  // under COEP), then check each one is available.
+  const fonts = await page.evaluate(async () => {
+    const faces = ["900 20px 'Archivo Variable'", "20px 'Archivo Black'", "14px 'JetBrains Mono'"];
+    await Promise.all(faces.map((f) => document.fonts.load(f)));
+    return faces.map((f) => document.fonts.check(f));
+  });
   expect(fonts).toEqual([true, true, true]);
   expect(problems).toEqual([]);
 });
