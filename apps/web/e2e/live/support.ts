@@ -92,6 +92,8 @@ export const test = base.extend<{ context: BrowserContext; page: Page }>({
       viewport: { width: 1440, height: 1000 },
       baseURL: APP,
     });
+    // Actions fail after a minute instead of waiting out the test timeout.
+    context.setDefaultTimeout(60_000);
     await use(context);
     await context.close();
   },

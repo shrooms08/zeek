@@ -48,3 +48,23 @@ export function digsInRound(
   }
   return out;
 }
+
+const SEEN_REVEAL = "zeek.seenReveal";
+
+/** The newest round whose reveal this browser has shown (-1 if none). */
+export function lastSeenReveal(): number {
+  try {
+    return Number(localStorage.getItem(SEEN_REVEAL) ?? "-1");
+  } catch {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+/** Records that the reveal of `round` was shown, so the field doesn't open it again. */
+export function markRevealSeen(round: number): void {
+  try {
+    if (round > lastSeenReveal()) localStorage.setItem(SEEN_REVEAL, String(round));
+  } catch {
+    // private window: the reveal may open once more
+  }
+}

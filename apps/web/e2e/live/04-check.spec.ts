@@ -34,10 +34,20 @@ test("past rounds, round detail, and every applicable check passes", async ({ pa
   await shot(page, "round-detail-1440");
   await page.getByTestId("check-this-round").click();
 
+  await page.getByText("Second source", { exact: true }).click();
   for (const second of ["", SECOND_RELAY]) {
     await page.getByTestId("check-second").fill(second);
-    await page.getByTestId("check-run").click();
-    await expect(page.getByTestId("check-summary")).toBeVisible({ timeout: 15 * 60_000 });
+    // The relay's upstream (a public lightwalletd) drops connections now and
+    // then; the app reports it and the check is simply run again.
+    for (let attempt = 1; ; attempt++) {
+      await page.getByTestId("check-run").click();
+      const summary = page.getByTestId("check-summary");
+      const failed = page.getByRole("alert").filter({ hasText: "couldn’t run" });
+      await expect(summary.or(failed)).toBeVisible({ timeout: 15 * 60_000 });
+      if (await summary.isVisible()) break;
+      console.log(`check attempt ${attempt}: ${(await failed.textContent()) ?? ""}`);
+      if (attempt === 3) throw new Error("the check couldn't run three times");
+    }
     await expect(page.getByTestId("check-summary")).toHaveText("Every check that applies passed.");
     for (const id of ["beacon", "digs", "timing", "settlement", "payout"]) {
       await expect(page.getByTestId(`check-${id}`)).toHaveAttribute("data-state", /^(pass|na)$/);

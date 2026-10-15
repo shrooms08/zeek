@@ -16,9 +16,7 @@ import { formatZec, zat } from "../lib/money";
 import { formatClock } from "../lib/time";
 import { useNow } from "../lib/useNow";
 import { useDraft } from "../state/draft";
-import { loadMyDigs } from "../state/myDigs";
-
-const SEEN_REVEAL = "zeek.seenReveal";
+import { lastSeenReveal, loadMyDigs, markRevealSeen } from "../state/myDigs";
 
 function cryptoRandom(): number {
   const b = new Uint32Array(1);
@@ -42,20 +40,10 @@ export function FieldScreen() {
   useEffect(() => {
     if (board.data === undefined) return;
     const mine = loadMyDigs().map((d) => d.round);
-    const seen = (() => {
-      try {
-        return Number(localStorage.getItem(SEEN_REVEAL) ?? "-1");
-      } catch {
-        return Number.MAX_SAFE_INTEGER;
-      }
-    })();
+    const seen = lastSeenReveal();
     const closed = mine.filter((r) => r < board.data.round && r > seen).sort((a, b) => b - a)[0];
     if (closed !== undefined) {
-      try {
-        localStorage.setItem(SEEN_REVEAL, String(closed));
-      } catch {
-        // ignore
-      }
+      markRevealSeen(closed);
       void navigate(`/reveal/${closed}`);
     }
   }, [board.data, navigate]);

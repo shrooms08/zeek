@@ -18,7 +18,7 @@ import {
   revealReducer,
   STAGE_MS,
 } from "../machines/reveal";
-import { digsInRound, loadMyDigs } from "../state/myDigs";
+import { digsInRound, loadMyDigs, markRevealSeen } from "../state/myDigs";
 
 export default function RevealScreen() {
   const n = Number(useParams().round);
@@ -51,6 +51,11 @@ export default function RevealScreen() {
       clearTimeout(id);
     };
   }, [state.stage]);
+
+  // Shown once: the field won't open this reveal again.
+  useEffect(() => {
+    if (state.stage === "result") markRevealSeen(n);
+  }, [state.stage, n]);
 
   const mine = useMemo(() => digsInRound(n, loadMyDigs()), [n]);
   if (!Number.isInteger(n) || n < 0) return <Offline text="No such round" />;

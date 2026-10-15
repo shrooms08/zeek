@@ -40,7 +40,15 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
       5_000,
     );
     await go(page, "/");
-    await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("field").or(page.getByTestId("reveal-screen"))).toBeVisible({
+      timeout: 60_000,
+    });
+    // The field opens an unseen reveal of a round this browser dug, once.
+    if (page.url().includes("/reveal/")) {
+      await expect(page.getByTestId("result-card")).toBeVisible({ timeout: 60_000 });
+      await go(page, "/");
+    }
+    await expect(page.getByTestId("field-screen")).toBeVisible({ timeout: 60_000 });
     for (let t = 0; t < 25; t++) await page.locator(`[data-tile="${t}"]`).click();
     await page.getByTestId("amount-input").fill("0.001");
     await page.getByTestId("amount-input").press("Enter");

@@ -17,7 +17,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["list"]],
-  use: { baseURL: "http://localhost:4174", trace: "retain-on-failure" },
+  use: { baseURL: "http://localhost:4174", trace: "retain-on-failure", actionTimeout: 60_000 },
   webServer: {
     command: "pnpm build && pnpm preview",
     url: "http://localhost:4174",

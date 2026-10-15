@@ -18,7 +18,7 @@ test("the reveal's result card matches the settlement", async ({ page }) => {
   const { round, tiles } = state.dig;
   await unlock(page, state.passphrase);
   await go(page, `/reveal/${round}`);
-  await expect(page.getByTestId("reveal-screen")).toBeVisible();
+  await expect(page.getByTestId("reveal-screen")).toBeVisible({ timeout: 60_000 });
   await shot(page, "reveal-waiting-1440");
   const settled = await until(
     `round ${round} to settle`,
