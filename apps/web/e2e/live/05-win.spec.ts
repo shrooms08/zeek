@@ -29,16 +29,28 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
 
   let round = state.win?.round;
   if (round === undefined) {
-    // Start right after a round opens: 5 batches with change waits take minutes.
-    await until(
-      "a fresh round (21+ blocks left)",
-      async () => {
-        const b = await engine<{ status: string; blocks_remaining: number }>("/v1/board");
-        return b.status === "open" && b.blocks_remaining >= 21 ? true : undefined;
-      },
-      30 * 60_000,
-      5_000,
+    const partial = state.winPartial;
+    const now = await engine<{ round: number; status: string; blocks_remaining: number }>(
+      "/v1/board",
     );
+    // Only resume while the stopped dig's round has time for the rest.
+    const resumeFrom =
+      partial !== undefined && now.round === partial.round && now.blocks_remaining >= 8
+        ? partial
+        : undefined;
+    const resume = resumeFrom !== undefined;
+    if (!resume) {
+      // Start right after a round opens: 5 batches with change waits take minutes.
+      await until(
+        "a fresh round (21+ blocks left)",
+        async () => {
+          const b = await engine<{ status: string; blocks_remaining: number }>("/v1/board");
+          return b.status === "open" && b.blocks_remaining >= 21 ? true : undefined;
+        },
+        30 * 60_000,
+        5_000,
+      );
+    }
     await go(page, "/");
     await expect(page.getByTestId("field").or(page.getByTestId("reveal-screen"))).toBeVisible({
       timeout: 60_000,
@@ -49,30 +61,47 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
       await go(page, "/");
     }
     await expect(page.getByTestId("field-screen")).toBeVisible({ timeout: 60_000 });
-    for (let t = 0; t < 25; t++) await page.locator(`[data-tile="${t}"]`).click();
+    // Resuming a dig that stopped part-way digs exactly the tiles not sent.
+    const tiles = resumeFrom?.unsent ?? Array.from({ length: 25 }, (_, t) => t);
+    for (const t of tiles) await page.locator(`[data-tile="${t}"]`).click();
     await page.getByTestId("amount-input").fill("0.001");
     await page.getByTestId("amount-input").press("Enter");
-    await expect(page.getByTestId("tile-count")).toHaveText("25");
-    // 25 x 0.001 + fees: four 6-tile payments (0.00035) and one 1-tile (0.0001).
-    await expect(page.getByTestId("total-amount")).toHaveText("0.0265");
+    await expect(page.getByTestId("tile-count")).toHaveText(String(tiles.length));
+    if (!resume) {
+      // 25 x 0.001 + fees: four 6-tile payments (0.00035) and one 1-tile (0.0001).
+      await expect(page.getByTestId("total-amount")).toHaveText("0.0265");
+    }
     await page.getByTestId("dig-button").click();
     await expect(page.getByTestId("dig-confirm")).toBeVisible({ timeout: 60_000 });
     await page.getByTestId("dig-privately").click();
     await expect(page.getByTestId("batch-progress")).toBeVisible({ timeout: 120_000 });
-    await shot(page, "dig-pocket-batches-1440");
-    await expect(
-      page
-        .getByTestId("dig-done")
-        .or(page.getByTestId("dig-partial"))
-        .or(page.getByTestId("dig-error")),
-    ).toBeVisible({
+    await shot(page, resume ? "dig-pocket-batches-resumed-1440" : "dig-pocket-batches-1440");
+    const done = page.getByTestId("dig-done");
+    const stopped = page.getByTestId("dig-partial");
+    await expect(done.or(stopped).or(page.getByTestId("dig-error"))).toBeVisible({
       timeout: 30 * 60_000,
     });
-    await expect(page.getByTestId("dig-done")).toBeVisible();
-    const text = (await page.getByTestId("dig-done").textContent()) ?? "";
-    round = Number(/round (\d+)/.exec(text)?.[1]);
-    const txids =
-      ((await page.getByTestId("dig-txids").textContent()) ?? "").match(/[0-9a-f]{64}/g) ?? [];
+    if (await stopped.isVisible()) {
+      // A real partial dig: record it so a rerun digs only the rest.
+      const text = (await stopped.textContent()) ?? "";
+      await shot(page, "dig-pocket-partial-1440");
+      const notSent = /Not sent: tiles ([0-9,]+)/.exec(text)?.[1]?.split(",").map(Number) ?? [];
+      const roundNow = (await engine<{ round: number }>("/v1/board")).round;
+      saveState({
+        winPartial: {
+          round: roundNow,
+          txids: [...(resumeFrom?.txids ?? []), ...(text.match(/[0-9a-f]{64}/g) ?? [])],
+          unsent: notSent,
+        },
+      });
+      throw new Error(`the dig stopped part-way: ${text}`);
+    }
+    await expect(done).toBeVisible();
+    round = Number(/round (\d+)/.exec((await done.textContent()) ?? "")?.[1]);
+    const txids = [
+      ...(resumeFrom?.txids ?? []),
+      ...(((await page.getByTestId("dig-txids").textContent()) ?? "").match(/[0-9a-f]{64}/g) ?? []),
+    ];
     expect(txids).toHaveLength(5);
     saveState({ win: { round, txids } });
   }

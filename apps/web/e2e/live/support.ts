@@ -27,6 +27,8 @@ export interface LiveState {
   funded?: { name: string; txid: string; amount: string }[];
   dig?: { round: number; tiles: number[]; message: string; txids: string[] };
   win?: { round: number; txids: string[] };
+  /** A 25-tile dig that stopped part-way: what's left to dig in that round. */
+  winPartial?: { round: number; txids: string[]; unsent: number[] };
   proofId?: string;
   other?: { round: number; tile: number };
 }

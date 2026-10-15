@@ -52,6 +52,10 @@ const SYNC_BATCH = 200;
 const DECOYS_PER_WANTED = 3;
 /** Rewinds attempted on one sync before giving up. */
 const MAX_REWINDS = 20;
+/** Times a dig retries a failed read (sync, config, board) per batch. */
+const READ_RETRIES = 4;
+/** Wait between those retries. */
+const READ_RETRY_MS = 15_000;
 /** Syncs attempted before building, when blocks keep arriving meanwhile. */
 const MAX_CATCH_UP = 5;
 
@@ -394,11 +398,27 @@ const handlers: { [M in MethodName]: Handler<M> } = {
         const started = Date.now();
         let built: BuiltTransaction | undefined;
         let board: { round: number; blocks_remaining: number } = { round: -1, blocks_remaining: 0 };
+        let readFailures = 0;
         while (built === undefined) {
           progress("sync");
-          const chainTip = await syncToTip(id);
-          const [{ json }, current] = await Promise.all([client.config(), client.board()]);
-          board = current;
+          let chainTip: number;
+          let json: string;
+          try {
+            chainTip = await syncToTip(id);
+            const [config, current] = await Promise.all([client.config(), client.board()]);
+            json = config.json;
+            board = current;
+          } catch (error) {
+            // These steps only read, so a dropped upstream connection (the
+            // relay's public lightwalletd does that) is retried rather than
+            // stopping a dig part-way. Broadcasts are never retried.
+            const e = toPocketError(error);
+            readFailures += 1;
+            if ((e.code !== "relay" && e.code !== "network") || readFailures > READ_RETRIES)
+              throw e;
+            await new Promise((resolve) => setTimeout(resolve, READ_RETRY_MS));
+            continue;
+          }
           if (round === -1) {
             round = board.round;
           } else if (board.round !== round) {
