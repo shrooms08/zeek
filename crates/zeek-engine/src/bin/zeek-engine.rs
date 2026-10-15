@@ -259,6 +259,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         ledger: coordinator.as_ref().map(Coordinator::ledger_view),
         chain_servers: Some(pool.clone()),
         digging,
+        demo_digs: std::env::var("ZEEK_DEMO_DIGS").as_deref() == Ok("on"),
         stream_slots: Arc::new(tokio::sync::Semaphore::new(zeek_engine::api::MAX_STREAMS)),
         relay: Some(Arc::new(RelayState::new(
             Box::new(LightwalletdBackend::new(pool.clone())),

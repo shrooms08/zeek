@@ -29,7 +29,7 @@ KEYHOLDER_PORTS="9101 9102 9103"
 TESTNET_LIGHTWALLETD="https://testnet.zec.rocks:443"
 
 # User agents, in start order.
-AGENTS="caffeinate keyholder-1 keyholder-2 keyholder-3 engine relay tunnel-engine tunnel-relay publish"
+AGENTS="caffeinate keyholder-1 keyholder-2 keyholder-3 engine relay tunnel-engine tunnel-relay publish demo-digger"
 
 say() { printf '%s\n' "$*"; }
 fail() {

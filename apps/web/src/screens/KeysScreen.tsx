@@ -71,8 +71,19 @@ export default function KeysScreen() {
         data-testid="keys-honest"
       >
         <Icon name="arrow" size={18} />
-        Today all three are run by the Zeek team. Next: independent operators.
+        The three keyholders are separate programs, each with its own key share under its own system
+        account. Today the Zeek team runs all three on one computer. Next: independent operators on
+        their own machines.
       </p>
+      {config.data?.demo_digs === true && (
+        <p
+          className="zk-honest flex items-center gap-3 px-5 py-3 text-white"
+          data-testid="demo-digs"
+        >
+          <Icon name="info" size={18} />
+          Some digs on testnet come from Zeek’s own test wallets.
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="panel" aria-label="Refused payouts">
           <h2 className="flex items-center gap-3 px-5 py-4 border-b-[3px] border-white text-white font-extrabold text-xl">

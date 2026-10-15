@@ -88,6 +88,7 @@ async fn board_serves_landing_digs_separately() {
         ledger: None,
         chain_servers: None,
         digging: true,
+        demo_digs: false,
         stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
             zeek_engine::api::MAX_STREAMS,
         )),

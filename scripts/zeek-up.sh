@@ -40,8 +40,11 @@ for n in 1 2 3; do
       "$BIN/zeek-keyholder" serve --config "config/keyholder-$n.json"
   fi
 done
+# The app says when Zeek's own test wallets dig (scripts/demo-digger.sh).
+DEMO=off
+[ -f "$RUN_DIR/demo-digger" ] && DEMO=on
 write_agent engine Interactive "$LOG_DIR/engine.out.log" \
-  "ZEEK_LOG_DIR=$LOG_DIR/engine RUST_LOG=info ZEEK_PUBLIC_BIND=$ENGINE_PUBLIC ZEEK_PROXY_SECRET_FILE=.secrets/proxy-secret ZEEK_PUBLIC_URL=$ORIGIN ZEEK_APP_URL=$ORIGIN ZEEK_LIGHTWALLETD_URL=$TESTNET_LIGHTWALLETD" -- \
+  "ZEEK_DEMO_DIGS=$DEMO ZEEK_LOG_DIR=$LOG_DIR/engine RUST_LOG=info ZEEK_PUBLIC_BIND=$ENGINE_PUBLIC ZEEK_PROXY_SECRET_FILE=.secrets/proxy-secret ZEEK_PUBLIC_URL=$ORIGIN ZEEK_APP_URL=$ORIGIN ZEEK_LIGHTWALLETD_URL=$TESTNET_LIGHTWALLETD" -- \
   "$BIN/zeek-engine"
 write_agent relay Standard "$LOG_DIR/relay.log" "" -- \
   "$BIN/zeek-verify" relay --lightwalletd "$TESTNET_LIGHTWALLETD" --bind "$RELAY_BIND" \
@@ -52,6 +55,13 @@ write_agent tunnel-relay Standard "$LOG_DIR/tunnel-relay.log" "" -- \
   "$CLOUDFLARED" tunnel --no-autoupdate --metrics "$RELAY_METRICS" --url "http://$RELAY_BIND"
 write_agent publish Background "$LOG_DIR/publish.log" "" -- \
   /bin/sh "$ZEEK_ROOT/scripts/zeek-publish.sh"
+if [ "$DEMO" = on ]; then
+  write_agent demo-digger Background "$LOG_DIR/demo-digger.log" "" -- \
+    /bin/sh "$ZEEK_ROOT/scripts/demo-digger.sh" run "$(cat "$RUN_DIR/demo-digger")"
+else
+  launchctl bootout "$DOMAIN/dev.zeek.demo-digger" 2>/dev/null || true
+  rm -f "$AGENTS_DIR/dev.zeek.demo-digger.plist"
+fi
 
 say "Starting services…"
 for agent in $AGENTS; do

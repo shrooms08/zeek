@@ -148,6 +148,8 @@ export interface EngineConfig {
   };
   /** False when digs are closed (mainnet readiness): the vault is withheld. */
   digging_enabled?: boolean;
+  /** True while Zeek's own test wallets dig (scripts/demo-digger.sh). */
+  demo_digs?: boolean;
   vault_address?: string;
   uivk?: string;
   genesis_height: number;

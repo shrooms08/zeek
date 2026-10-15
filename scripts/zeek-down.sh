@@ -12,7 +12,7 @@ STOP_DAEMONS=no
 [ "${1:-}" = "--keyholders" ] && STOP_DAEMONS=yes
 
 # Reverse start order: the publisher first, so it does not republish.
-for agent in publish tunnel-relay tunnel-engine relay engine keyholder-3 keyholder-2 keyholder-1 caffeinate; do
+for agent in demo-digger publish tunnel-relay tunnel-engine relay engine keyholder-3 keyholder-2 keyholder-1 caffeinate; do
   if agent_loaded "$agent"; then
     launchctl bootout "$DOMAIN/dev.zeek.$agent" 2>/dev/null || true
     say "stopped $agent"

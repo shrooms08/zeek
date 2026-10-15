@@ -150,8 +150,20 @@ export default function HowToPlayScreen() {
               Every payout is signed by two of three keyholders, and anyone can check every round.
             </li>
           </ol>
+          <p className="text-mist mt-3" data-testid="how-watching">
+            Watching is free: the field, results, round checks and Campfire need no wallet. To dig
+            you need a wallet: a Zeek Pocket in this browser, or any Zcash wallet.
+          </p>
           {p?.network === "test" && (
-            <p className="text-fog text-sm mt-3">This is testnet: TAZ has no value.</p>
+            <p className="text-fog text-sm mt-3">
+              This is testnet: TAZ has no value. A new Pocket can get free test coins from its
+              wallet screen.
+            </p>
+          )}
+          {config.data?.demo_digs === true && (
+            <p className="text-fog text-sm mt-3" data-testid="demo-digs">
+              Some digs on testnet come from Zeek’s own test wallets.
+            </p>
           )}
         </details>
       </div>

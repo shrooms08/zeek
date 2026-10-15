@@ -45,6 +45,8 @@ pub struct AppState {
     pub chain_servers: Option<Arc<zeek_vault::pool::Pool>>,
     /// Whether digs are open (false: mainnet readiness, vault withheld).
     pub digging: bool,
+    /// Whether the demo digger runs (`ZEEK_DEMO_DIGS=on`).
+    pub demo_digs: bool,
     /// Open `/v1/stream` connections allowed at once.
     pub stream_slots: Arc<tokio::sync::Semaphore>,
     /// Present when this engine relays chain data to browser wallets.
@@ -128,6 +130,10 @@ pub struct ConfigResponse {
     /// vault's address, sealing key and viewing key are withheld, so nobody
     /// can send funds to a vault that is not open.
     pub digging_enabled: bool,
+    /// Whether Zeek's own test wallets dig on this network (scripts/
+    /// demo-digger.sh), so the app can say so.
+    #[serde(default)]
+    pub demo_digs: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault_address: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -291,12 +297,14 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
     router
 }
 
-/// The public config response (`digging`: whether digs are open).
-pub fn config_response(config: &GameConfig, digging: bool) -> ConfigResponse {
+/// The public config response (`digging`: whether digs are open;
+/// `demo_digs`: whether Zeek's own test wallets dig).
+pub fn config_response(config: &GameConfig, digging: bool, demo_digs: bool) -> ConfigResponse {
     let open = |v| if digging { Some(v) } else { None };
     ConfigResponse {
         params: config.params.clone(),
         digging_enabled: digging,
+        demo_digs,
         vault_address: open(config.vault_address.clone()),
         sealing_public_key: digging.then(|| config.sealing_public_key.clone()),
         uivk: open(config.uivk.clone()),
@@ -310,6 +318,7 @@ async fn config(State(state): State<Arc<AppState>>) -> ApiResult<ConfigResponse>
     Ok(Json(config_response(
         state.processor.config(),
         state.digging,
+        state.demo_digs,
     )))
 }
 
