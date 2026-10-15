@@ -6,6 +6,7 @@
 # 1,000 KV writes a day). It also keeps the small launchd log files under
 # 10 MB (engine and keyholders rotate their own logs).
 set -u
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 NAMESPACE=$(deploy_value KV_NAMESPACE) || fail "run scripts/cloudflare-setup.sh first"

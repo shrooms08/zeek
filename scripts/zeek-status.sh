@@ -2,6 +2,7 @@
 # Shows what is running: each launchd service, the local health checks, the
 # published tunnels and the public site.
 set -u
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 check() {

@@ -10,7 +10,8 @@ set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 host="$(rustc +nightly -vV | sed -n 's/^host: //p')"
-export AR_wasm32_unknown_unknown="$(rustc +nightly --print sysroot)/lib/rustlib/$host/bin/llvm-ar"
+sysroot="$(rustc +nightly --print sysroot)"
+export AR_wasm32_unknown_unknown="$sysroot/lib/rustlib/$host/bin/llvm-ar"
 export CC_wasm32_unknown_unknown="${CC_wasm32_unknown_unknown:-clang}"
 export RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=4294967296 -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base --cfg zcash_unstable="nu7"'
 cargo +nightly build -p zeek-pocket --lib --release --target wasm32-unknown-unknown -Z build-std=panic_abort,std "$@"

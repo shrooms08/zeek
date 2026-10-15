@@ -9,6 +9,7 @@
 #   scripts/demo-digger.sh off           turn off; then run zeek-up.sh
 #   scripts/demo-digger.sh run [player]  the loop itself (what the launchd agent runs)
 set -eu
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 MARKER="$RUN_DIR/demo-digger"

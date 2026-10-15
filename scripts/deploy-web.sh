@@ -5,6 +5,7 @@
 #
 #   scripts/deploy-web.sh
 set -eu
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 PROJECT=$(deploy_value PAGES_PROJECT) || fail "run scripts/cloudflare-setup.sh first"

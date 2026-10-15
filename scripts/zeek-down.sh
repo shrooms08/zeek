@@ -7,6 +7,7 @@
 #                                   (engine and keyholders under their own users)
 #   scripts/zeek-down.sh --daemons  also stop those daemons (asks for your password)
 set -eu
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 STOP_DAEMONS=no

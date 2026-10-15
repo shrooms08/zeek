@@ -13,6 +13,7 @@
 #
 # Then run scripts/deploy-web.sh and scripts/zeek-up.sh.
 set -eu
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
 PROJECT=${1:-playzeek}
