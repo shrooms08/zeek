@@ -128,6 +128,12 @@ keyholder its own macOS user.
   - write this repository;
   - use your sudo rights or your Cloudflare login.
 
+The daemons run root-owned copies of the binaries in
+`/Library/Application Support/Zeek/bin`. The script only creates and changes
+its own folders (`/Library/Application Support/Zeek/...` and
+`/Library/Logs/Zeek/...`) and its own plists; it never changes a system
+directory. It can be re-run after a failure at any step.
+
 The script refuses to run with uncommitted changes. It refuses symbolic
 links in anything it moves, and it never replaces an installed binary or
 config without the binary's SHA-256 or `--replace-config`.

@@ -96,7 +96,7 @@ Nothing is broadcast.
    address:
 
    ```sh
-   for n in 1 2 3; do sudo -u _zeekmkh$n /usr/local/libexec/zeek/zeek-keyholder address \
+   for n in 1 2 3; do sudo -u _zeekmkh$n "/Library/Application Support/Zeek/bin/zeek-keyholder" address \
      --config "/Library/Application Support/Zeek/mainnet/keyholder-$n/config.json" | head -1; done
    ```
 

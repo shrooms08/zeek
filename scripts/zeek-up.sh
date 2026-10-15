@@ -16,6 +16,7 @@
 #
 # Keyholders listen on localhost only and are never tunneled.
 set -eu
+# shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 # Databases, logs and secrets are readable by this user only (review L5).
 umask 077
@@ -71,7 +72,7 @@ fi
 # Daemons run root-owned copies of the binaries; a rebuilt binary only
 # reaches them through isolate-services.sh (which checks its hash).
 for name in zeek-engine zeek-keyholder; do
-  if [ -e "/usr/local/libexec/zeek/$name" ] && ! cmp -s "$BIN/$name" "/usr/local/libexec/zeek/$name"; then
+  if [ -e "$DAEMON_BIN/$name" ] && ! cmp -s "$BIN/$name" "$DAEMON_BIN/$name"; then
     say "note: $name changed; to run it, after checking the build is yours:"
     say "  sudo scripts/isolate-services.sh --update-binary $name=$(shasum -a 256 "$BIN/$name" | cut -d' ' -f1)"
   fi

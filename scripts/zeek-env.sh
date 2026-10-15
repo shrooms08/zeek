@@ -1,5 +1,6 @@
 # Shared settings for zeek-up.sh, zeek-down.sh, zeek-status.sh and
-# zeek-publish.sh. Sourced, not run.
+# zeek-publish.sh. Sourced, not run: its variables are used by those scripts.
+# shellcheck disable=SC2034
 #
 # Everything runs as macOS launchd agents of the logged-in user (labels
 # dev.zeek.*), except the engine and the keyholders once
@@ -49,6 +50,9 @@ public_origin() {
   [ -n "$name" ] || return 1
   printf 'https://%s.pages.dev' "$name"
 }
+
+# Root-owned copies of the binaries the daemons run (isolate-services.sh).
+DAEMON_BIN="/Library/Application Support/Zeek/bin"
 
 # Whether service $1 (engine, keyholder-N) runs as a system daemon under its
 # own user (after isolate-services.sh).

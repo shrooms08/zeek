@@ -23,23 +23,23 @@
 #   * moves each service's secrets and databases out of the repository into
 #     /Library/Application Support/Zeek/<network>/<service> (0700, owned by
 #     that user), with root-owned copies of the binaries in
-#     /usr/local/libexec/zeek;
+#     /Library/Application Support/Zeek/bin;
 #   * runs the testnet engine and keyholders as LaunchDaemons from boot,
 #     restarting on a crash, logging to /Library/Logs/Zeek (readable by you).
+#
+# It only creates and changes its own folders (under
+# /Library/Application Support/Zeek and /Library/Logs/Zeek) and its own
+# LaunchDaemon plists; it never changes a system directory. Every step can be
+# re-run after a failure at any point.
 #
 # The services still all run on this one Mac, operated by the Zeek team.
 set -eu
 umask 077
 
-[ "$(id -u)" = 0 ] || {
-  echo "run with sudo: sudo $0" >&2
-  exit 1
-}
-OWNER=${SUDO_USER:?run through sudo from your own account}
-OWNER_UID=$(id -u "$OWNER")
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 BASE="/Library/Application Support/Zeek"
-LIBEXEC=/usr/local/libexec/zeek
+# Root-owned copies of the binaries the daemons run.
+BIN_DIR="$BASE/bin"
 LOGS=/Library/Logs/Zeek
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
@@ -50,6 +50,16 @@ fail() {
   exit 1
 }
 
+# The checks below also run without sudo (they need no privileges), so they
+# can be tried first; everything after them needs root.
+if [ "$(id -u)" = 0 ]; then
+  OWNER=${SUDO_USER:?run through sudo from your own account}
+  as_owner() { sudo -u "$OWNER" "$@"; }
+else
+  OWNER=$(id -un)
+  as_owner() { "$@"; }
+fi
+
 MAINNET_DKG=no
 REPLACE_CONFIG=no
 UPDATES=""
@@ -59,6 +69,10 @@ while [ $# -gt 0 ]; do
     --replace-config) REPLACE_CONFIG=yes ;;
     --update-binary)
       [ $# -ge 2 ] || fail "--update-binary needs NAME=SHA256"
+      case $2 in
+        zeek-engine=* | zeek-keyholder=*) ;;
+        *) fail "--update-binary takes zeek-engine=SHA256 or zeek-keyholder=SHA256" ;;
+      esac
       UPDATES="$UPDATES $2"
       shift
       ;;
@@ -69,8 +83,14 @@ done
 
 # ---- checks on what root is about to trust ----
 
-[ -z "$(sudo -u "$OWNER" git -C "$REPO" status --porcelain --untracked-files=no)" ] ||
+[ -z "$(as_owner git -C "$REPO" status --porcelain --untracked-files=no)" ] ||
   fail "the repository has uncommitted changes; commit or stash them first"
+
+if [ "$(id -u)" != 0 ]; then
+  say "checks passed (options understood, repository clean); now run it with sudo"
+  exit 0
+fi
+OWNER_UID=$(id -u "$OWNER")
 
 # Refuses a path that is, or contains, a symbolic link.
 no_links() {
@@ -87,6 +107,10 @@ no_links() {
 # Creates directory $1 (owner $2, mode $3) unless it exists as a real
 # directory; refuses a symbolic link.
 make_dir() {
+  case $1 in
+    "$BASE" | "$BASE"/* | "$LOGS" | "$LOGS"/*) ;;
+    *) fail "refusing to manage $1: only folders under $BASE and $LOGS are ours" ;;
+  esac
   if [ -L "$1" ]; then
     fail "$1 is a symbolic link; refusing"
   fi
@@ -125,7 +149,7 @@ install_config() {
 # only when it is unchanged or its SHA-256 was given with --update-binary.
 install_binary() {
   src="$REPO/target/release/$1"
-  dst="$LIBEXEC/$1"
+  dst="$BIN_DIR/$1"
   [ -x "$src" ] || fail "build it first (as $OWNER): cargo build --release -p $1"
   no_links "$src"
   sum=$(shasum -a 256 "$src" | cut -d' ' -f1)
@@ -153,25 +177,50 @@ free_id() {
   fail "no free id in 450-499"
 }
 
+# The id already given to user or group $1, if any.
+existing_id() {
+  id=$(dscl . -read "/Users/$1" UniqueID 2>/dev/null | awk '{print $2}')
+  if [ -z "$id" ]; then
+    id=$(dscl . -read "/Groups/$1" PrimaryGroupID 2>/dev/null | awk '{print $2}')
+  fi
+  printf '%s' "$id"
+}
+
+# Creates (or completes, after a partial run) service user and group $1.
+# Every attribute is written each time, so a half-created record is finished.
 ensure_user() {
-  dscl . -read "/Users/$1" >/dev/null 2>&1 && return 0
-  uid=$(free_id)
-  dscl . -create "/Groups/$1"
-  dscl . -create "/Groups/$1" PrimaryGroupID "$uid"
-  dscl . -create "/Groups/$1" Password '*'
-  dscl . -create "/Users/$1"
-  dscl . -create "/Users/$1" UniqueID "$uid"
-  dscl . -create "/Users/$1" PrimaryGroupID "$uid"
-  dscl . -create "/Users/$1" UserShell /usr/bin/false
-  dscl . -create "/Users/$1" NFSHomeDirectory /var/empty
-  dscl . -create "/Users/$1" RealName "$2"
-  dscl . -create "/Users/$1" Password '*'
-  dscl . -create "/Users/$1" IsHidden 1
-  say "created user $1 (uid $uid)"
+  uid=$(existing_id "$1")
+  if [ -n "$uid" ] && dscl . -read "/Users/$1" UserShell >/dev/null 2>&1 &&
+    dscl . -read "/Groups/$1" PrimaryGroupID >/dev/null 2>&1; then
+    say "user $1 exists (uid $uid)"
+  else
+    new=no
+    if [ -z "$uid" ]; then
+      uid=$(free_id)
+      new=yes
+    fi
+    dscl . -read "/Groups/$1" >/dev/null 2>&1 || dscl . -create "/Groups/$1"
+    dscl . -create "/Groups/$1" PrimaryGroupID "$uid"
+    dscl . -create "/Groups/$1" Password '*'
+    dscl . -read "/Users/$1" >/dev/null 2>&1 || dscl . -create "/Users/$1"
+    dscl . -create "/Users/$1" UniqueID "$uid"
+    dscl . -create "/Users/$1" PrimaryGroupID "$uid"
+    dscl . -create "/Users/$1" UserShell /usr/bin/false
+    dscl . -create "/Users/$1" NFSHomeDirectory /var/empty
+    dscl . -create "/Users/$1" RealName "$2"
+    dscl . -create "/Users/$1" Password '*'
+    dscl . -create "/Users/$1" IsHidden 1
+    if [ "$new" = yes ]; then
+      say "created user $1 (uid $uid)"
+    else
+      say "completed user $1 (uid $uid)"
+    fi
+  fi
 }
 
 # Writes and loads /Library/LaunchDaemons/$1.plist running as user $2 from
-# directory $3: plist_daemon LABEL USER DIR LOGDIR ENV_PAIRS -- PROGRAM ARGS...
+# directory $3: daemon LABEL USER DIR LOGDIR ENV -- PROGRAM ARGS...
+# ENV holds one KEY=VALUE per line (values may contain spaces).
 daemon() {
   label=$1
   user=$2
@@ -195,8 +244,10 @@ daemon() {
     printf '    <key>HOME</key><string>/var/empty</string>\n'
     printf '    <key>RUST_LOG</key><string>info</string>\n'
     printf '    <key>ZEEK_LOG_DIR</key><string>%s</string>\n' "$logdir"
-    for pair in $envpairs; do
-      printf '    <key>%s</key><string>%s</string>\n' "${pair%%=*}" "${pair#*=}"
+    printf '%s\n' "$envpairs" | while IFS= read -r pair; do
+      if [ -n "$pair" ]; then
+        printf '    <key>%s</key><string>%s</string>\n' "${pair%%=*}" "${pair#*=}"
+      fi
     done
     printf '  </dict>\n'
     printf '  <key>RunAtLoad</key><true/>\n'
@@ -224,12 +275,11 @@ node_config() {
 
 # ---- binaries and directories ----
 
-make_dir /usr/local root:wheel 755
-make_dir "$LIBEXEC" root:wheel 755
+make_dir "$BASE" root:wheel 755
+make_dir "$BIN_DIR" root:wheel 755
 install_binary zeek-keyholder
 install_binary zeek-engine
 make_dir "$LOGS" root:wheel 755
-make_dir "$BASE" root:wheel 755
 make_dir "$BASE/testnet" root:wheel 755
 make_dir "$BASE/mainnet" root:wheel 755
 
@@ -279,7 +329,7 @@ for n in 1 2 3; do
   logdir="$LOGS/testnet-keyholder-$n"
   make_dir "$logdir" "$user:staff" 750
   daemon "dev.zeek.keyholder-$n" "$user" "$dir" "$logdir" "" -- \
-    "$LIBEXEC/zeek-keyholder" serve --config "$dir/config.json"
+    "$BIN_DIR/zeek-keyholder" serve --config "$dir/config.json"
   say "testnet keyholder $n runs as $user"
 done
 
@@ -316,14 +366,32 @@ DEMO=off
 if [ -f "$REPO/data/run/demo-digger" ]; then
   DEMO=on
 fi
-daemon dev.zeek.engine "$user" "$dir" "$logdir" \
-  "ZEEK_GAME_CONFIG=$dir/game.json ZEEK_ENGINE_DB=$dir/data/zeek-engine.sqlite ZEEK_ENGINE_BIND=127.0.0.1:8787 ZEEK_PUBLIC_BIND=127.0.0.1:8788 ZEEK_PROXY_SECRET_FILE=$dir/secrets/proxy-secret ZEEK_PUBLIC_URL=$ORIGIN ZEEK_APP_URL=$ORIGIN ZEEK_LIGHTWALLETD_URL=https://testnet.zec.rocks:443 ZEEK_KEYHOLDERS=$KEYHOLDERS ZEEK_VAULT_THRESHOLD=$THRESHOLD ZEEK_COORDINATOR_IDENTITY=$dir/secrets/coordinator/identity.json ZEEK_VAULT_SECRETS_DIR=$dir/secrets ZEEK_VAULT_DATA_DIR=$dir/data ZEEK_ENGINE_CORS=http://localhost:4174 ZEEK_DEMO_DIGS=$DEMO" -- \
-  "$LIBEXEC/zeek-engine"
+ENGINE_ENV="ZEEK_GAME_CONFIG=$dir/game.json
+ZEEK_ENGINE_DB=$dir/data/zeek-engine.sqlite
+ZEEK_ENGINE_BIND=127.0.0.1:8787
+ZEEK_PUBLIC_BIND=127.0.0.1:8788
+ZEEK_PROXY_SECRET_FILE=$dir/secrets/proxy-secret
+ZEEK_PUBLIC_URL=$ORIGIN
+ZEEK_APP_URL=$ORIGIN
+ZEEK_LIGHTWALLETD_URL=https://testnet.zec.rocks:443
+ZEEK_KEYHOLDERS=$KEYHOLDERS
+ZEEK_VAULT_THRESHOLD=$THRESHOLD
+ZEEK_COORDINATOR_IDENTITY=$dir/secrets/coordinator/identity.json
+ZEEK_VAULT_SECRETS_DIR=$dir/secrets
+ZEEK_VAULT_DATA_DIR=$dir/data
+ZEEK_ENGINE_CORS=http://localhost:4174
+ZEEK_DEMO_DIGS=$DEMO"
+daemon dev.zeek.engine "$user" "$dir" "$logdir" "$ENGINE_ENV" -- "$BIN_DIR/zeek-engine"
 say "testnet engine runs as $user"
 
 # ---- mainnet keyholders ----
 
-if [ "$MAINNET_DKG" = yes ]; then
+# Written once a mainnet vault is complete; a finished vault is never
+# replaced by this script (it may hold funds by then).
+MAINNET_DONE="$BASE/mainnet/vault-complete"
+if [ "$MAINNET_DKG" = yes ] && [ -e "$MAINNET_DONE" ]; then
+  say "mainnet vault already created inside the separated users; leaving it as it is"
+elif [ "$MAINNET_DKG" = yes ]; then
   coordinator="$REPO/.secrets/mainnet/coordinator/identity.json"
   no_links "$coordinator"
   COORD=$(sed -n 's/.*"public_key": *"\([0-9a-f]\{64\}\)".*/\1/p' "$coordinator")
@@ -333,8 +401,9 @@ if [ "$MAINNET_DKG" = yes ]; then
     user="_zeekmkh$n"
     dir="$BASE/mainnet/keyholder-$n"
     ensure_user "$user" "Zeek mainnet keyholder $n"
-    # The previous mainnet vault was never funded and its address never
-    # published; its shares, created under your account, are discarded.
+    # The first mainnet vault (created under your account) was never funded
+    # and its address never published, and an unfinished earlier attempt of
+    # this step holds no usable vault: both are discarded.
     for old in "$REPO/.secrets/mainnet/keyholder-$n" "$REPO/data/mainnet/keyholder-$n" "$dir"; do
       if [ -e "$old" ]; then
         no_links "$old"
@@ -344,7 +413,7 @@ if [ "$MAINNET_DKG" = yes ]; then
     make_dir "$dir" "$user:$user" 700
     make_dir "$dir/secrets" "$user:$user" 700
     make_dir "$dir/data" "$user:$user" 700
-    id=$(cd "$dir" && sudo -u "$user" "$LIBEXEC/zeek-keyholder" identity-keygen --secrets-dir "$dir/secrets")
+    id=$(cd "$dir" && sudo -u "$user" "$BIN_DIR/zeek-keyholder" identity-keygen --secrets-dir "$dir/secrets")
     ids="$ids $n=$id"
   done
   servers='"https://zec.rocks:443", "https://eu.zec.rocks:443", "https://na.zec.rocks:443", "https://zec.0xrpc.io:443", "https://zec-node.cakewallet.com:443", "https://zcash.mysideoftheweb.com:9067", "https://lwd.zcashexplorer.app:9067"'
@@ -383,7 +452,10 @@ EOF
   pids=""
   for n in 1 2 3; do
     dir="$BASE/mainnet/keyholder-$n"
-    (cd "$dir" && sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" dkg --config "$dir/config.json" \
+    # The log is written by root on purpose: it goes into the root-owned
+    # log folder, which the service users cannot write.
+    # shellcheck disable=SC2024
+    (cd "$dir" && sudo -u "_zeekmkh$n" "$BIN_DIR/zeek-keyholder" dkg --config "$dir/config.json" \
       --session "$session" --network main >"$LOGS/mainnet-dkg-$n.log" 2>&1) &
     pids="$pids $!"
   done
@@ -396,7 +468,7 @@ EOF
   done
   first=""
   for n in 1 2 3; do
-    out=$(cd "$BASE/mainnet/keyholder-$n" && sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" address --config "$BASE/mainnet/keyholder-$n/config.json")
+    out=$(cd "$BASE/mainnet/keyholder-$n" && sudo -u "_zeekmkh$n" "$BIN_DIR/zeek-keyholder" address --config "$BASE/mainnet/keyholder-$n/config.json")
     if [ -z "$first" ]; then
       first=$out
     fi
@@ -409,7 +481,7 @@ EOF
   # config; the keyholders get a pinned copy.
   game="$REPO/config/game.mainnet.json"
   no_links "$game"
-  sudo -u "$OWNER" sed -i '' \
+  as_owner sed -i '' \
     -e "s|\"vault_address\": *\"[^\"]*\"|\"vault_address\": \"$ADDRESS\"|" \
     -e "s|\"uivk\": *\"[^\"]*\"|\"uivk\": \"$UIVK\"|" \
     -e "s|\"sealing_public_key\": *\"[^\"]*\"|\"sealing_public_key\": \"$SEALING\"|" "$game"
@@ -417,6 +489,7 @@ EOF
     install -o "_zeekmkh$n" -g "_zeekmkh$n" -m 600 "$game" "$BASE/mainnet/keyholder-$n/game.json"
     chmod -R go-rwx "$BASE/mainnet/keyholder-$n"
   done
+  : >"$MAINNET_DONE"
   say "new mainnet vault created inside the separated users; its public values are in config/game.mainnet.json (do not publish it)"
 fi
 
