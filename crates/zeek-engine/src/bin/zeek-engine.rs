@@ -192,6 +192,9 @@ async fn run_audit(settings: EngineSettings, args: AuditArgs) -> anyhow::Result<
     Ok(())
 }
 
+/// Worker threads of the chain loop's own runtime.
+const CHAIN_WORKERS: usize = 2;
+
 /// How often every lightwalletd server is health-checked.
 const PROBE_EVERY: Duration = Duration::from_secs(60);
 
@@ -334,27 +337,54 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         Ok(())
     };
 
-    // The chain loop runs as its own task: the store's guards are not
-    // `Send`, so the compiler rejects any database access held across an
-    // `.await` (network, beacon, proving, signing) inside it.
-    let chain_loop = tokio::spawn(chain_loop(
-        state.clone(),
-        source,
-        fetcher,
-        coordinator,
-        scanner,
-        config,
-        settings.poll_secs,
-    ));
+    // The chain loop runs on its own runtime and OS threads, so its
+    // synchronous CPU work (trial decryption, wallet scanning, transaction
+    // building) never occupies a worker the API needs: on a shared runtime a
+    // busy worker strands requests queued behind it (seen live: a 1.9 s
+    // board read while a payout was being built). Inside, it is still a
+    // spawned task, so the store's guards (not `Send`) cannot be held across
+    // an `.await` (network, beacon, proving, signing).
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let loop_state = state.clone();
+    let poll_secs = settings.poll_secs;
+    std::thread::Builder::new()
+        .name("zeek-chain".into())
+        .spawn(move || {
+            let outcome = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(CHAIN_WORKERS)
+                .thread_name("zeek-chain")
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| {
+                    rt.block_on(async {
+                        tokio::spawn(chain_loop(
+                            loop_state,
+                            source,
+                            fetcher,
+                            coordinator,
+                            scanner,
+                            config,
+                            poll_secs,
+                        ))
+                        .await
+                        .map_err(|e| e.to_string())
+                    })
+                });
+            let _ = done_tx.send(outcome);
+        })
+        .context("starting the chain loop thread")?;
     tokio::select! {
         result = server => {
             if let Err(e) = result {
                 tracing::error!(error = %e, "API server stopped");
             }
         }
-        result = chain_loop => {
-            if let Err(e) = result {
-                tracing::error!(error = %e, "chain loop stopped");
+        result = done_rx => {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!(error = %e, "chain loop stopped"),
+                Err(_) => tracing::error!("chain loop thread ended without a result"),
             }
         }
     }
