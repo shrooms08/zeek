@@ -212,8 +212,9 @@ The props are buttons over the island, kept outside the tile diamond:
 - **The cart** rolls along its rails.
 - **Rocks** wobble.
 - **The mine:** holding it rumbles and shows the Deep Cache.
-- **The campfire:** poking it throws sparks.
-- **Zeb** answers in pictograms; five quick taps make him pop out of a hole.
+- **The camp** (the fire and Zeb sitting by it) is one button: sparks fly,
+  Zeb hops, and the Campfire chat opens. It takes Enter and Space, shows a
+  focus ring, and glows white on hover.
 
 Tab reaches the props, but the field's arrow keys skip them. They are
 disabled during the reveal and while sealing, and they never touch the

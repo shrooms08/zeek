@@ -85,6 +85,8 @@ export interface FieldProps {
   /** Ink flies to these tiles (your dig was sealed); `n` replays it. */
   flight?: { tiles: readonly number[]; n: number } | null;
   onReact?: (reaction: PropReaction) => void;
+  /** The camp (fire and Zeb) was pressed: open the Campfire chat. */
+  onCampfire?: () => void;
   /** An illustration (onboarding, How to play): no tab stop, no picking, hidden from screen readers. */
   decorative?: boolean;
 }
@@ -429,6 +431,7 @@ export function Field(props: FieldProps) {
       )}
       {world && front ? (
         <PropButtons
+          onCampfire={props.onCampfire}
           interactive={interactive}
           cacheLabel={cacheLabel}
           fire={fire}

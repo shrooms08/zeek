@@ -397,6 +397,21 @@ body {
   outline: 3px dashed var(--color-white);
   outline-offset: 2px;
 }
+/* The camp (fire and Zeb) opens the Campfire chat: firelight on hover,
+   a press that sinks a little. White light: gold is for treasure only. */
+.zk-camp-button {
+  transition:
+    background-color 160ms var(--ease-out),
+    transform 120ms var(--ease-snap);
+}
+.zk-camp-button:hover,
+.zk-camp-button:focus-visible {
+  background: radial-gradient(circle, rgb(255 255 255 / 0.2) 0%, rgb(255 255 255 / 0) 70%);
+}
+.zk-camp-button:active {
+  transform: scale(0.94);
+  background: radial-gradient(circle, rgb(255 255 255 / 0.3) 0%, rgb(255 255 255 / 0) 70%);
+}
 /* Reactions run on the prop's inner group, around its base. */
 .zk-prop,
 .zk-act {
@@ -541,27 +556,6 @@ body {
     transform: translateY(-12px);
   }
 }
-.zk-act-egg-0,
-.zk-act-egg-1 {
-  animation: zk-egg 2.4s var(--ease-spring);
-}
-@keyframes zk-egg {
-  0% {
-    transform: translateY(60px);
-    opacity: 0;
-  }
-  30% {
-    transform: translateY(60px);
-    opacity: 1;
-  }
-  55% {
-    transform: translateY(-10px);
-  }
-  70%,
-  100% {
-    transform: translateY(0);
-  }
-}
 .zk-leaf {
   animation: zk-leaf 1.6s var(--ease-out) forwards;
   opacity: 0;
@@ -649,6 +643,11 @@ body {
   .zk-prop-button[data-active="true"] {
     outline: 3px dashed var(--color-white);
     outline-offset: 2px;
+  }
+  .zk-camp-button,
+  .zk-camp-button:active {
+    transition: none;
+    transform: none;
   }
 }
 

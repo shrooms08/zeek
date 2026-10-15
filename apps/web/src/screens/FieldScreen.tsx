@@ -43,7 +43,6 @@ function cryptoRandom(): number {
 const REACTION_SOUND: Partial<Record<PropReaction, Parameters<typeof play>[0]>> = {
   rumble: "rumble",
   poke: "crackle",
-  egg: "thunk",
 };
 
 export function FieldScreen() {
@@ -217,6 +216,7 @@ export function FieldScreen() {
       landing={landing}
       flight={fx.flight}
       onReact={onReact}
+      onCampfire={() => void navigate("/campfire")}
     />
   );
 
