@@ -25,7 +25,8 @@ import {
 } from "react";
 import {
   CRACKS,
-  burst as burstMarkup,
+  burstGlow,
+  burstRays,
   puff,
   slabShadow,
   slabSides,
@@ -104,13 +105,15 @@ function onTile(t: number, x: number, y: number, margin = 6): boolean {
 /**
  * Where each pin stands. During the reveal no pin may cover the treasure
  * tile: a pin whose stem or head would cross it leans sideways, away from
- * the treasure; the treasure tile's own pin stands on its back corner.
+ * the treasure; the treasure tile's own pin stands at its right corner.
  */
 export function placePins(selected: readonly number[], treasure: number | null): PinPlace[] {
   return selected.map((i, k) => {
     const [cx, cy] = ctr(i);
     if (treasure === null) return { i, n: k + 1, base: [cx, cy], head: [cx, cy - 44] };
-    if (i === treasure) return { i, n: k + 1, base: [cx, cy - 20], head: [cx, cy - 64] };
+    // The treasure tile's own pin stands at its right corner, clear of the
+    // chest that rises from the tile's middle.
+    if (i === treasure) return { i, n: k + 1, base: [cx + 28, cy + 2], head: [cx + 56, cy - 30] };
     const crosses = (hx: number, hy: number) => {
       for (let s = 0; s <= 1; s += 0.1) {
         if (onTile(treasure, cx + (hx - cx) * s, cy + (hy - cy) * s)) return true;
@@ -486,6 +489,9 @@ function Treasure({
 }) {
   const [cx, cy] = ctr(i);
   const origin = `${f(cx)}px ${f(cy)}px`;
+  const burstClass = reduce ? "zk-fade-in" : "zk-burst";
+  // Bottom to top: the tile's split and outline, the glow, the chest, then
+  // the rays and sparkles. Nothing of the tile may cross the chest.
   return (
     <g data-treasure={i}>
       <path
@@ -497,32 +503,39 @@ function Treasure({
         strokeLinejoin="round"
         className={reduce ? undefined : "zk-draw"}
         style={{ animationDuration: "200ms" }}
+        data-treasure-layer="split"
       />
-      <g
-        className={reduce ? "zk-fade-in" : "zk-burst"}
-        style={{ transformOrigin: origin }}
-        data-burst={burst}
-      >
-        <Markup html={burstMarkup(cx, cy, burst, gold, p)} />
-      </g>
-      {burst >= 3 && (
-        <g
-          className={reduce ? "zk-fade-in" : "zk-chest-drop"}
-          style={{ transformOrigin: origin }}
-          data-chest=""
-        >
-          <Markup
-            html={`<g transform="translate(${f(cx - 30)} ${f(cy - 48)}) scale(.5)">${chest(true, gold)}</g>`}
-          />
-        </g>
-      )}
       <polygon
         points={pts(full(i))}
         fill="none"
         stroke="#0A0A0A"
         strokeWidth={4.5}
         strokeLinejoin="round"
+        data-treasure-layer="outline"
       />
+      <g
+        className={burstClass}
+        style={{ transformOrigin: origin }}
+        data-burst={burst}
+        data-treasure-layer="glow"
+      >
+        <Markup html={burstGlow(cx, cy, burst, gold, p)} />
+      </g>
+      {burst >= 3 && (
+        <g
+          className={reduce ? "zk-fade-in" : "zk-chest-drop"}
+          style={{ transformOrigin: origin }}
+          data-chest=""
+          data-treasure-layer="chest"
+        >
+          <Markup
+            html={`<g transform="translate(${f(cx - 30)} ${f(cy - 48)}) scale(.5)">${chest(true, gold)}</g>`}
+          />
+        </g>
+      )}
+      <g className={burstClass} style={{ transformOrigin: origin }} data-treasure-layer="rays">
+        <Markup html={burstRays(cx, cy, burst, gold)} />
+      </g>
     </g>
   );
 }

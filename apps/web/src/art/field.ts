@@ -159,27 +159,62 @@ export function splitPath(i: number): string {
   return `M${f(cx - 30)} ${f(cy - 6)} L${f(cx - 14)} ${f(cy + 2)} L${f(cx - 4)} ${f(cy - 6)} L${f(cx + 8)} ${f(cy + 4)} L${f(cx + 30)} ${f(cy - 4)}`;
 }
 
-/** Light burst over (cx, cy): frame 1 glint, 2 full burst, 3 settled. */
-export function burst(cx: number, cy: number, b: 1 | 2 | 3, gold: boolean, p: string): string {
-  let s = `<circle cx="${f(cx)}" cy="${f(cy)}" r="${b === 1 ? 70 : b === 2 ? 220 : 150}" fill="url(#${p}${gold ? "gg" : "gw"})"/>`;
+/**
+ * The light burst over (cx, cy), frame 1 glint, 2 full burst, 3 settled, in
+ * two layers so the chest sits between them: the soft glow (under the
+ * chest) and the rays and sparkles (over it).
+ */
+export function burstGlow(cx: number, cy: number, b: 1 | 2 | 3, gold: boolean, p: string): string {
+  return `<circle cx="${f(cx)}" cy="${f(cy)}" r="${b === 1 ? 70 : b === 2 ? 220 : 150}" fill="url(#${p}${gold ? "gg" : "gw"})"/>`;
+}
+
+/**
+ * The chest over a treasure tile centred at (cx, cy), as drawn by the field
+ * (chest art at scale .5 from (cx − 30, cy − 48)): its box with the lid's
+ * glint, and where the light comes out.
+ */
+export function chestBox(
+  cx: number,
+  cy: number,
+): {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+} {
+  return { x0: cx - 24, x1: cx + 24, y0: cy - 56, y1: cy };
+}
+/** Where the rays radiate from (the open lid) and how far out they start. */
+export const RAY_ORIGIN_DY = -24;
+export const RAY_INNER = 40;
+
+export function burstRays(cx: number, cy: number, b: 1 | 2 | 3, gold: boolean): string {
+  let s = "";
+  const oy = cy + RAY_ORIGIN_DY;
   if (b >= 2) {
     const n = b === 2 ? 15 : 11;
     for (let k = 0; k < n; k++) {
       const a = ((-168 + k * (156 / (n - 1))) * Math.PI) / 180;
       const L = (k % 2 ? 200 : 300) * (b === 2 ? 1 : 0.65);
       const w = k % 2 ? 0.035 : 0.055;
+      // Each ray starts outside the chest, so the chest stays in front of
+      // nothing but its own light.
+      const r0 = RAY_INNER;
       s += `<polygon points="${pts([
-        [cx, cy],
-        [cx + Math.cos(a - w) * L, cy + Math.sin(a - w) * L],
-        [cx + Math.cos(a + w) * L, cy + Math.sin(a + w) * L],
+        [cx + Math.cos(a) * r0, oy + Math.sin(a) * r0],
+        [cx + Math.cos(a - w) * L, oy + Math.sin(a - w) * L],
+        [cx + Math.cos(a + w) * L, oy + Math.sin(a + w) * L],
       ])}" fill="${gold ? GOLD : WHITE}" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/>`;
     }
   }
   const rr = rng(4);
+  const box = chestBox(cx, cy);
   for (let k = 0; k < (b === 1 ? 5 : 9); k++) {
     const x = cx + (rr() - 0.5) * (b === 1 ? 90 : 240);
     const y = cy - 20 - rr() * (b === 1 ? 50 : 150);
     const z = 3 + rr() * 4;
+    // No sparkle on the chest itself.
+    if (x + z > box.x0 && x - z < box.x1 && y + z > box.y0 && y - z < box.y1) continue;
     s += `<path d="M${f(x)} ${f(y - z)} L${f(x + z * 0.3)} ${f(y - z * 0.3)} L${f(x + z)} ${f(y)} L${f(x + z * 0.3)} ${f(y + z * 0.3)} L${f(x)} ${f(y + z)} L${f(x - z * 0.3)} ${f(y + z * 0.3)} L${f(x - z)} ${f(y)} L${f(x - z * 0.3)} ${f(y - z * 0.3)}Z" fill="${gold && b > 1 ? GOLD : WHITE}" stroke="${INK}" stroke-width="1" class="zk-twinkle" style="animation-delay:-${f(k * 0.37)}s"/>`;
   }
   return s;
