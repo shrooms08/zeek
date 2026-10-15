@@ -10,7 +10,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useReducer, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Mine } from "../art/Characters";
 import { usePending, useRound } from "../api/queries";
 import { Field } from "../components/field/Field";
@@ -219,7 +219,7 @@ export default function RevealScreen() {
   if (erupt && desktop && settled !== null) {
     return (
       <main
-        className="mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(380px,1fr)_2fr] items-center gap-6 px-10 py-8"
+        className="mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(360px,0.9fr)_2fr] items-center gap-6 px-10 py-8"
         data-testid="reveal-screen"
       >
         <motion.div
@@ -242,7 +242,20 @@ export default function RevealScreen() {
             On top of the round’s prize. Everyone who dug tile {(treasure ?? 0) + 1} shares it by
             how much they dug.
           </p>
-          <div className="mt-6">{card}</div>
+          <div className="mt-6 flex gap-3" data-testid="result-card" data-outcome="cache-win">
+            {loadMyDigs().some((d) => d.round === n && d.via === "pocket") && (
+              <Link
+                className="btn btn-primary flex items-center gap-2"
+                to={`/prove/${n}`}
+                data-testid="prove-it"
+              >
+                <Icon name="share" size={18} /> Prove it
+              </Link>
+            )}
+            <Link className="btn" to="/">
+              Dig again
+            </Link>
+          </div>
         </motion.div>
         {field}
       </main>

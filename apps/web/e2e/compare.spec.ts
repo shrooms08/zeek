@@ -8,7 +8,7 @@
  * round 188 with the Cache flag set.
  */
 import { chromium, expect, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { go, loadState, REPO, test, unlock } from "./live/support";
@@ -40,15 +40,12 @@ async function designFrame(
   const handle = await page.evaluateHandle(
     ([cap, lab]) => {
       if (lab !== undefined) return document.querySelector(`[data-screen-label="${lab}"]`);
-      const own = (e: Element) =>
-        [...e.childNodes]
-          .filter((n) => n.nodeType === 3)
-          .map((n) => n.textContent ?? "")
-          .join("")
-          .trim();
-      const hit = [...document.querySelectorAll("*")].find((e) =>
-        own(e).startsWith(cap ?? "\u0000"),
-      );
+      // Captions are short and may wrap part of their text in a span.
+      const hit = [...document.querySelectorAll("*")]
+        .filter(
+          (e) => e.children.length <= 2 && (e.textContent ?? "").trim().startsWith(cap ?? "\u0000"),
+        )
+        .sort((a, b) => (a.textContent ?? "").length - (b.textContent ?? "").length)[0];
       return hit?.nextElementSibling ?? null;
     },
     [caption, label] as const,
@@ -67,13 +64,16 @@ async function compose(
   note: string,
 ) {
   await page.setViewportSize({ width: 1600, height: 1000 });
-  const img = (f: string) => pathToFileURL(f).href;
+  // Inline the screenshots: a page set with setContent can't load file:// URLs.
+  const img = (f: string) => `data:image/png;base64,${readFileSync(f).toString("base64")}`;
   await page.setContent(`<html><body style="margin:0;background:#000;font:600 14px system-ui;color:#D6D6D6">
   <div id="sheet" style="display:inline-flex;gap:24px;padding:20px;background:#000;align-items:flex-start">
     <figure style="margin:0"><figcaption style="margin-bottom:8px;letter-spacing:.1em">DESIGN · ${title}</figcaption><img src="${img(design)}" style="display:block;outline:1px solid #3A3A3A"></figure>
     <figure style="margin:0"><figcaption style="margin-bottom:8px;letter-spacing:.1em">LIVE APP · ${title}${note === "" ? "" : ` · <span style="color:#E8B54A">${note}</span>`}</figcaption><img src="${img(app)}" style="display:block;outline:1px solid #3A3A3A"></figure>
   </div></body></html>`);
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() =>
+    [...document.images].every((i) => i.complete && i.naturalWidth > 0),
+  );
   await page.locator("#sheet").screenshot({ path: out });
 }
 
@@ -300,13 +300,20 @@ test("design frames beside the live app", async ({ page }) => {
       name: "first-time",
       size: 390,
       design: { page: "Zeek Reveal", caption: "6A · STEP 1" },
-      app: async (p) => {
-        await p.evaluate(() => {
-          localStorage.removeItem("zeek.seenOnboarding");
+      // A fresh browser: the live profile has already seen the explainer.
+      app: async () => {
+        const browser = await chromium.launch();
+        const fresh = await browser.newPage({
+          baseURL: "http://localhost:4174",
+          viewport: { width: 390, height: 844 },
         });
-        await p.goto("/");
-        await expect(p.getByTestId("onboarding")).toBeVisible({ timeout: 60_000 });
-        await p.waitForTimeout(800);
+        await fresh.goto("/");
+        await expect(fresh.getByTestId("onboarding")).toBeVisible({ timeout: 60_000 });
+        await fresh.waitForTimeout(800);
+        const file = path.join(TMP, "first-time-390-fresh.png");
+        await fresh.screenshot({ path: file });
+        await browser.close();
+        return { file };
       },
     },
     {
@@ -337,12 +344,16 @@ test("design frames beside the live app", async ({ page }) => {
     await unlock(page, passphrase);
     const result = await pair.app(page);
     const note = typeof result === "string" ? result : "";
-    await page.screenshot({ path: appFile });
+    const own =
+      typeof result === "object" && result !== null && "file" in result
+        ? String(result.file)
+        : null;
+    if (own === null) await page.screenshot({ path: appFile });
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await compose(
       composer,
       designFile,
-      appFile,
+      own ?? appFile,
       path.join(OUT, `${base}.png`),
       `${pair.name} · ${pair.size}`,
       note,

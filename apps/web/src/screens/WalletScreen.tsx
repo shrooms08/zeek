@@ -642,7 +642,7 @@ function Home() {
       className="grid gap-8 lg:grid-cols-[minmax(0,560px)_minmax(0,480px)]"
       data-testid="wallet-home"
     >
-      <div className="flex flex-col gap-5">
+      <div className="flex min-w-0 flex-col gap-5">
         <section className="zk-stat px-6 py-5" aria-label="Balance">
           <div className="label flex items-center gap-2">
             <Icon name="wallet" size={18} /> Balance
@@ -753,7 +753,7 @@ function Home() {
           </Panel>
         )}
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-3">
         <div className="label text-fog">History</div>
         {history.data === undefined ? (
           <p className="text-fog">Loading…</p>

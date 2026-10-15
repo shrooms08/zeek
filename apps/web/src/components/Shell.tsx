@@ -69,7 +69,7 @@ export function Shell({ children }: { children: ReactNode }) {
         )}
         <button
           type="button"
-          className="btn zk-square sm:px-5 flex items-center gap-2.5"
+          className="btn flex min-h-[52px] min-w-[52px] items-center justify-center gap-2.5 px-3 sm:px-5"
           style={{ fontSize: 18 }}
           onClick={() => {
             setOpen(true);

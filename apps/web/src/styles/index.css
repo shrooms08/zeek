@@ -1107,7 +1107,8 @@ body {
   font-stretch: 112%;
 }
 .zk-headline {
-  font-size: clamp(56px, 7vw, 96px);
+  color: var(--color-white);
+  font-size: clamp(44px, 6vw, 88px);
   line-height: 0.92;
   font-weight: 900;
   font-stretch: 115%;
@@ -1299,5 +1300,25 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .zk-chest-glint [data-glint] {
     animation: zk-fade 150ms linear both !important;
+  }
+}
+
+/* The field draws its own focus ring on the focused tile. */
+[data-testid="field"]:focus,
+[data-testid="field"]:focus-visible {
+  outline: none;
+}
+.zk-dig {
+  white-space: nowrap;
+}
+.zk-lift .zk-dig,
+[data-testid="dig-panel"] .zk-dig {
+  font-size: 26px;
+}
+
+/* Narrow screens: big amounts wrap their unit rather than overflow. */
+@media (max-width: 639px) {
+  .zk-amount {
+    flex-wrap: wrap;
   }
 }

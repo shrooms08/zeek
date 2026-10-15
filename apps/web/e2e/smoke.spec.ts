@@ -73,3 +73,20 @@ test("the Pocket starts its wasm worker with threads", async ({ page }) => {
   expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe("function");
   expect(problems).toEqual([]);
 });
+
+test.describe("at 390 wide", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  for (const path of ["/", "/rounds", "/check", "/keys", "/campfire", "/wallet", "/how", "/nope"]) {
+    test(`${path} never scrolls sideways`, async ({ page }) => {
+      await page.addInitScript(() => {
+        localStorage.setItem("zeek.seenOnboarding", "1");
+      });
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  }
+});
