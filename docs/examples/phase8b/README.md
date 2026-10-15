@@ -49,9 +49,9 @@ running.
   | Payout openings against the settlement | pass |
   | Beacon round binding, digs, timing, the mined payout | needs the live engine (no tick) |
 
-- **Coming back:** with a page left open in Replay, `scripts/zeek-up.sh`
-  brought the services back. The page switched to the live field by itself
-  46 s after the outage check began, without a reload.
+- **Coming back:** a page was left open in Replay, and `scripts/zeek-up.sh`
+  ran 15 s later (it took 32 s). The page switched to the live field by
+  itself 46 s after it first showed Replay, without a reload.
 - **Share pages** answered 503 during the outage: nothing was in the edge
   cache yet, because the running engine binary does not send the new
   `Cache-Control`. After it is installed, share pages and cards opened in
