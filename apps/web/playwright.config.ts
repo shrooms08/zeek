@@ -26,6 +26,8 @@ export default defineConfig({
   },
   projects: [
     { name: "smoke", testMatch: "smoke.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    // Safari's engine: cross-origin isolation and wasm threads must work there too.
+    { name: "smoke-webkit", testMatch: "smoke.spec.ts", use: { ...devices["Desktop Safari"] } },
     { name: "live", testMatch: /live\/.*\.spec\.ts/, timeout: 3 * 60 * 60_000 },
     {
       name: "shots",

@@ -63,3 +63,13 @@ test("first-time explainer, then the field plays by keyboard", async ({ page }) 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("field-live")).not.toContainText("selected");
 });
+
+test("the Pocket starts its wasm worker with threads", async ({ page }) => {
+  const problems = watch(page);
+  await page.goto("/wallet");
+  // Pocket.start initialises the wasm and its thread pool before the wallet
+  // screen can say whether a Pocket exists.
+  await expect(page.getByTestId("wallet-create")).toBeVisible({ timeout: 90_000 });
+  expect(await page.evaluate(() => typeof SharedArrayBuffer)).toBe("function");
+  expect(problems).toEqual([]);
+});
