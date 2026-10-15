@@ -8,14 +8,15 @@ use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 use zeek_engine::api::{router, AppState, BoardResponse};
 use zeek_engine::chain::ingest;
-use zeek_engine::db::{Db, Pool};
+use zeek_engine::db::Pool;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::mempool::{run_session, Landing, MempoolSource, MEMPOOL_STALL};
 use zeek_engine::processor::{BoardState, Processor};
+use zeek_engine::store::Store;
 use zeek_engine::synthetic::{SyntheticChain, TestVault};
 use zeek_engine::EngineError;
 
@@ -73,18 +74,18 @@ async fn board_serves_landing_digs_separately() {
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
     let mut chain = SyntheticChain::new(&vault, GENESIS, 1_700_000_000);
     chain.advance(3);
-    let mut db = Db::open_in_memory().expect("db");
-    ingest(&mut chain, &mut db, &scanner, &config)
+    let store = Store::open_in_memory().expect("db");
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     let (events, mut rx) = broadcast::channel(16);
     let landing = Arc::new(Landing::new(events.clone()));
     let state = Arc::new(AppState {
         processor: Processor::new(config.clone()),
-        db: Mutex::new(db),
+        store: Arc::new(store),
         events,
         started: std::time::Instant::now(),
-        coordinator: None,
+        ledger: None,
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),

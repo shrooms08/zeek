@@ -10,8 +10,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use zeek_engine::config::GameConfig;
-use zeek_engine::db::Db;
 use zeek_engine::processor::Processor;
+use zeek_engine::store::Store;
 
 use crate::config::{KeyholderConfig, COORDINATOR_ID};
 use crate::db::NodeDb;
@@ -34,7 +34,8 @@ pub struct AppState {
     pub dkg: DkgState,
     pub signer: SignerState,
     pub keys: RwLock<Option<Arc<KeyMaterial>>>,
-    pub chain_db: Mutex<Db>,
+    /// This node's own chain view; the follower writes, handlers read.
+    pub chain: Arc<Store>,
     pub node_db: Mutex<NodeDb>,
     pub endpoint: Mutex<Option<String>>,
 }
@@ -154,8 +155,11 @@ async fn sign_request(State(state): State<Arc<AppState>>, Json(env): Json<Envelo
                 .into_response()
         }
     };
-    let chain = state.chain_db.lock().await;
     let node = state.node_db.lock().await;
+    let chain = match state.chain.reader() {
+        Ok(c) => c,
+        Err(e) => return refusal(&state, &session, e.to_string()).into_response(),
+    };
     let ctx = VerifyContext {
         processor: &state.processor,
         fvk: &keys.fvk,
@@ -245,12 +249,12 @@ async fn sign_round2(State(state): State<Arc<AppState>>, Json(env): Json<Envelop
 
 async fn health(State(state): State<Arc<AppState>>) -> Response {
     let keys = state.keys.read().await.clone();
-    let chain = state.chain_db.lock().await;
-    let (tip_height, settled_rounds) = match (chain.tip(), chain.settled_rounds()) {
-        (Ok(tip), Ok(rounds)) => (tip.map(|b| b.height), rounds.len()),
-        _ => (None, 0),
-    };
-    drop(chain);
+    let (tip_height, settled_rounds) = state
+        .chain
+        .read(|db| Ok::<_, zeek_engine::EngineError>((db.tip()?, db.settled_rounds()?)))
+        .map_or((None, 0), |(tip, rounds)| {
+            (tip.map(|b| b.height), rounds.len())
+        });
     let body = Health {
         identifier: state.config.identifier,
         has_key_share: keys.is_some(),

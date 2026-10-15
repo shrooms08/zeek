@@ -20,6 +20,7 @@ use crate::config::{GameConfig, SETTLE_CONFIRMATIONS};
 use crate::db::{BeaconRow, Db, PlanStatus, SettlementRow};
 use crate::error::EngineError;
 use crate::proof::{ProofBundle, PROOF_VERSION};
+use crate::store::Store;
 
 /// Something that happened, pushed to WebSocket clients.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,20 +376,26 @@ impl Processor {
 
     /// Settles every round that is ready, in order. `now` is the current Unix
     /// time (beacons are only fetched once published).
+    ///
+    /// The beacon is fetched with no database connection held; each round's
+    /// beacon and settlement are then written in one short transaction.
     pub async fn process(
         &mut self,
-        db: &mut Db,
+        store: &Store,
         fetcher: &mut dyn BeaconFetcher,
         now: u64,
     ) -> Result<Vec<Event>, EngineError> {
         let params = self.config.params.clone();
         let mut events = Vec::new();
-        let Some(tip) = db.tip()? else {
+        let Some(tip) = store.read(|db| db.tip())? else {
             return Ok(events);
         };
-        let mut round = db.last_settled_round()?.map(|r| r + 1).unwrap_or(0);
+        let mut round = store
+            .read(|db| db.last_settled_round())?
+            .map(|r| r + 1)
+            .unwrap_or(0);
         loop {
-            let (window, status, ctx) = self.status(db, round)?;
+            let (window, status, ctx) = store.read(|db| self.status(db, round))?;
             let required_tip = window
                 .end
                 .checked_add(params.mtp_window - 1)
@@ -410,12 +417,13 @@ impl Processor {
                 &ctx.post_close_block_times,
             )?;
 
+            let mut new_beacon = None;
             let outcome = match (status, timing) {
                 (RoundStatus::Voided, _) | (_, TimingVerdict::Unsafe { .. }) => {
                     RoundOutcome::Voided
                 }
                 (RoundStatus::Revealable, TimingVerdict::Safe { .. }) => {
-                    let fetched = match db.beacon(drand_round)? {
+                    let fetched = match store.read(|db| db.beacon(drand_round))? {
                         Some(row) => row,
                         None => {
                             if now < beacon_time || !self.backoff.ready(drand_round, now) {
@@ -429,7 +437,7 @@ impl Processor {
                                         randomness: f.randomness,
                                         relay: f.relay,
                                     };
-                                    db.insert_beacon(&row)?;
+                                    new_beacon = Some(row.clone());
                                     row
                                 }
                                 Err(e) => {
@@ -463,8 +471,9 @@ impl Processor {
             };
 
             let voided = matches!(outcome, RoundOutcome::Voided);
-            let classified = self.classified(db, round, voided)?;
-            let previous_cache = self.cache_balance(db)?;
+            let (classified, previous_cache) = store.read(|db| {
+                Ok::<_, EngineError>((self.classified(db, round, voided)?, self.cache_balance(db)?))
+            })?;
             let settlement = settle::settle(&params, round, &classified, previous_cache, outcome)?;
             let row = SettlementRow {
                 round,
@@ -480,7 +489,14 @@ impl Processor {
                 status: PlanStatus::AwaitingSignatures,
                 rules_version: rounds::rules_version(&params, round)?,
             };
-            db.insert_settlement(&row)?;
+            store.write(|db| {
+                db.transaction(|tx| {
+                    if let Some(beacon) = &new_beacon {
+                        tx.insert_beacon(beacon)?;
+                    }
+                    tx.insert_settlement(&row)
+                })
+            })?;
             tracing::info!(
                 round,
                 ?outcome,

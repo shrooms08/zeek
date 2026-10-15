@@ -503,8 +503,8 @@ mod tests {
 
     use super::*;
     use crate::chain::ingest;
-    use crate::db::Db;
     use crate::processor::Processor;
+    use crate::store::Store;
     use crate::synthetic::{SyntheticChain, TestVault};
 
     const GENESIS: u32 = 1_000;
@@ -548,7 +548,7 @@ mod tests {
     struct Fixture {
         vault: TestVault,
         chain: SyntheticChain,
-        db: Db,
+        store: Store,
         scanner: DigScanner,
         processor: Processor,
         landing: Landing,
@@ -562,8 +562,8 @@ mod tests {
         let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
         let mut chain = SyntheticChain::new(&vault, GENESIS, 1_700_000_000);
         chain.advance(2);
-        let mut db = Db::open_in_memory().expect("db");
-        ingest(&mut chain, &mut db, &scanner, &config)
+        let store = Store::open_in_memory().expect("db");
+        ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
         let (tx, events) = broadcast::channel(16);
@@ -571,7 +571,7 @@ mod tests {
             processor: Processor::new(config),
             vault,
             chain,
-            db,
+            store,
             scanner,
             landing: Landing::new(tx),
             events,
@@ -697,7 +697,10 @@ mod tests {
         ));
         f.session(vec![raw.clone()]).await;
         assert_eq!(f.landing.digs().len(), 1);
-        let board = f.processor.board(&f.db).expect("board");
+        let board = f
+            .processor
+            .board(&f.store.reader().expect("reader"))
+            .expect("board");
         assert_eq!(
             (board.digs, board.gross_dug_zat, board.prize_pool_zat),
             (0, 0, 0),
@@ -708,18 +711,23 @@ mod tests {
         // Mined in the next block and ingested.
         f.chain.push_raw_transaction(raw.clone()).expect("mine");
         let config = f.processor.config().clone();
-        ingest(&mut f.chain, &mut f.db, &f.scanner, &config)
+        ingest(&mut f.chain, &f.store, &f.scanner, &config)
             .await
             .expect("ingest");
-        let db = &f.db;
+        let store = &f.store;
         let dropped = f
             .landing
-            .drop_mined(unix_now(), |txid| db.has_note_from_tx(txid))
+            .drop_mined(unix_now(), |txid| {
+                store.read(|db| db.has_note_from_tx(txid))
+            })
             .expect("drop");
         assert_eq!(dropped, 1);
         assert!(f.landing.digs().is_empty());
         assert_eq!(f.last_landing_event(), Some(vec![]));
-        let board = f.processor.board(&f.db).expect("board");
+        let board = f
+            .processor
+            .board(&f.store.reader().expect("reader"))
+            .expect("board");
         assert_eq!(board.digs, 1);
         assert_eq!(board.gross_dug_zat, 400_000);
         assert_eq!(board.depths[12], 100);
@@ -730,7 +738,13 @@ mod tests {
         assert_eq!(found.len(), 1);
         f.landing.observe(session, txid, found, unix_now());
         assert!(f.landing.digs().is_empty());
-        assert_eq!(f.processor.board(&f.db).expect("board").digs, 1);
+        assert_eq!(
+            f.processor
+                .board(&f.store.reader().expect("reader"))
+                .expect("board")
+                .digs,
+            1
+        );
     }
 
     #[tokio::test]
@@ -835,16 +849,23 @@ mod tests {
         f.chain.delay(100_000); // close far too late: the round is voided
         f.chain.advance(params.mtp_window + SETTLE_CONFIRMATIONS);
         let config = f.processor.config().clone();
-        ingest(&mut f.chain, &mut f.db, &f.scanner, &config)
+        ingest(&mut f.chain, &f.store, &f.scanner, &config)
             .await
             .expect("ingest");
         f.processor
-            .process(&mut f.db, &mut FixedBeacons::default(), u64::MAX / 2)
+            .process(&f.store, &mut FixedBeacons::default(), u64::MAX / 2)
             .await
             .expect("process");
-        let row = f.db.settlement(0).expect("row").expect("settled");
+        let row = f
+            .store
+            .read(|db| db.settlement(0))
+            .expect("row")
+            .expect("settled");
         assert_eq!(row.outcome, zeek_core::settle::RoundOutcome::Voided);
-        let classified = f.processor.classified(&f.db, 0, true).expect("classified");
+        let classified = f
+            .processor
+            .classified(&f.store.reader().expect("reader"), 0, true)
+            .expect("classified");
         assert!(classified.valid.is_empty());
         let refunded: Vec<u64> = classified.refunds.iter().map(|d| d.note.value).collect();
         assert_eq!(

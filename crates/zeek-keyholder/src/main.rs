@@ -8,8 +8,8 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use tokio::sync::{Mutex, RwLock};
 use zeek_engine::config::{GameConfig, DEFAULT_RELAYS};
-use zeek_engine::db::Db;
 use zeek_engine::processor::Processor;
+use zeek_engine::store::Store;
 use zeek_keyholder::api::{router, AppState};
 use zeek_keyholder::config::KeyholderConfig;
 use zeek_keyholder::db::NodeDb;
@@ -122,7 +122,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
     let identity = Identity::load(&config.identity_path())
         .context("loading the identity key (run `identity-keygen` first)")?;
     let game = GameConfig::load(&config.game_config)?;
-    let chain_db = Db::open(&config.engine_db_path())?;
+    let chain = Arc::new(Store::open(&config.engine_db_path())?);
     let node_db = NodeDb::open(&config.node_db_path())?;
     let keys = match KeyMaterial::load(&config) {
         Ok(k) => Some(Arc::new(k)),
@@ -143,7 +143,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         dkg: DkgState::default(),
         signer: SignerState::default(),
         keys: RwLock::new(keys),
-        chain_db: Mutex::new(chain_db),
+        chain: chain.clone(),
         node_db: Mutex::new(node_db),
         endpoint: Mutex::new(None),
     });
@@ -201,16 +201,13 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         if server.is_finished() {
             break;
         }
-        // The pass holds the chain database lock (health and signing read
-        // it), so a call that never returns must not stall the node.
-        let pass = {
-            let mut db = state.chain_db.lock().await;
-            match tokio::time::timeout(FOLLOWER_PASS_TIMEOUT, follower.pass(&mut db)).await {
-                Ok(result) => result.map_err(|e| e.to_string()),
-                Err(_) => Err(format!(
-                    "follower pass timed out after {FOLLOWER_PASS_TIMEOUT:?}"
-                )),
-            }
+        // A backstop against a call that never returns; health and signing
+        // read through their own connections meanwhile.
+        let pass = match tokio::time::timeout(FOLLOWER_PASS_TIMEOUT, follower.pass(&chain)).await {
+            Ok(result) => result.map_err(|e| e.to_string()),
+            Err(_) => Err(format!(
+                "follower pass timed out after {FOLLOWER_PASS_TIMEOUT:?}"
+            )),
         };
         *state.endpoint.lock().await = follower.endpoint().map(str::to_owned);
         if let Err(e) = pass {

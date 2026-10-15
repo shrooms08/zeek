@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, Mutex, MutexGuard};
+use tokio::sync::broadcast;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use zeek_core::board::TileTotals;
 use zeek_core::digs;
@@ -23,21 +23,24 @@ use zeek_core::seal::SealingPublicKey;
 use zeek_core::settle::{Payout, RoundOutcome};
 
 use crate::config::{GameConfig, SETTLE_CONFIRMATIONS};
-use crate::coordinator::Coordinator;
+use crate::coordinator::LedgerView;
 use crate::db::{Db, PayoutRecord, PlanStatus};
 use crate::error::EngineError;
 use crate::ledger::Ledger;
 use crate::processor::{BoardState, Event, PendingRound, Processor};
 use crate::proof::ProofBundle;
+use crate::store::{Reader, Store};
 
 /// Shared state of the HTTP handlers.
 pub struct AppState {
     pub processor: Processor,
-    pub db: Mutex<Db>,
+    /// Shared with the engine loop; handlers read through its read pool.
+    pub store: Arc<Store>,
     pub events: broadcast::Sender<Event>,
     pub started: Instant,
     /// Present when this engine also coordinates payouts.
-    pub coordinator: Option<Arc<Mutex<Coordinator>>>,
+    /// The vault ledger (payout coordinator engines only).
+    pub ledger: Option<LedgerView>,
     /// Present when this engine relays chain data to browser wallets.
     pub relay: Option<Arc<crate::relay::RelayState>>,
     /// Campfire display filter.
@@ -230,8 +233,9 @@ impl IntoResponse for ApiError {
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
-async fn lock(state: &AppState) -> MutexGuard<'_, Db> {
-    state.db.lock().await
+/// A read-only connection: never waits for the engine loop's writes.
+fn reader(state: &AppState) -> Result<Reader<'_>, ApiError> {
+    Ok(state.store.reader()?)
 }
 
 /// Builds the router.
@@ -292,7 +296,7 @@ async fn config(State(state): State<Arc<AppState>>) -> ApiResult<ConfigResponse>
 
 async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardResponse> {
     let board = {
-        let db = lock(&state).await;
+        let db = reader(&state)?;
         state.processor.board(&db)?
     };
     Ok(Json(BoardResponse {
@@ -302,7 +306,7 @@ async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardResponse> {
 }
 
 async fn pending(State(state): State<Arc<AppState>>) -> ApiResult<PendingResponse> {
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     Ok(Json(PendingResponse {
         rounds: state.processor.pending_rounds(&db)?,
     }))
@@ -379,7 +383,7 @@ async fn round(
     State(state): State<Arc<AppState>>,
     Path(round): Path<u32>,
 ) -> ApiResult<RoundResponse> {
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     Ok(Json(round_response(&state.processor, &db, round)?))
 }
 
@@ -399,7 +403,7 @@ async fn proof(
     State(state): State<Arc<AppState>>,
     Path(round): Path<u32>,
 ) -> ApiResult<ProofBundle> {
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     match proof_response(&state.processor, &db, round)? {
         Some(bundle) => Ok(Json(bundle)),
         None => Err(ApiError(
@@ -410,19 +414,17 @@ async fn proof(
 }
 
 async fn vault_ledger(State(state): State<Arc<AppState>>) -> ApiResult<Ledger> {
-    let Some(coordinator) = &state.coordinator else {
+    let Some(view) = &state.ledger else {
         return Err(ApiError(
             StatusCode::NOT_FOUND,
             "this engine is not configured as the payout coordinator".into(),
         ));
     };
-    let db = lock(&state).await;
-    let coordinator = coordinator.lock().await;
-    Ok(Json(coordinator.ledger(&db, &state.processor)?))
+    Ok(Json(view.ledger(&state.store, &state.processor)?))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> ApiResult<HealthResponse> {
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     Ok(Json(HealthResponse {
         ok: true,
         tip_height: db.tip()?.map(|b| b.height),
@@ -526,7 +528,7 @@ async fn rounds_list(
 ) -> ApiResult<RoundsResponse> {
     let limit = q.limit.unwrap_or(20).clamp(1, 100) as usize;
     let include_empty = q.include_empty == Some(1);
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     let Some(last) = db.last_settled_round()? else {
         return Ok(Json(RoundsResponse {
             rounds: Vec::new(),
@@ -587,7 +589,7 @@ async fn round_digests(
     use sha2::{Digest, Sha256};
     let window = zeek_core::rounds::round_window(&state.processor.config().params, round)
         .map_err(|e| bad(StatusCode::BAD_REQUEST, e.to_string()))?;
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     // Late payments land after the window; include the next round's window
     // too so a wallet can see where its payment went.
     let notes = db
@@ -642,7 +644,7 @@ pub struct KeyholdersResponse {
 }
 
 async fn keyholders_status(State(state): State<Arc<AppState>>) -> ApiResult<KeyholdersResponse> {
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     let health = db.keyholder_health()?;
     let counts = db.keyholder_counts()?;
     let keyholders = state
@@ -700,7 +702,7 @@ async fn campfire(
     axum::extract::Query(q): axum::extract::Query<CampfireQuery>,
 ) -> ApiResult<CampfireResponse> {
     let limit = q.limit.unwrap_or(50);
-    let db = lock(&state).await;
+    let db = reader(&state)?;
     let messages = crate::campfire::messages(
         &db,
         &state.processor.config().params,
@@ -745,7 +747,7 @@ async fn submit_proof(
         .map_err(|e| bad(StatusCode::BAD_REQUEST, e.to_string()))?;
     let id = zeek_verify::win::WinProof::id(&bytes);
     let bundle = {
-        let db = lock(&state).await;
+        let db = reader(&state)?;
         let row = db.settlement(proof.round)?.ok_or_else(|| {
             bad(
                 StatusCode::NOT_FOUND,
@@ -798,9 +800,9 @@ async fn submit_proof(
     if !verdict.valid {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(stored)));
     }
-    lock(&state)
-        .await
-        .insert_win_proof(&id, round, created_at, &bytes)?;
+    state
+        .store
+        .write(|db| db.insert_win_proof(&id, round, created_at, &bytes))?;
     Ok((StatusCode::CREATED, Json(stored)))
 }
 
@@ -819,9 +821,9 @@ async fn get_proof(
             "a proof id is 32 hex characters",
         ));
     }
-    let (round, created_at, bytes) = lock(&state)
-        .await
-        .win_proof(&id)?
+    let (round, created_at, bytes) = state
+        .store
+        .read(|db| db.win_proof(&id))?
         .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))?;
     // Stored proofs were fully verified on submission; the stored verdict
     // is restated here (the claim depends only on public data).
@@ -849,10 +851,10 @@ async fn stream(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Res
 }
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
-    let initial = {
-        let db = lock(&state).await;
-        state.processor.board(&db).map(Event::Board)
-    };
+    let initial = state
+        .store
+        .read(|db| state.processor.board(db))
+        .map(Event::Board);
     let mut rx = state.events.subscribe();
     if let Ok(event) = initial {
         if send_event(&mut socket, &event).await.is_err() {

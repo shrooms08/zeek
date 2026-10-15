@@ -270,7 +270,7 @@ pub async fn round_page(State(state): State<Arc<AppState>>, Path(name): Path<Str
     let Ok(round) = stem.parse::<u32>() else {
         return not_found("round");
     };
-    let row = match state.db.lock().await.settlement(round) {
+    let row = match state.store.read(|db| db.settlement(round)) {
         Ok(Some(row)) => row,
         Ok(None) => return not_found("settled round"),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -310,7 +310,7 @@ pub async fn win_page(State(state): State<Arc<AppState>>, Path(name): Path<Strin
     if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
         return not_found("proof");
     }
-    let stored = match state.db.lock().await.win_proof(id) {
+    let stored = match state.store.read(|db| db.win_proof(id)) {
         Ok(Some(p)) => p,
         Ok(None) => return not_found("proof"),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

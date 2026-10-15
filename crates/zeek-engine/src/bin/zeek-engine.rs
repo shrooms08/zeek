@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::broadcast;
 use zeek_engine::api::{router, AppState};
 use zeek_engine::audit::{self, VaultSpec};
 use zeek_engine::beacon::RelayFetcher;
@@ -19,6 +19,7 @@ use zeek_engine::decrypt::DigScanner;
 use zeek_engine::mempool::{self, Landing, LightwalletdMempool};
 use zeek_engine::processor::{Event, Processor};
 use zeek_engine::relay::{LightwalletdBackend, RelayState};
+use zeek_engine::store::Store;
 
 #[derive(Parser)]
 #[command(
@@ -205,9 +206,9 @@ const PASS_TIMEOUT: Duration = Duration::from_secs(600);
 async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()> {
     let settings_ref = settings.clone();
     let scanner = DigScanner::new(config.incoming_viewing_key()?);
-    let db = Db::open(&settings.db_path)?;
-    let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
-    let mut fetcher = RelayFetcher::new(settings.relays.clone())?;
+    let store = Arc::new(Store::open(&settings.db_path)?);
+    let source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    let fetcher = RelayFetcher::new(settings.relays.clone())?;
     let (events, _) = broadcast::channel::<Event>(256);
     tracing::info!(
         genesis = config.genesis_height,
@@ -223,12 +224,12 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                 vault = coordinator.vault_address(),
                 "payout coordinator enabled"
             );
-            Some(Arc::new(Mutex::new(coordinator)))
+            Some(coordinator)
         }
         None => None,
     };
     let (keyholder_ids, threshold) = match &coordinator {
-        Some(c) => c.lock().await.keyholder_ids(),
+        Some(c) => c.keyholder_ids(),
         None => (Vec::new(), 0),
     };
     let state = Arc::new(AppState {
@@ -240,10 +241,10 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         public_url: std::env::var("ZEEK_PUBLIC_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:8787".to_owned()),
         processor: Processor::new(config.clone()),
-        db: Mutex::new(db),
+        store: store.clone(),
         events: events.clone(),
         started: Instant::now(),
-        coordinator: coordinator.clone(),
+        ledger: coordinator.as_ref().map(Coordinator::ledger_view),
         relay: Some(Arc::new(RelayState::new(
             Box::new(LightwalletdBackend::new(
                 zeek_vault::lightwalletd::connect(&settings.lightwalletd_url).await?,
@@ -288,26 +289,64 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         .await
     });
 
+    // The chain loop runs as its own task: the store's guards are not
+    // `Send`, so the compiler rejects any database access held across an
+    // `.await` (network, beacon, proving, signing) inside it.
+    let chain_loop = tokio::spawn(chain_loop(
+        state.clone(),
+        source,
+        fetcher,
+        coordinator,
+        scanner,
+        config,
+        settings.poll_secs,
+    ));
+    tokio::select! {
+        result = server => {
+            if let Ok(Err(e)) = result {
+                tracing::error!(error = %e, "API server stopped");
+            }
+        }
+        result = chain_loop => {
+            if let Err(e) = result {
+                tracing::error!(error = %e, "chain loop stopped");
+            }
+        }
+    }
+    tracing::info!("engine stopping");
+    Ok(())
+}
+
+/// Follows the chain, settles rounds and pays them, until Ctrl-C.
+async fn chain_loop(
+    state: Arc<AppState>,
+    mut source: LightwalletdSource,
+    mut fetcher: RelayFetcher,
+    mut coordinator: Option<Coordinator>,
+    scanner: DigScanner,
+    config: GameConfig,
+    poll_secs: u64,
+) {
+    let store = state.store.clone();
     let mut processor = Processor::new(config.clone());
     let mut last_board = None;
     // Campfire events announce messages mined after startup.
-    let mut last_campfire_height = state.db.lock().await.tip()?.map_or(0, |b| b.height);
-    loop {
-        if server.is_finished() {
-            break;
+    let mut last_campfire_height = match store.read(|db| db.tip()) {
+        Ok(tip) => tip.map_or(0, |b| b.height),
+        Err(e) => {
+            tracing::error!(error = %e, "could not read the stored tip");
+            return;
         }
+    };
+    loop {
         let pass = async {
-            let mut db = state.db.lock().await;
-            let report = chain::ingest(&mut source, &mut db, &scanner, &config).await?;
+            let report = chain::ingest(&mut source, &store, &scanner, &config).await?;
             // Landing digs whose transaction is now stored are de-duplicated:
             // from here on the board counts them.
-            let now_secs = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let now_secs = unix_now();
             if let Err(e) = state
                 .landing
-                .drop_mined(now_secs, |txid| db.has_note_from_tx(txid))
+                .drop_mined(now_secs, |txid| store.read(|db| db.has_note_from_tx(txid)))
             {
                 tracing::warn!(error = %e, "could not check landing digs against stored notes");
             }
@@ -321,13 +360,9 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     "ingested"
                 );
             }
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let before = processor.pending_rounds(&db)?;
-            let mut events_out = processor.process(&mut db, &mut fetcher, now).await?;
-            let after = processor.pending_rounds(&db)?;
+            let before = store.read(|db| processor.pending_rounds(db))?;
+            let mut events_out = processor.process(&store, &mut fetcher, unix_now()).await?;
+            let after = store.read(|db| processor.pending_rounds(db))?;
             for closed in after
                 .iter()
                 .filter(|p| !before.iter().any(|b| b.round == p.round))
@@ -339,9 +374,8 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     beacon_time: closed.beacon_time,
                 });
             }
-            if let Some(coordinator) = &coordinator {
-                let mut coordinator = coordinator.lock().await;
-                match coordinator.pay_next(&mut db, &processor, &config).await {
+            if let Some(coordinator) = coordinator.as_mut() {
+                match coordinator.pay_next(&store, &processor, &config).await {
                     Ok(Some(report)) => events_out.push(Event::Paid {
                         round: report.round,
                         txid: report.txid,
@@ -350,44 +384,47 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
                     Ok(None) => {}
                     Err(e) => tracing::error!(error = %e, "payout attempt failed"),
                 }
-                if let Err(e) = coordinator.probe_keyholders(&db).await {
+                if let Err(e) = coordinator.probe_keyholders(&store).await {
                     tracing::warn!(error = %e, "keyholder health probe failed");
                 }
                 if let Err(e) = coordinator
-                    .record_openings(&mut db, &mut source, &config)
+                    .record_openings(&store, &mut source, &config)
                     .await
                 {
                     tracing::warn!(error = %e, "recording payout openings failed; retrying next pass");
                 }
             }
             if report.new_notes > 0 {
-                let mut fresh: Vec<_> = zeek_engine::campfire::messages(
-                    &db,
-                    &config.params,
-                    &state.campfire_filter,
-                    None,
-                    zeek_engine::campfire::MAX_LIMIT,
-                    false,
-                )?
-                .into_iter()
-                .filter(|m| m.height > last_campfire_height)
-                .collect();
+                let mut fresh: Vec<_> = store
+                    .read(|db| {
+                        zeek_engine::campfire::messages(
+                            db,
+                            &config.params,
+                            &state.campfire_filter,
+                            None,
+                            zeek_engine::campfire::MAX_LIMIT,
+                            false,
+                        )
+                    })?
+                    .into_iter()
+                    .filter(|m| m.height > last_campfire_height)
+                    .collect();
                 fresh.reverse();
                 if let Some(newest) = fresh.last() {
                     last_campfire_height = newest.height;
                 }
                 events_out.extend(fresh.into_iter().map(Event::Campfire));
             }
-            let board = processor.board(&db)?;
+            let board = store.read(|db| processor.board(db))?;
             if last_board.as_ref() != Some(&board) {
                 events_out.push(Event::Board(board.clone()));
                 last_board = Some(board);
             }
             Ok::<_, anyhow::Error>(events_out)
         };
-        // A backstop: the pass holds the database lock, so a call that never
-        // returns would stall the API too. Dropping the pass rolls back any
-        // open transaction; every step resumes from the database next pass.
+        // A backstop against a call that never returns. No database
+        // connection is held across a network call, so the API keeps
+        // answering either way; every step resumes from the database.
         let pass = tokio::time::timeout(PASS_TIMEOUT, pass)
             .await
             .unwrap_or_else(|_| {
@@ -398,7 +435,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         match pass {
             Ok(events_out) => {
                 for event in events_out {
-                    let _ = events.send(event);
+                    let _ = state.events.send(event);
                 }
             }
             Err(e) => {
@@ -406,10 +443,15 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
             }
         }
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(settings.poll_secs)) => {}
+            _ = tokio::time::sleep(Duration::from_secs(poll_secs)) => {}
             _ = tokio::signal::ctrl_c() => break,
         }
     }
-    tracing::info!("engine stopping");
-    Ok(())
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }

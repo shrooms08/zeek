@@ -17,6 +17,10 @@ use zeek_core::timing::TimingVerdict;
 
 use crate::error::EngineError;
 
+/// How long a connection waits for a lock held by another process (the
+/// writer's checkpoint, or a second writer such as `payout-recover`).
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Schema version written to `meta`. Version 2 added `notes.cmx`.
 pub const SCHEMA_VERSION: u32 = 2;
 
@@ -251,7 +255,53 @@ impl Db {
         Self::init(Connection::open_in_memory()?)
     }
 
+    /// Opens a read-only connection to an existing database file (the API's
+    /// read pool). In WAL mode it reads the last committed state without
+    /// waiting for the writer.
+    pub fn open_reader(path: &Path) -> Result<Self, EngineError> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        conn.execute_batch("PRAGMA query_only = ON;")?;
+        Ok(Db { conn })
+    }
+
+    /// Runs `f` inside one `BEGIN IMMEDIATE` transaction: everything `f`
+    /// writes commits together, or nothing does.
+    pub fn transaction<T>(
+        &mut self,
+        f: impl FnOnce(&Db) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        match f(self) {
+            Ok(value) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(value)
+            }
+            Err(e) => {
+                if let Err(rollback) = self.conn.execute_batch("ROLLBACK") {
+                    tracing::error!(error = %rollback, "rollback failed");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Rolls back a transaction left open by a closure that panicked, so the
+    /// connection starts clean.
+    pub fn abandon_open_transaction(&self) -> Result<(), EngineError> {
+        if !self.conn.is_autocommit() {
+            tracing::warn!("rolling back a transaction left open by an interrupted write");
+            self.conn.execute_batch("ROLLBACK")?;
+        }
+        Ok(())
+    }
+
     fn init(conn: Connection) -> Result<Self, EngineError> {
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;

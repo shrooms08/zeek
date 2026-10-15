@@ -21,9 +21,10 @@ use zeek_core::params::Network;
 use zeek_vault::lightwalletd::{self, Client};
 
 use crate::config::GameConfig;
-use crate::db::{BlockRow, Db, NoteRow};
+use crate::db::{BlockRow, NoteRow};
 use crate::decrypt::DigScanner;
 use crate::error::EngineError;
+use crate::store::Store;
 
 /// Longest wait for the next block of a block-range stream.
 pub const STREAM_STALL: Duration = Duration::from_secs(60);
@@ -180,15 +181,18 @@ pub fn branch_for(network: Network, height: u32) -> BranchId {
 
 /// Follows the chain from the stored tip (or the game's genesis) to the
 /// source's tip, handling one reorg if encountered.
+///
+/// Every network call runs with no database connection held; each block is
+/// then written (its notes and its header) in one short transaction.
 pub async fn ingest(
     source: &mut dyn ChainSource,
-    db: &mut Db,
+    store: &Store,
     scanner: &DigScanner,
     config: &GameConfig,
 ) -> Result<IngestReport, EngineError> {
     let chain_tip = source.latest_height().await?;
-    db.set_chain_tip(chain_tip)?;
-    backfill_commitments(source, db, config).await?;
+    store.write(|db| db.set_chain_tip(chain_tip))?;
+    backfill_commitments(source, store, config).await?;
     // Before genesis no block is stored; keep the tip's time so the board can
     // estimate when round 0 starts.
     if chain_tip < config.genesis_height {
@@ -198,17 +202,18 @@ pub async fn ingest(
             .into_iter()
             .next()
         {
-            db.set_chain_tip_time(u64::from(block.time))?;
+            store.write(|db| db.set_chain_tip_time(u64::from(block.time)))?;
         }
     }
+    let stored_tip = store.read(|db| db.tip())?.map(|b| b.height);
     let mut report = IngestReport {
         chain_tip,
-        stored_tip: db.tip()?.map(|b| b.height),
+        stored_tip,
         ..IngestReport::default()
     };
 
-    let mut next = match db.tip()? {
-        Some(tip) => tip.height + 1,
+    let mut next = match stored_tip {
+        Some(tip) => tip + 1,
         None => config.genesis_height,
     };
     while next <= chain_tip {
@@ -228,9 +233,9 @@ pub async fn ingest(
                     got: block.height,
                 });
             }
-            if let Some(fork) = detect_reorg(source, db, config, &block).await? {
+            if let Some(fork) = detect_reorg(source, store, config, &block).await? {
                 tracing::warn!(fork, height, "reorg detected; rolling back");
-                let discarded = db.rollback_to(fork)?;
+                let discarded = store.write(|db| db.rollback_to(fork))?;
                 if !discarded.is_empty() {
                     tracing::error!(?discarded, "rollback discarded settled rounds");
                 }
@@ -239,12 +244,13 @@ pub async fn ingest(
                 next = fork;
                 break;
             }
-            report.new_notes += store_block(source, db, scanner, config, &block).await?;
+            let notes = block_notes(source, scanner, config, &block).await?;
+            report.new_notes += store_block(store, &block, &notes)?;
             report.new_blocks += 1;
             next = height + 1;
         }
     }
-    report.stored_tip = db.tip()?.map(|b| b.height);
+    report.stored_tip = store.read(|db| db.tip())?.map(|b| b.height);
     Ok(report)
 }
 
@@ -252,10 +258,10 @@ pub async fn ingest(
 /// reading it from the note's transaction. Returns how many were filled.
 pub async fn backfill_commitments(
     source: &mut dyn ChainSource,
-    db: &mut Db,
+    store: &Store,
     config: &GameConfig,
 ) -> Result<usize, EngineError> {
-    let missing = db.notes_without_cmx()?;
+    let missing = store.read(|db| db.notes_without_cmx())?;
     for note in &missing {
         let raw = source.transaction(&note.txid).await?;
         let cmx = DigScanner::commitment_of(
@@ -265,7 +271,7 @@ pub async fn backfill_commitments(
             note.pool,
             note.action_index,
         )?;
-        db.set_note_cmx(&note.txid, note.action_index, note.pool, &cmx)?;
+        store.write(|db| db.set_note_cmx(&note.txid, note.action_index, note.pool, &cmx))?;
     }
     if !missing.is_empty() {
         tracing::info!(
@@ -280,12 +286,12 @@ pub async fn backfill_commitments(
 /// chain.
 async fn detect_reorg(
     source: &mut dyn ChainSource,
-    db: &Db,
+    store: &Store,
     config: &GameConfig,
     block: &CompactBlock,
 ) -> Result<Option<u32>, EngineError> {
     let height = block.height as u32;
-    let Some(parent) = db.block(height.wrapping_sub(1))? else {
+    let Some(parent) = store.read(|db| db.block(height.wrapping_sub(1)))? else {
         return Ok(None);
     };
     if parent.hash == block.prev_hash {
@@ -294,7 +300,7 @@ async fn detect_reorg(
     // Walk back until a stored block matches the chain.
     let mut candidate = parent.height;
     loop {
-        let Some(stored) = db.block(candidate)? else {
+        let Some(stored) = store.read(|db| db.block(candidate))? else {
             return Err(EngineError::ReorgTooDeep(candidate));
         };
         let fetched = source
@@ -313,21 +319,21 @@ async fn detect_reorg(
     }
 }
 
-/// Stores one block and the vault's notes in it; returns how many notes.
-async fn store_block(
+/// The vault's notes in one block: scans the compact outputs and fetches
+/// and decrypts the full transaction of every hit. No database access.
+async fn block_notes(
     source: &mut dyn ChainSource,
-    db: &mut Db,
     scanner: &DigScanner,
     config: &GameConfig,
     block: &CompactBlock,
-) -> Result<usize, EngineError> {
+) -> Result<Vec<NoteRow>, EngineError> {
     let height = block.height as u32;
     let malformed = |reason: String| EngineError::MalformedBlock { height, reason };
     if block.hash.len() != 32 || block.prev_hash.len() != 32 {
         return Err(malformed("hash fields must be 32 bytes".into()));
     }
     let branch = branch_for(config.params.network, height);
-    let mut stored = 0usize;
+    let mut notes = Vec::new();
     for tx in &block.vtx {
         let hits = scanner.scan_compact_tx(height, tx)?;
         if hits.is_empty() {
@@ -340,7 +346,7 @@ async fn store_block(
         let txid_hex = hex::encode(display);
         let raw = source.transaction(&txid).await?;
         for note in scanner.decrypt_full(&txid_hex, &raw, branch, &hits)? {
-            let inserted = db.insert_note(&NoteRow {
+            notes.push(NoteRow {
                 txid,
                 action_index: note.action_index,
                 pool: note.pool,
@@ -349,27 +355,48 @@ async fn store_block(
                 value: note.value,
                 memo: note.memo.to_vec(),
                 cmx: Some(note.cmx),
-            })?;
-            if inserted {
-                stored += 1;
-                tracing::info!(
-                    height,
-                    txid = %txid_hex,
-                    action = note.action_index,
-                    pool = ?note.pool,
-                    value = note.value,
-                    "received note at the vault address"
-                );
-            }
+            });
         }
     }
-    db.insert_block(&BlockRow {
-        height,
-        hash: block.hash.clone(),
-        prev_hash: block.prev_hash.clone(),
-        time: u64::from(block.time),
+    Ok(notes)
+}
+
+/// Stores one block and its notes in one transaction; returns how many notes
+/// were new.
+fn store_block(
+    store: &Store,
+    block: &CompactBlock,
+    notes: &[NoteRow],
+) -> Result<usize, EngineError> {
+    let height = block.height as u32;
+    let inserted = store.write(|db| {
+        db.transaction(|tx| {
+            let mut inserted = Vec::new();
+            for note in notes {
+                if tx.insert_note(note)? {
+                    inserted.push(note);
+                }
+            }
+            tx.insert_block(&BlockRow {
+                height,
+                hash: block.hash.clone(),
+                prev_hash: block.prev_hash.clone(),
+                time: u64::from(block.time),
+            })?;
+            Ok(inserted)
+        })
     })?;
-    Ok(stored)
+    for note in &inserted {
+        tracing::info!(
+            height,
+            txid = %note.txid_hex(),
+            action = note.action_index,
+            pool = ?note.pool,
+            value = note.value,
+            "received note at the vault address"
+        );
+    }
+    Ok(inserted.len())
 }
 
 #[cfg(test)]
@@ -388,45 +415,62 @@ mod tests {
         let memo = vault.dig_memo(0, 1, 1);
         chain.push_block(vec![chain.payment(200_000, Pool::Ironwood, memo.encode())]); // 1002
         chain.advance(3);
-        let mut db = Db::open_in_memory().expect("db");
+        let store = Store::open_in_memory().expect("db");
 
-        let report = ingest(&mut chain, &mut db, &scanner, &config)
+        let report = ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
         assert_eq!(report.new_notes, 1);
         assert_eq!(report.stored_tip, Some(1_005));
         assert_eq!(
-            db.block(1_000).expect("block").map(|b| b.height),
+            store
+                .read(|db| db.block(1_000))
+                .expect("block")
+                .map(|b| b.height),
             Some(1_000)
         );
         assert!(
-            db.block(999).expect("block").is_none(),
+            store.read(|db| db.block(999)).expect("block").is_none(),
             "nothing below genesis"
         );
-        let notes = db.notes_in_range(1_000, 1_024).expect("notes");
+        let notes = store
+            .read(|db| db.notes_in_range(1_000, 1_024))
+            .expect("notes");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].height, 1_002);
         assert_eq!(notes[0].value, 200_000);
         let cmx = notes[0].cmx.expect("commitment recorded");
         assert_eq!(
-            db.note_by_cmx(&cmx).expect("lookup").map(|n| n.value),
+            store
+                .read(|db| db.note_by_cmx(&cmx))
+                .expect("lookup")
+                .map(|n| n.value),
             Some(200_000)
         );
 
         // A schema-1 row (no commitment) is backfilled from its transaction.
-        db.clear_note_commitments().expect("null");
-        assert_eq!(db.notes_without_cmx().expect("missing").len(), 1);
-        let filled = backfill_commitments(&mut chain, &mut db, &config)
+        store.write(|db| db.clear_note_commitments()).expect("null");
+        assert_eq!(
+            store
+                .read(|db| db.notes_without_cmx())
+                .expect("missing")
+                .len(),
+            1
+        );
+        let filled = backfill_commitments(&mut chain, &store, &config)
             .await
             .expect("backfill");
         assert_eq!(filled, 1);
         assert_eq!(
-            db.notes_in_range(1_000, 1_024).expect("notes")[0].cmx,
+            store
+                .read(|db| db.notes_in_range(1_000, 1_024))
+                .expect("notes")[0]
+                .cmx,
             Some(cmx)
         );
 
         // A second pass with nothing new is a no-op.
-        let again = ingest(&mut chain, &mut db, &scanner, &config)
+        let again = ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
         assert_eq!(again.new_blocks, 0);
@@ -442,12 +486,12 @@ mod tests {
         chain.advance(5); // 100..=104
         chain.push_block(vec![chain.payment(300_000, Pool::Ironwood, [0xF6; 512])]); // 105
         chain.advance(2); // 106, 107
-        let mut db = Db::open_in_memory().expect("db");
-        ingest(&mut chain, &mut db, &scanner, &config)
+        let store = Store::open_in_memory().expect("db");
+        ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
-        assert_eq!(db.note_count().expect("count"), 1);
-        let before = db.dump().expect("dump");
+        assert_eq!(store.read(|db| db.note_count()).expect("count"), 1);
+        let before = store.read(|db| db.dump()).expect("dump");
 
         // The chain forks at 105: the note's block is replaced by an empty one
         // and a different note lands at 106.
@@ -455,19 +499,19 @@ mod tests {
         chain.advance(1); // new 105
         chain.push_block(vec![chain.payment(400_000, Pool::Ironwood, [0xF6; 512])]); // new 106
         chain.advance(3); // 107..=109
-        let report = ingest(&mut chain, &mut db, &scanner, &config)
+        let report = ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
         assert_eq!(report.reorg_from, Some(105));
         assert!(report.rolled_back_settlements.is_empty());
         assert_eq!(report.stored_tip, Some(109));
-        let notes = db.notes_in_range(100, 200).expect("notes");
+        let notes = store.read(|db| db.notes_in_range(100, 200)).expect("notes");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].height, 106);
         assert_eq!(notes[0].value, 400_000);
-        assert_ne!(db.dump().expect("dump"), before);
+        assert_ne!(store.read(|db| db.dump()).expect("dump"), before);
         assert_eq!(
-            db.block(105).expect("b").map(|b| b.hash),
+            store.read(|db| db.block(105)).expect("b").map(|b| b.hash),
             chain.block(105).map(|b| b.hash.clone())
         );
     }

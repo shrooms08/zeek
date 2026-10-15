@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use orchard::circuit::{ProvingKey, VerifyingKey};
@@ -54,6 +55,7 @@ use crate::protocol::{
     self, kind, Envelope, Expect, Refusal, SessionId, SignCommitments, SignPackages, SignRequest,
     SignShares,
 };
+use crate::store::Store;
 
 /// Participant identifier of the coordinator in envelopes.
 pub const COORDINATOR_ID: u16 = 0;
@@ -152,6 +154,53 @@ pub struct Coordinator {
     client: Option<Client>,
 }
 
+/// How long the API reuses a computed ledger (it opens the wallet database).
+const LEDGER_CACHE: Duration = Duration::from_secs(15);
+
+/// Reads the vault ledger without the coordinator (see
+/// [`Coordinator::ledger_view`]).
+#[derive(Clone)]
+pub struct LedgerView {
+    data_dir: PathBuf,
+    ufvk: UnifiedFullViewingKey,
+    cached: Arc<std::sync::Mutex<Option<(std::time::Instant, Ledger)>>>,
+}
+
+impl LedgerView {
+    fn open(&self) -> Result<(wallet::Db, zcash_client_sqlite::AccountUuid), EngineError> {
+        let db = wallet::open(&self.data_dir)?;
+        let account = wallet::find_account(&db, &self.ufvk)?
+            .ok_or_else(|| EngineError::Config("the vault wallet has no account for this vault; run `zeek-vault sync` with the vault's secrets first".into()))?;
+        Ok((db, account))
+    }
+
+    /// The ledger from the vault wallet (without syncing), reused for
+    /// [`LEDGER_CACHE`].
+    pub fn ledger(&self, store: &Store, processor: &Processor) -> Result<Ledger, EngineError> {
+        let mut cached = self
+            .cached
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((at, ledger)) = cached.as_ref() {
+            if at.elapsed() < LEDGER_CACHE {
+                return Ok(ledger.clone());
+            }
+        }
+        let (wallet_db, account) = self.open()?;
+        let report = wallet::balance(&wallet_db, account)?;
+        let ledger = store.read(|db| {
+            ledger::compute(
+                db,
+                processor,
+                report.ironwood.total.into_u64(),
+                report.chain_tip,
+            )
+        })?;
+        *cached = Some((std::time::Instant::now(), ledger.clone()));
+        Ok(ledger)
+    }
+}
+
 /// What one payout attempt did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PayoutReport {
@@ -196,13 +245,13 @@ impl Coordinator {
     /// the opened receiver and the net amount. Returns the rounds recorded.
     pub async fn record_openings(
         &self,
-        db: &mut Db,
+        store: &Store,
         source: &mut dyn crate::chain::ChainSource,
         game: &GameConfig,
     ) -> Result<Vec<u32>, EngineError> {
         let mut recorded = Vec::new();
-        for (round, txid) in db.rounds_missing_openings()? {
-            let Some(row) = db.settlement(round)? else {
+        for (round, txid) in store.read(|db| db.rounds_missing_openings())? {
+            let Some(row) = store.read(|db| db.settlement(round))? else {
                 continue;
             };
             let mut internal = hex::decode(&txid)
@@ -219,7 +268,7 @@ impl Coordinator {
             // older vault) must not block the others.
             match self.openings_of(game, &row.settlement, &txid, height, &raw) {
                 Ok(openings) => {
-                    db.set_payout_openings(round, &openings)?;
+                    store.write(|db| db.set_payout_openings(round, &openings))?;
                     tracing::info!(round, %txid, height, outputs = openings.outputs.len(), "payout openings recorded");
                     recorded.push(round);
                 }
@@ -319,12 +368,13 @@ impl Coordinator {
         })
     }
 
-    /// Probes every keyholder's health endpoint and records the result.
-    pub async fn probe_keyholders(&self, db: &Db) -> Result<(), EngineError> {
+    /// Probes every keyholder's health endpoint, then records the results.
+    pub async fn probe_keyholders(&self, store: &Store) -> Result<(), EngineError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let mut results = Vec::with_capacity(self.settings.keyholders.len());
         for keyholder in &self.settings.keyholders {
             let url = format!("{}/v1/health", keyholder.url);
             let outcome = self
@@ -335,12 +385,19 @@ impl Coordinator {
                 .await
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.error_for_status().map_err(|e| e.to_string()));
-            match outcome {
-                Ok(_) => db.set_keyholder_health(keyholder.identifier, now, true, "")?,
-                Err(e) => db.set_keyholder_health(keyholder.identifier, now, false, &e)?,
-            }
+            results.push((keyholder.identifier, outcome.err()));
         }
-        Ok(())
+        store.write(|db| {
+            db.transaction(|tx| {
+                for (identifier, error) in &results {
+                    match error {
+                        None => tx.set_keyholder_health(*identifier, now, true, "")?,
+                        Some(e) => tx.set_keyholder_health(*identifier, now, false, e)?,
+                    }
+                }
+                Ok(())
+            })
+        })
     }
 
     /// Identifiers of the configured keyholders and the signing threshold.
@@ -371,22 +428,17 @@ impl Coordinator {
 
     /// Opens the vault wallet and returns its account.
     fn vault_wallet(&self) -> Result<(wallet::Db, zcash_client_sqlite::AccountUuid), EngineError> {
-        let db = wallet::open(&self.settings.vault_data_dir)?;
-        let account = wallet::find_account(&db, &self.ufvk)?
-            .ok_or_else(|| EngineError::Config("the vault wallet has no account for this vault; run `zeek-vault sync` with the vault's secrets first".into()))?;
-        Ok((db, account))
+        self.ledger_view().open()
     }
 
-    /// Reads the ledger from the vault wallet (without syncing).
-    pub fn ledger(&self, db: &Db, processor: &Processor) -> Result<Ledger, EngineError> {
-        let (wallet_db, account) = self.vault_wallet()?;
-        let report = wallet::balance(&wallet_db, account)?;
-        ledger::compute(
-            db,
-            processor,
-            report.ironwood.total.into_u64(),
-            report.chain_tip,
-        )
+    /// A read-only view of the vault wallet for the API's ledger endpoint,
+    /// usable while a payout holds the coordinator.
+    pub fn ledger_view(&self) -> LedgerView {
+        LedgerView {
+            data_dir: self.settings.vault_data_dir.clone(),
+            ufvk: self.ufvk.clone(),
+            cached: Arc::new(std::sync::Mutex::new(None)),
+        }
     }
 
     /// Pays the earliest settlement that is still owed, if any.
@@ -397,24 +449,28 @@ impl Coordinator {
     /// payout), pays every payout output and returns one change output to the
     /// vault's internal address. See [`plan_inputs`] for the shape and the fee
     /// coverage argument.
+    ///
+    /// Wallet sync, proving, keyholder signing and broadcast all run with no
+    /// engine database connection held; the payout record is written in
+    /// short steps around them (only this loop writes payouts).
     pub async fn pay_next(
         &mut self,
-        db: &mut Db,
+        store: &Store,
         processor: &Processor,
         game: &GameConfig,
     ) -> Result<Option<PayoutReport>, EngineError> {
-        let Some(round) = next_payable_round(db)? else {
+        let Some(round) = store.read(next_payable_round)? else {
             return Ok(None);
         };
-        let row = db
-            .settlement(round)?
+        let row = store
+            .read(|db| db.settlement(round))?
             .ok_or_else(|| EngineError::Corrupt(format!("settlement {round} vanished")))?;
         if row.settlement.payouts.is_empty() {
-            db.set_plan_status(round, PlanStatus::NothingToPay)?;
+            store.write(|db| db.set_plan_status(round, PlanStatus::NothingToPay))?;
             tracing::info!(round, "settlement has no payout; marked nothing_to_pay");
             return Ok(None);
         }
-        if let Some(existing) = db.payout(round)? {
+        if let Some(existing) = store.read(|db| db.payout(round))? {
             return Err(EngineError::AlreadyPaid(vec![existing.round]));
         }
 
@@ -461,16 +517,20 @@ impl Coordinator {
             wallet::sync(&mut wallet_db, client).await?;
         }
         let report = wallet::balance(&wallet_db, account)?;
-        let ledger_before = ledger::compute(
-            db,
-            processor,
-            report.ironwood.total.into_u64(),
-            report.chain_tip,
-        )?;
+        let (ledger_before, charged) = store.read(|db| {
+            Ok::<_, EngineError>((
+                ledger::compute(
+                    db,
+                    processor,
+                    report.ironwood.total.into_u64(),
+                    report.chain_tip,
+                )?,
+                processor.payout_inputs(db, &row)?,
+            ))
+        })?;
 
         // Inputs: the round's charged notes, then the float notes the plan needs.
-        let charged: Vec<PlannedNote> = processor
-            .payout_inputs(db, &row)?
+        let charged: Vec<PlannedNote> = charged
             .into_iter()
             .map(|note| PlannedNote {
                 id: NoteId {
@@ -561,7 +621,6 @@ impl Coordinator {
         // that gives every input the confirmations the policy requires.
         let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
         let circuit = send::circuit_version_for(expected_target)?;
-        let proving_key = ProvingKey::build(circuit);
         let verifying_key = VerifyingKey::build(circuit);
         let min_confirmations = NonZeroU32::new(report.min_confirmations).ok_or_else(|| {
             EngineError::Config("confirmations policy requires at least 1".into())
@@ -591,7 +650,12 @@ impl Coordinator {
                 plan.fee
             )));
         }
-        let pczt = send::prove(pczt, &proving_key)?;
+        // Proving takes about a minute of CPU: it runs on the blocking pool so
+        // the API's workers stay free.
+        let pczt =
+            tokio::task::spawn_blocking(move || send::prove(pczt, &ProvingKey::build(circuit)))
+                .await
+                .map_err(|e| EngineError::Server(format!("proving task: {e}")))??;
 
         // Signing session.
         let mut session = [0u8; 32];
@@ -600,27 +664,34 @@ impl Coordinator {
         let sighash = Signer::new(pczt.clone())
             .map_err(|e| EngineError::Server(format!("signer: {e:?}")))?
             .shielded_sighash();
-        db.insert_payout(&PayoutRecord {
-            round,
-            state: PayoutState::Signing,
-            session: hex::encode(session),
-            txid: None,
-            height: report.chain_tip,
-            fee: fee.into_u64(),
-            signers: vec![],
+        store.write(|db| {
+            db.insert_payout(&PayoutRecord {
+                round,
+                state: PayoutState::Signing,
+                session: hex::encode(session),
+                txid: None,
+                height: report.chain_tip,
+                fee: fee.into_u64(),
+                signers: vec![],
+            })
         })?;
         let mut events = Vec::new();
         let result = self
             .sign_with_keyholders(&session, pczt, &pending, sighash, &[round], &mut events)
             .await;
-        for event in &events {
-            db.insert_keyholder_event(event)?;
-        }
+        store.write(|db| {
+            db.transaction(|tx| {
+                for event in &events {
+                    tx.insert_keyholder_event(event)?;
+                }
+                Ok(())
+            })
+        })?;
         let signed = match result {
             Ok(s) => s,
             Err(e) => {
                 // Nothing was broadcast: forget the attempt so it can be retried.
-                db.delete_payout_if_signing(round)?;
+                store.write(|db| db.delete_payout_if_signing(round))?;
                 return Err(e);
             }
         };
@@ -629,13 +700,17 @@ impl Coordinator {
         // and the broadcast is recorded before the wallet is told about it: a
         // wallet storage failure must never hide a transaction that is on
         // the network (the wallet learns about it from the chain anyway).
-        db.set_payout_signers(round, &signers)?;
+        store.write(|db| db.set_payout_signers(round, &signers))?;
         let client = self.client().await?;
         let transaction =
             send::extract_and_broadcast(client, pczt, &verifying_key, target_height).await?;
         let txid = transaction.txid().to_string();
-        db.mark_payout_broadcast(round, &txid, report.chain_tip, &signers)?;
-        db.set_plan_status(round, PlanStatus::Paid)?;
+        store.write(|db| {
+            db.transaction(|tx| {
+                tx.mark_payout_broadcast(round, &txid, report.chain_tip, &signers)?;
+                tx.set_plan_status(round, PlanStatus::Paid)
+            })
+        })?;
         tracing::info!(round, %txid, ?signers, "payout broadcast");
         if let Err(e) = send::store_transaction(&mut wallet_db, &transaction) {
             tracing::warn!(round, %txid, error = %e, "the vault wallet could not record the payout yet; it will pick it up from the chain");

@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zeek_engine::beacon::RelayFetcher;
 use zeek_engine::chain::{self, LightwalletdSource};
 use zeek_engine::config::GameConfig;
-use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::Processor;
+use zeek_engine::store::Store;
 
 use crate::error::KeyholderError;
 
@@ -78,13 +78,14 @@ impl Follower {
     }
 
     /// One ingestion + settlement pass. A failing endpoint is dropped so the
-    /// next pass tries the list again.
-    pub async fn pass(&mut self, db: &mut Db) -> Result<(), KeyholderError> {
+    /// next pass tries the list again. No connection to `store` is held
+    /// across a network call, so signing and health keep reading.
+    pub async fn pass(&mut self, store: &Store) -> Result<(), KeyholderError> {
         self.connect().await?;
         let Some((url, source)) = self.source.as_mut() else {
             return Ok(());
         };
-        let result = chain::ingest(source, db, &self.scanner, &self.config).await;
+        let result = chain::ingest(source, store, &self.scanner, &self.config).await;
         match result {
             Ok(report) => {
                 if report.new_blocks > 0 || report.new_notes > 0 || report.reorg_from.is_some() {
@@ -107,7 +108,10 @@ impl Follower {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let events = self.processor.process(db, &mut self.fetcher, now).await?;
+        let events = self
+            .processor
+            .process(store, &mut self.fetcher, now)
+            .await?;
         for event in events {
             tracing::info!(?event, "round event");
         }

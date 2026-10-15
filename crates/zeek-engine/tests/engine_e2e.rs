@@ -2,101 +2,32 @@
 //! ingestion, timing rule, beacon verification and settlement without any
 //! network, and the result is reproducible, verifiable and private.
 
-use std::collections::HashMap;
-
-use zeek_core::beacon::Beacon;
 use zeek_core::digs::RefundReason;
-use zeek_core::params::GameParams;
 use zeek_core::rounds::RoundStatus;
 use zeek_core::settle::{PayoutReason, RoundOutcome};
 use zeek_engine::api::{config_response, proof_response, round_response};
-use zeek_engine::beacon::FixedBeacons;
 use zeek_engine::chain::ingest;
 use zeek_engine::config::SETTLE_CONFIRMATIONS;
-use zeek_engine::db::{Db, Pool};
+use zeek_engine::db::Pool;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::{Event, Processor};
 use zeek_engine::proof;
+use zeek_engine::store::Store;
 use zeek_engine::synthetic::{SyntheticChain, TestVault};
 
-/// A real quicknet beacon (tests/fixtures/quicknet.json in zeek-core, from
-/// https://api.drand.sh/v2/beacons/quicknet/rounds/10000000).
-const FIXTURE_ROUND: u64 = 10_000_000;
-const FIXTURE_SIGNATURE: &str =
-    "a187c9f5800521e986b5658924696682071ce7ae965486e8fd08bc2c4758bdbb9ed9ecb7beee392a38214e321ecd434f";
-
-const GENESIS: u32 = 5_000;
-
-/// Start time of round 0 such that its bound drand round is the fixture round.
-fn start_time(params: &GameParams) -> u64 {
-    let beacon_time = params.drand.genesis_time + (FIXTURE_ROUND - 1) * params.drand.period_secs;
-    beacon_time - params.round_duration_secs().expect("duration") - params.reveal_delay_secs
-}
-
-fn fixture_beacons() -> FixedBeacons {
-    let mut beacons = HashMap::new();
-    beacons.insert(
-        FIXTURE_ROUND,
-        Beacon {
-            round: FIXTURE_ROUND,
-            signature: FIXTURE_SIGNATURE.to_owned(),
-        },
-    );
-    FixedBeacons { beacons }
-}
-
-struct Scenario {
-    vault: TestVault,
-    chain: SyntheticChain,
-}
-
-/// Round 0 with three valid digs (alice 0.005 on tile 3, bob 0.003 on tile
-/// 3, carol 0.004 on tile 17), one wrong-round dig, one dust dig and one
-/// text-memo note, followed by the blocks the timing rule and the
-/// confirmation policy need.
-fn scenario(delay_close_secs: u64) -> Scenario {
-    let vault = TestVault::new(42);
-    let config = vault.config(GENESIS);
-    let mut chain = SyntheticChain::new(&vault, GENESIS - 3, start_time(&config.params) - 75);
-    chain.advance(3); // GENESIS-3 .. GENESIS-1 (operator float era)
-    assert_eq!(chain.next_height(), GENESIS);
-    chain.push_block(vec![]); // GENESIS: start block, time == start_time
-    chain.advance(4);
-    chain.push_block(vec![
-        chain.payment(500_000, Pool::Ironwood, vault.dig_memo(0, 3, 1).encode()),
-        chain.change(1_000),
-    ]);
-    chain.push_block(vec![chain.payment(
-        300_000,
-        Pool::Ironwood,
-        vault.dig_memo(0, 3, 2).encode(),
-    )]);
-    chain.advance(2);
-    chain.push_block(vec![
-        chain.payment(400_000, Pool::Ironwood, vault.dig_memo(0, 17, 3).encode()),
-        chain.payment(200_000, Pool::Ironwood, vault.dig_memo(7, 17, 3).encode()),
-        chain.payment(50_000, Pool::Ironwood, vault.dig_memo(0, 1, 4).encode()),
-        chain.payment(150_000, Pool::Ironwood, [0xF6; 512]),
-    ]);
-    while chain.next_height() < GENESIS + config.params.blocks_per_round {
-        chain.advance(1);
-    }
-    chain.delay(delay_close_secs);
-    // Post-close blocks for the timing rule plus the confirmation depth.
-    chain.advance(config.params.mtp_window + SETTLE_CONFIRMATIONS);
-    Scenario { vault, chain }
-}
+mod common;
+use common::{fixture_beacons, scenario, start_time, Scenario, FIXTURE_ROUND, GENESIS};
 
 #[tokio::test]
 async fn round_is_ingested_settled_served_and_reproducible() {
     let Scenario { vault, mut chain } = scenario(0);
     let config = vault.config(GENESIS);
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let mut processor = Processor::new(config.clone());
     let mut beacons = fixture_beacons();
 
-    let report = ingest(&mut chain, &mut db, &scanner, &config)
+    let report = ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     assert_eq!(
@@ -105,14 +36,18 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     );
 
     // Before the beacon is published nothing settles.
-    let (_, _, _) = processor.status(&db, 0).expect("status");
+    let (_, _, _) = processor
+        .status(&store.reader().expect("reader"), 0)
+        .expect("status");
     let beacon_time = start_time(&config.params) + 600 + 900;
     let events = processor
-        .process(&mut db, &mut beacons, beacon_time - 1)
+        .process(&store, &mut beacons, beacon_time - 1)
         .await
         .expect("process");
     assert!(events.is_empty());
-    let pending = processor.pending_rounds(&db).expect("pending");
+    let pending = processor
+        .pending_rounds(&store.reader().expect("reader"))
+        .expect("pending");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].drand_round, FIXTURE_ROUND);
     assert_eq!(pending[0].beacon_time, beacon_time);
@@ -120,7 +55,7 @@ async fn round_is_ingested_settled_served_and_reproducible() {
 
     // Once published, the round settles.
     let events = processor
-        .process(&mut db, &mut beacons, beacon_time + 5)
+        .process(&store, &mut beacons, beacon_time + 5)
         .await
         .expect("process");
     assert!(matches!(
@@ -132,7 +67,10 @@ async fn round_is_ingested_settled_served_and_reproducible() {
         }
     ));
     assert!(matches!(events[1], Event::Settled { round: 0, .. }));
-    let row = db.settlement(0).expect("row").expect("settled");
+    let row = store
+        .read(|db| db.settlement(0))
+        .expect("row")
+        .expect("settled");
     let RoundOutcome::Drawn {
         treasure_tile,
         cache_triggered,
@@ -167,7 +105,9 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     assert_eq!(refunds.len(), 1);
     assert_eq!(refunds[0].net, 200_000 - 5_000 - 5_000);
     // The payout transaction must spend exactly the four charged notes.
-    let inputs = processor.payout_inputs(&db, &row).expect("inputs");
+    let inputs = processor
+        .payout_inputs(&store.reader().expect("reader"), &row)
+        .expect("inputs");
     assert_eq!(inputs.len(), 4);
     assert!(inputs.iter().all(|n| n.value >= 200_000));
     assert!(inputs
@@ -191,7 +131,8 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     // API views.
     let config_view = config_response(&config);
     assert_eq!(config_view.genesis_height, GENESIS);
-    let round_view = round_response(&processor, &db, 0).expect("round view");
+    let round_view =
+        round_response(&processor, &store.reader().expect("reader"), 0).expect("round view");
     assert_eq!(round_view.status, RoundStatus::Settled);
     let settled = round_view.settled.as_ref().expect("settled view");
     assert_eq!(settled.rules_version, 2);
@@ -200,14 +141,18 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     assert_eq!(settled.tile_totals[17], 400_000);
     assert_eq!(settled.treasure_tile, Some(treasure_tile));
     assert_eq!(settled.payouts, s.payouts);
-    let board = processor.board(&db).expect("board");
+    let board = processor
+        .board(&store.reader().expect("reader"))
+        .expect("board");
     assert_eq!(board.round, 1, "the tip is in round 1 now");
     assert_eq!(board.cache, s.new_cache);
-    let pending = processor.pending_rounds(&db).expect("pending");
+    let pending = processor
+        .pending_rounds(&store.reader().expect("reader"))
+        .expect("pending");
     assert!(pending.is_empty());
 
     // Proof bundle recomputes to the identical settlement with zeek-core only.
-    let bundle = proof_response(&processor, &db, 0)
+    let bundle = proof_response(&processor, &store.reader().expect("reader"), 0)
         .expect("proof")
         .expect("settled");
     let recomputed = proof::recompute(&bundle).expect("recompute");
@@ -215,7 +160,11 @@ async fn round_is_ingested_settled_served_and_reproducible() {
         serde_json::to_string(&recomputed).expect("json"),
         serde_json::to_string(&bundle.settlement).expect("json")
     );
-    assert!(proof_response(&processor, &db, 1).expect("proof").is_none());
+    assert!(
+        proof_response(&processor, &store.reader().expect("reader"), 1)
+            .expect("proof")
+            .is_none()
+    );
 
     // Privacy: no API output contains an opened payout receiver (the players'
     // receivers are [player; 43]); the sealed bytes are there instead.
@@ -247,29 +196,29 @@ async fn round_is_ingested_settled_served_and_reproducible() {
 
     // Idempotent restart: a fresh processor over the same database adds nothing,
     // and a fresh database over the same chain reproduces the state byte for byte.
-    let dump = db.dump().expect("dump");
+    let dump = store.read(|db| db.dump()).expect("dump");
     let mut restarted = Processor::new(config.clone());
     let events = restarted
-        .process(&mut db, &mut beacons, beacon_time + 1_000)
+        .process(&store, &mut beacons, beacon_time + 1_000)
         .await
         .expect("process");
     assert!(events.is_empty());
-    let again = ingest(&mut chain, &mut db, &scanner, &config)
+    let again = ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     assert_eq!(again.new_blocks, 0);
-    assert_eq!(db.dump().expect("dump"), dump);
+    assert_eq!(store.read(|db| db.dump()).expect("dump"), dump);
 
-    let mut fresh = Db::open_in_memory().expect("db");
-    ingest(&mut chain, &mut fresh, &scanner, &config)
+    let fresh = Store::open_in_memory().expect("db");
+    ingest(&mut chain, &fresh, &scanner, &config)
         .await
         .expect("ingest");
     let mut fresh_processor = Processor::new(config.clone());
     fresh_processor
-        .process(&mut fresh, &mut fixture_beacons(), beacon_time + 5)
+        .process(&fresh, &mut fixture_beacons(), beacon_time + 5)
         .await
         .expect("process");
-    assert_eq!(fresh.dump().expect("dump"), dump);
+    assert_eq!(fresh.read(|db| db.dump()).expect("dump"), dump);
 }
 
 #[tokio::test]
@@ -278,25 +227,33 @@ async fn cache_carry_over_is_the_first_previous_cache() {
     let mut config = vault.config(GENESIS);
     config.initial_cache_zat = 777_000;
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let mut processor = Processor::new(config.clone());
-    assert_eq!(processor.cache_balance(&db).expect("cache"), 777_000);
+    assert_eq!(
+        processor
+            .cache_balance(&store.reader().expect("reader"))
+            .expect("cache"),
+        777_000
+    );
     assert_eq!(config_response(&config).initial_cache_zat, 777_000);
-    ingest(&mut chain, &mut db, &scanner, &config)
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     let beacon_time = start_time(&config.params) + 600 + 900;
     processor
-        .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+        .process(&store, &mut fixture_beacons(), beacon_time + 5)
         .await
         .expect("process");
-    let row = db.settlement(0).expect("row").expect("settled");
+    let row = store
+        .read(|db| db.settlement(0))
+        .expect("row")
+        .expect("settled");
     assert_eq!(row.settlement.previous_cache, 777_000);
     assert!(
         row.settlement.new_cache >= 777_000 + 59_250,
         "rake lands on top of the carry-over"
     );
-    let bundle = proof_response(&processor, &db, 0)
+    let bundle = proof_response(&processor, &store.reader().expect("reader"), 0)
         .expect("proof")
         .expect("settled");
     assert_eq!(
@@ -312,17 +269,19 @@ async fn late_window_is_voided_and_refunded() {
     let Scenario { vault, mut chain } = scenario(1_200);
     let config = vault.config(GENESIS);
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let mut processor = Processor::new(config.clone());
     let mut beacons = fixture_beacons();
-    ingest(&mut chain, &mut db, &scanner, &config)
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
-    let (_, status, _) = processor.status(&db, 0).expect("status");
+    let (_, status, _) = processor
+        .status(&store.reader().expect("reader"), 0)
+        .expect("status");
     assert_eq!(status, RoundStatus::Voided);
 
     let events = processor
-        .process(&mut db, &mut beacons, 0)
+        .process(&store, &mut beacons, 0)
         .await
         .expect("process");
     assert!(matches!(
@@ -333,7 +292,10 @@ async fn late_window_is_voided_and_refunded() {
             ..
         }
     ));
-    let row = db.settlement(0).expect("row").expect("settled");
+    let row = store
+        .read(|db| db.settlement(0))
+        .expect("row")
+        .expect("settled");
     assert_eq!(row.settlement.rake, 0);
     assert!(row
         .settlement
@@ -349,7 +311,7 @@ async fn late_window_is_voided_and_refunded() {
         row.settlement.new_cache, 200_000,
         "forfeits still feed the cache"
     );
-    let bundle = proof_response(&processor, &db, 0)
+    let bundle = proof_response(&processor, &store.reader().expect("reader"), 0)
         .expect("proof")
         .expect("settled");
     assert!(bundle.beacon.is_none());
@@ -364,7 +326,7 @@ async fn http_api_serves_the_round() {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
-    use tokio::sync::{broadcast, Mutex};
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
     use zeek_engine::api::{router, AppState, HealthResponse, PendingResponse, RoundResponse};
     use zeek_engine::proof::ProofBundle;
@@ -372,23 +334,23 @@ async fn http_api_serves_the_round() {
     let Scenario { vault, mut chain } = scenario(0);
     let config = vault.config(GENESIS);
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let mut processor = Processor::new(config.clone());
-    ingest(&mut chain, &mut db, &scanner, &config)
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     let beacon_time = start_time(&config.params) + 600 + 900;
     processor
-        .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+        .process(&store, &mut fixture_beacons(), beacon_time + 5)
         .await
         .expect("process");
     let (events, _) = broadcast::channel(8);
     let state = Arc::new(AppState {
         processor,
-        db: Mutex::new(db),
+        store: Arc::new(store),
         events,
         started: std::time::Instant::now(),
-        coordinator: None,
+        ledger: None,
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),
@@ -540,23 +502,26 @@ async fn text_memo_digs_count_from_the_activation_height() {
         [(base, 2u32, 1usize, 500_000u64), (v3, 3, 2, 300_000)]
     {
         let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-        let mut db = Db::open_in_memory().expect("db");
+        let store = Store::open_in_memory().expect("db");
         let mut processor = Processor::new(config.clone());
-        ingest(&mut chain, &mut db, &scanner, &config)
+        ingest(&mut chain, &store, &scanner, &config)
             .await
             .expect("ingest");
         processor
-            .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+            .process(&store, &mut fixture_beacons(), beacon_time + 5)
             .await
             .expect("process");
-        let row = db.settlement(0).expect("row").expect("settled");
+        let row = store
+            .read(|db| db.settlement(0))
+            .expect("row")
+            .expect("settled");
         assert_eq!(row.rules_version, expected_version);
         assert_eq!(row.settlement.forfeited, forfeited);
         let gross: u64 = if valid_digs == 2 { 300_000 } else { 100_000 };
         assert_eq!(row.settlement.pot, gross - valid_digs as u64 * 5_000);
-        let view = round_response(&processor, &db, 0).expect("view");
+        let view = round_response(&processor, &store.reader().expect("reader"), 0).expect("view");
         assert_eq!(view.digs, valid_digs);
-        let bundle = proof_response(&processor, &db, 0)
+        let bundle = proof_response(&processor, &store.reader().expect("reader"), 0)
             .expect("proof")
             .expect("settled");
         assert_eq!(bundle.version, proof::PROOF_VERSION);
@@ -586,12 +551,14 @@ async fn board_reports_prize_pool_and_gross_total() {
     ]);
     chain.advance(2);
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let processor = Processor::new(config.clone());
-    ingest(&mut chain, &mut db, &scanner, &config)
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
-    let board = processor.board(&db).expect("board");
+    let board = processor
+        .board(&store.reader().expect("reader"))
+        .expect("board");
     assert_eq!(board.round, 0);
     assert_eq!(board.digs, 2);
     assert_eq!(board.gross_dug_zat, 200_000);
@@ -832,7 +799,7 @@ async fn campfire_messages_and_shouts() {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
-    use tokio::sync::{broadcast, Mutex};
+    use tokio::sync::broadcast;
     use tower::ServiceExt;
     use zeek_engine::api::{router, AppState, CampfireResponse};
 
@@ -863,22 +830,25 @@ async fn campfire_messages_and_shouts() {
     }
     chain.advance(config.params.mtp_window + SETTLE_CONFIRMATIONS);
     let scanner = DigScanner::new(config.incoming_viewing_key().expect("ivk"));
-    let mut db = Db::open_in_memory().expect("db");
+    let store = Store::open_in_memory().expect("db");
     let mut processor = Processor::new(config.clone());
-    ingest(&mut chain, &mut db, &scanner, &config)
+    ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
     let beacon_time = start_time(&config.params) + 600 + 900;
     processor
-        .process(&mut db, &mut fixture_beacons(), beacon_time + 5)
+        .process(&store, &mut fixture_beacons(), beacon_time + 5)
         .await
         .expect("process");
-    let row = db.settlement(0).expect("row").expect("settled");
+    let row = store
+        .read(|db| db.settlement(0))
+        .expect("row")
+        .expect("settled");
     assert_eq!(row.rules_version, 4);
     assert_eq!(row.settlement.shouts, 110_000);
     assert_eq!(row.settlement.shout_fees, 10_000);
     assert_eq!(row.settlement.forfeited, 10_000, "the undersized shout");
-    let bundle = proof_response(&processor, &db, 0)
+    let bundle = proof_response(&processor, &store.reader().expect("reader"), 0)
         .expect("proof")
         .expect("settled");
     assert_eq!(bundle.rules_version, Some(4));
@@ -900,10 +870,10 @@ async fn campfire_messages_and_shouts() {
     let app = router(
         Arc::new(AppState {
             processor,
-            db: Mutex::new(db),
+            store: Arc::new(store),
             events,
             started: std::time::Instant::now(),
-            coordinator: None,
+            ledger: None,
             relay: None,
             campfire_filter: filter,
             proof_limiter: zeek_engine::relay::RateLimiter::new(10),
