@@ -87,6 +87,9 @@ async fn board_serves_landing_digs_separately() {
         started: std::time::Instant::now(),
         ledger: None,
         chain_servers: None,
+        stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            zeek_engine::api::MAX_STREAMS,
+        )),
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),

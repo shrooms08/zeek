@@ -26,14 +26,14 @@
 //! dropped when idle; `GET /v1/relay/stats` exposes aggregate counters only.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -293,8 +293,12 @@ impl RateLimiter {
 pub struct RelayState {
     backend: Box<dyn RelayBackend>,
     limiter: RateLimiter,
+    global: RateLimiter,
     stats: RelayStats,
 }
+
+/// The all-clients ceiling, as a multiple of the per-client rate.
+const GLOBAL_RATE_FACTOR: u32 = 10;
 
 impl RelayState {
     /// A relay over `backend` allowing `rate_per_minute` requests per address.
@@ -302,6 +306,7 @@ impl RelayState {
         RelayState {
             backend,
             limiter: RateLimiter::new(rate_per_minute),
+            global: RateLimiter::new(rate_per_minute.saturating_mul(GLOBAL_RATE_FACTOR)),
             stats: RelayStats::default(),
         }
     }
@@ -377,13 +382,14 @@ async fn rate_limit(
     request: Request,
     next: Next,
 ) -> Response {
-    let address = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|info| info.0.ip())
-        .unwrap_or(IpAddr::from([0, 0, 0, 0]));
+    let address = crate::edge::ClientIp::of(&request);
     state.stats.requests.fetch_add(1, Ordering::Relaxed);
-    if !state.limiter.allow(address, Instant::now()).await {
+    let now = Instant::now();
+    // Per client, and a ceiling for everyone together so that many clients
+    // cannot get the shared upstream servers to throttle this host.
+    let allowed = state.limiter.allow(address, now).await
+        && state.global.allow(IpAddr::from([0, 0, 0, 0]), now).await;
+    if !allowed {
         state.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
         return error(
             StatusCode::TOO_MANY_REQUESTS,

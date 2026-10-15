@@ -16,6 +16,7 @@ use zeek_engine::config::{EngineSettings, GameConfig};
 use zeek_engine::coordinator::{Coordinator, CoordinatorSettings};
 use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
+use zeek_engine::edge;
 use zeek_engine::mempool::{self, Landing, LightwalletdMempool};
 use zeek_engine::processor::{Event, Processor};
 use zeek_engine::relay::{LightwalletdBackend, RelayState};
@@ -251,6 +252,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         started: Instant::now(),
         ledger: coordinator.as_ref().map(Coordinator::ledger_view),
         chain_servers: Some(pool.clone()),
+        stream_slots: Arc::new(tokio::sync::Semaphore::new(zeek_engine::api::MAX_STREAMS)),
         relay: Some(Arc::new(RelayState::new(
             Box::new(LightwalletdBackend::new(pool.clone())),
             RelayState::rate_from_env(),
@@ -280,18 +282,49 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
     let listener = tokio::net::TcpListener::bind(&settings.bind)
         .await
         .with_context(|| format!("binding {}", settings.bind))?;
-    tracing::info!(bind = %settings.bind, "API listening");
+    tracing::info!(bind = %settings.bind, "local API listening");
     let app = router(state.clone(), &settings.cors_origins);
-    let server = tokio::spawn(async move {
+    let local = edge::local(app.clone());
+    let mut servers = tokio::task::JoinSet::new();
+    servers.spawn(async move {
         axum::serve(
             listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            local.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
     });
+    if let Some((bind, secret_file)) = &settings.public {
+        let secret = std::fs::read_to_string(secret_file)
+            .with_context(|| format!("reading the proxy secret {}", secret_file.display()))?;
+        let public = edge::public(app, edge::ProxySecret::new(&secret)?);
+        let listener = tokio::net::TcpListener::bind(bind)
+            .await
+            .with_context(|| format!("binding {bind}"))?;
+        tracing::info!(bind = %bind, "public API listening (proxy secret required)");
+        servers.spawn(async move {
+            axum::serve(
+                listener,
+                public.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .with_graceful_shutdown(async {
+                let _ = tokio::signal::ctrl_c().await;
+            })
+            .await
+        });
+    }
+    let server = async move {
+        while let Some(result) = servers.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(anyhow::Error::from(e)),
+                Err(e) => return Err(anyhow::Error::from(e)),
+            }
+        }
+        Ok(())
+    };
 
     // The chain loop runs as its own task: the store's guards are not
     // `Send`, so the compiler rejects any database access held across an
@@ -307,7 +340,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
     ));
     tokio::select! {
         result = server => {
-            if let Ok(Err(e)) = result {
+            if let Err(e) = result {
                 tracing::error!(error = %e, "API server stopped");
             }
         }

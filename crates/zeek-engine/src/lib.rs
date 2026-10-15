@@ -25,6 +25,7 @@ pub mod config;
 pub mod coordinator;
 pub mod db;
 pub mod decrypt;
+pub mod edge;
 pub mod error;
 pub mod identity;
 pub mod ledger;

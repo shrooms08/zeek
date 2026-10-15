@@ -93,6 +93,10 @@ impl GameConfig {
 /// verified public servers of the game's network).
 pub const LIGHTWALLETD_URL_VAR: &str = "ZEEK_LIGHTWALLETD_URL";
 pub const GAME_CONFIG_VAR: &str = "ZEEK_GAME_CONFIG";
+/// Address of the public listener (the tunnel's target); unset disables it.
+pub const PUBLIC_BIND_VAR: &str = "ZEEK_PUBLIC_BIND";
+/// File holding the secret the Pages Function sends on every request.
+pub const PROXY_SECRET_FILE_VAR: &str = "ZEEK_PROXY_SECRET_FILE";
 pub const DB_PATH_VAR: &str = "ZEEK_ENGINE_DB";
 pub const BIND_VAR: &str = "ZEEK_ENGINE_BIND";
 pub const CORS_VAR: &str = "ZEEK_ENGINE_CORS";
@@ -118,6 +122,8 @@ pub struct EngineSettings {
     pub game_config_path: PathBuf,
     pub db_path: PathBuf,
     pub bind: String,
+    /// Public listener and the file holding its proxy secret.
+    pub public: Option<(String, PathBuf)>,
     /// Allowed CORS origins; empty means CORS headers are not sent.
     pub cors_origins: Vec<String>,
     pub relays: Vec<String>,
@@ -164,6 +170,15 @@ impl EngineSettings {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("data/zeek-engine.sqlite")),
             bind: var(BIND_VAR)?.unwrap_or_else(|| "127.0.0.1:8787".to_owned()),
+            public: match var(PUBLIC_BIND_VAR)? {
+                Some(bind) => Some((
+                    bind,
+                    var(PROXY_SECRET_FILE_VAR)?
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(".secrets/proxy-secret")),
+                )),
+                None => None,
+            },
             cors_origins: list(var(CORS_VAR)?, ""),
             relays: list(var(RELAYS_VAR)?, DEFAULT_RELAYS),
             poll_secs,

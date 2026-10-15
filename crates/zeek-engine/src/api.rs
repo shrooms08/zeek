@@ -43,6 +43,8 @@ pub struct AppState {
     pub ledger: Option<LedgerView>,
     /// The engine's `lightwalletd` servers (for the status page).
     pub chain_servers: Option<Arc<zeek_vault::pool::Pool>>,
+    /// Open `/v1/stream` connections allowed at once.
+    pub stream_slots: Arc<tokio::sync::Semaphore>,
     /// Present when this engine relays chain data to browser wallets.
     pub relay: Option<Arc<crate::relay::RelayState>>,
     /// Campfire display filter.
@@ -731,11 +733,11 @@ fn bad(status: StatusCode, message: impl Into<String>) -> ApiError {
 /// storing it; proofs are public data.
 async fn submit_proof(
     State(state): State<Arc<AppState>>,
-    connect: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    client: Option<axum::Extension<crate::edge::ClientIp>>,
     Json(body): Json<SubmitProof>,
 ) -> Result<(StatusCode, Json<StoredProof>), ApiError> {
     use base64::Engine;
-    let address = connect.map_or(std::net::IpAddr::from([0, 0, 0, 0]), |c| c.0 .0.ip());
+    let address = client.map_or(std::net::IpAddr::from([0, 0, 0, 0]), |c| c.0 .0);
     if !state.proof_limiter.allow(address, Instant::now()).await {
         return Err(bad(
             StatusCode::TOO_MANY_REQUESTS,
@@ -848,8 +850,28 @@ async fn get_proof(
     }))
 }
 
+/// Most simultaneous `/v1/stream` connections.
+pub const MAX_STREAMS: usize = 2_000;
+
+/// Largest client message accepted on `/v1/stream` (clients only listen).
+const MAX_CLIENT_MESSAGE: usize = 1_024;
+
 async fn stream(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    let Ok(slot) = state.stream_slots.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody {
+                error: "too many live connections; the app falls back to polling".into(),
+            }),
+        )
+            .into_response();
+    };
+    ws.max_message_size(MAX_CLIENT_MESSAGE)
+        .max_frame_size(MAX_CLIENT_MESSAGE)
+        .on_upgrade(move |socket| async move {
+            handle_socket(socket, state).await;
+            drop(slot);
+        })
 }
 
 async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
@@ -873,8 +895,10 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         tokio::select! {
             incoming = socket.recv() => {
                 match incoming {
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
-                    Some(Ok(_)) => {}
+                    // Pings are answered by the library; the stream is
+                    // one-way, so any data from the client ends it.
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                    _ => return,
                 }
             }
             event = rx.recv() => {
