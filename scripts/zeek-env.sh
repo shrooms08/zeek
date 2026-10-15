@@ -9,6 +9,8 @@
 
 ZEEK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export PATH="$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# shellcheck source=scripts/launchd.sh
+. "$ZEEK_ROOT/scripts/launchd.sh"
 
 # Cloudflare deployment written by scripts/cloudflare-setup.sh.
 DEPLOY_FILE="$ZEEK_ROOT/apps/web/.zeek-deploy"
@@ -70,7 +72,7 @@ is_daemon() {
 }
 
 agent_loaded() {
-  launchctl print "$DOMAIN/dev.zeek.$1" >/dev/null 2>&1
+  launchd_present "$DOMAIN/dev.zeek.$1"
 }
 
 # Writes ~/Library/LaunchAgents/dev.zeek.NAME.plist.

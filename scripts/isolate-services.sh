@@ -49,6 +49,8 @@ fail() {
   printf 'isolate-services: %s\n' "$*" >&2
   exit 1
 }
+# shellcheck source=scripts/launchd.sh
+. "$REPO/scripts/launchd.sh"
 
 # The checks below also run without sudo (they need no privileges), so they
 # can be tried first; everything after them needs root.
@@ -261,8 +263,9 @@ daemon() {
   } >"$plist"
   chown root:wheel "$plist"
   chmod 644 "$plist"
-  launchctl bootout "system/$label" 2>/dev/null || true
-  launchctl bootstrap system "$plist"
+  launchd_start system "$label" "$plist" ||
+    fail "could not start $label: $LAUNCHD_ERROR. Its log: $logdir/stdout.log; its state: sudo launchctl print system/$label"
+  say "started $label"
 }
 
 # Rewrites a node config's paths into its protected directory.
@@ -286,7 +289,8 @@ make_dir "$BASE/mainnet" root:wheel 755
 # ---- stop what runs as you before its files move ----
 
 for label in dev.zeek.engine dev.zeek.keyholder-1 dev.zeek.keyholder-2 dev.zeek.keyholder-3; do
-  launchctl bootout "gui/$OWNER_UID/$label" 2>/dev/null || true
+  launchd_stop "gui/$OWNER_UID/$label" ||
+    fail "$label (your old agent) did not stop; see: launchctl print gui/$OWNER_UID/$label"
   rm -f "/Users/$OWNER/Library/LaunchAgents/$label.plist"
 done
 for port in 8787 8788 9101 9102 9103; do

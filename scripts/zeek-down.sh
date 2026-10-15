@@ -18,7 +18,8 @@ fi
 # Reverse start order: the publisher first, so it does not republish.
 for agent in demo-digger publish tunnel-relay tunnel-engine relay engine keyholder-3 keyholder-2 keyholder-1 caffeinate; do
   if agent_loaded "$agent"; then
-    launchctl bootout "$DOMAIN/dev.zeek.$agent" 2>/dev/null || true
+    launchd_stop "$DOMAIN/dev.zeek.$agent" ||
+      fail "$agent did not stop within ${LAUNCHD_STOP_WAIT}s; see: launchctl print $DOMAIN/dev.zeek.$agent"
     say "stopped $agent"
   fi
   rm -f "$AGENTS_DIR/dev.zeek.$agent.plist"
@@ -35,8 +36,10 @@ fi
 
 if [ "$STOP_DAEMONS" = yes ]; then
   for service in engine keyholder-1 keyholder-2 keyholder-3; do
-    if is_daemon "$service"; then
+    if is_daemon "$service" && launchd_present "system/dev.zeek.$service"; then
       sudo launchctl bootout "system/dev.zeek.$service" 2>/dev/null || true
+      launchd_wait_gone "system/dev.zeek.$service" ||
+        fail "$service did not stop within ${LAUNCHD_STOP_WAIT}s; see: sudo launchctl print system/dev.zeek.$service"
       say "stopped $service (daemon; it starts again at boot, or with: sudo launchctl bootstrap system /Library/LaunchDaemons/dev.zeek.$service.plist)"
     fi
   done

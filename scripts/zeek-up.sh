@@ -64,7 +64,7 @@ if [ "$DEMO" = on ]; then
   write_agent demo-digger Background "$LOG_DIR/demo-digger.log" "" -- \
     /bin/sh "$ZEEK_ROOT/scripts/demo-digger.sh" run "$(cat "$RUN_DIR/demo-digger")"
 else
-  launchctl bootout "$DOMAIN/dev.zeek.demo-digger" 2>/dev/null || true
+  launchd_stop "$DOMAIN/dev.zeek.demo-digger" || fail "the demo digger did not stop"
   rm -f "$AGENTS_DIR/dev.zeek.demo-digger.plist"
 fi
 
@@ -81,16 +81,8 @@ say "Starting services…"
 for agent in $AGENTS; do
   plist="$AGENTS_DIR/dev.zeek.$agent.plist"
   [ -f "$plist" ] || continue
-  if agent_loaded "$agent"; then
-    launchctl bootout "$DOMAIN/dev.zeek.$agent" 2>/dev/null || true
-    # bootout returns before the job is fully gone.
-    i=0
-    while agent_loaded "$agent" && [ "$i" -lt 20 ]; do
-      sleep 0.5
-      i=$((i + 1))
-    done
-  fi
-  launchctl bootstrap "$DOMAIN" "$plist"
+  launchd_start "$DOMAIN" "dev.zeek.$agent" "$plist" ||
+    fail "could not start $agent: $LAUNCHD_ERROR (see $LOG_DIR and: launchctl print $DOMAIN/dev.zeek.$agent)"
 done
 # The published markers belong to the tunnels just replaced.
 rm -f "$RUN_DIR"/*.published
