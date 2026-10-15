@@ -230,6 +230,15 @@ export class Pocket {
     return this.call("history", undefined);
   }
 
+  /**
+   * Checks the passphrase against the stored wallet (the wallet must be
+   * unlocked); resolves `true` or rejects with `bad_passphrase`. Nothing
+   * secret comes back.
+   */
+  confirmPassphrase(passphrase: string): Promise<true> {
+    return this.call("confirmPassphrase", { passphrase });
+  }
+
   /** Returns the 24-word phrase after checking the passphrase. */
   exportSeed(passphrase: string): Promise<string> {
     return this.call("exportSeed", { passphrase });

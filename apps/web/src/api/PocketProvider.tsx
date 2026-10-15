@@ -4,6 +4,7 @@
  * syncing) is a reducer every screen reads.
  */
 
+import { autoDigRunning } from "../state/autoDigFlag";
 import { Pocket } from "@zeek/pocket";
 import {
   createContext,
@@ -51,7 +52,8 @@ export function PocketProvider({ children }: { children: ReactNode }) {
   }, [pocket]);
   // Auto-lock (security review M4): the keys leave memory after 15 minutes
   // without a tap, click or key, except while a dig is being sent (its
-  // batches can wait minutes between payments).
+  // batches can wait minutes between payments) or a confirmed Pro auto-dig
+  // runs (it stops by itself; src/lib/autoDig.ts).
   const lastActive = useRef(Date.now());
   const unlocked = wallet.kind === "unlocked";
   useEffect(() => {
@@ -63,7 +65,7 @@ export function PocketProvider({ children }: { children: ReactNode }) {
     const events = ["pointerdown", "keydown"] as const;
     for (const e of events) window.addEventListener(e, touch, { passive: true });
     const id = window.setInterval(() => {
-      const digging = window.location.pathname.startsWith("/dig/");
+      const digging = window.location.pathname.startsWith("/dig/") || autoDigRunning();
       if (!digging && Date.now() - lastActive.current > IDLE_LOCK_MS) {
         void (async () => {
           await (await pocket()).lock();

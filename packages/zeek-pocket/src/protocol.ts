@@ -95,6 +95,7 @@ export interface Methods {
   send: [SendOptions, SendResult];
   history: [undefined, HistoryEntry[]];
   exportSeed: [{ passphrase: string }, string];
+  confirmPassphrase: [{ passphrase: string }, true];
   buildDigRequest: [DigRequestOptions, Omit<AnyWalletDig, "qrSvg">];
   shout: [ShoutOptions, SendResult];
   buildShoutRequest: [ShoutRequestOptions, Omit<AnyWalletShout, "qrSvg">];

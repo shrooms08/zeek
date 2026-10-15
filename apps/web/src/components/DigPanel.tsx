@@ -3,15 +3,21 @@
  * "Dig separately", optional message, total with fees, <DigButton>, wallet
  * choice. Empty, it shrinks to "Tap tiles to dig" and Auto-pick (1B).
  * `compact` is the mobile bottom sheet (1C).
+ *
+ * Lite (the default) is that flow. Pro adds <ProTools> (ALL, quick
+ * amounts, MAX, auto-dig) and "Your digs"; the mode is remembered in this
+ * browser. A running auto-dig shows its Stop button in either mode.
  */
 
 import { motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { digTotal } from "../lib/digPlan";
+import type { DigMode } from "../lib/digMode";
 import { AMOUNT_STEP, formatZec, parseZec, PRESETS, type Zat } from "../lib/money";
 import { EASE } from "../motion/tokens";
 import { Icon } from "./Icon";
+import { AutoDigCard, ModeSwitch, ProTools, YourDigs } from "./ProTools";
 import { DigButton } from "./ui";
 
 /** Bytes of a message as the memo stores it (UTF-8). */
@@ -135,6 +141,13 @@ export interface DigPanelProps {
   onAutoPick: () => void;
   onClear: () => void;
   onDig: () => void;
+  mode: DigMode;
+  onMode: (mode: DigMode) => void;
+  onTiles: (tiles: number[]) => void;
+  /** The Pocket's spendable balance, when it is unlocked (Pro's MAX, auto-dig). */
+  spendable: Zat | undefined;
+  /** One round's length in ms. */
+  roundMs: number;
 }
 
 function SeparateSwitch({
@@ -174,6 +187,22 @@ export function DigPanel(p: DigPanelProps) {
   const [showMessage, setShowMessage] = useState(p.message !== "");
   const compact = p.compact === true;
   const state = p.closed ? "closed" : n === 0 ? "empty" : tooLong ? "closed" : "idle";
+  const pro = p.mode === "pro";
+  const modeSwitch = <ModeSwitch mode={p.mode} onChange={p.onMode} />;
+  const proTools = pro && (
+    <ProTools
+      tiles={p.tiles}
+      amountEach={p.amountEach}
+      minDig={p.minDig}
+      separate={p.separate}
+      spendable={p.spendable}
+      closed={p.closed}
+      roundMs={p.roundMs}
+      compact={compact}
+      onTiles={p.onTiles}
+      onAmount={p.onAmount}
+    />
+  );
 
   const message = p.campfire && (!compact || showMessage) && (
     <label className="flex flex-col gap-1">
@@ -220,7 +249,10 @@ export function DigPanel(p: DigPanelProps) {
         className="zk-panel-compact flex flex-col gap-2"
         aria-label="Dig"
         data-testid="dig-panel"
+        data-mode={p.mode}
       >
+        <AutoDigCard />
+        {modeSwitch}
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-2 text-white font-extrabold flex-1">
             <Icon name="tile" size={18} />
@@ -238,6 +270,7 @@ export function DigPanel(p: DigPanelProps) {
           <SeparateSwitch on={p.separate} onChange={p.onSeparate} short />
         </div>
         <AmountPicker value={p.amountEach} min={p.minDig} onChange={p.onAmount} compact />
+        {proTools}
         {message}
         <DigButton
           state={state}
@@ -268,13 +301,28 @@ export function DigPanel(p: DigPanelProps) {
             </Link>
           </span>
         </div>
+        {pro && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-white">Your digs</summary>
+            <div className="max-h-48 overflow-y-auto mt-2">
+              <YourDigs />
+            </div>
+          </details>
+        )}
       </section>
     );
   }
 
-  if (n === 0) {
+  if (n === 0 && !pro) {
     return (
-      <section className="flex flex-col gap-4" aria-label="Dig" data-testid="dig-panel">
+      <section
+        className="flex flex-col gap-4"
+        aria-label="Dig"
+        data-testid="dig-panel"
+        data-mode={p.mode}
+      >
+        <AutoDigCard />
+        {modeSwitch}
         <DigButton state={state} count={0} onClick={p.onDig} closedText={p.closedText} />
         <button
           type="button"
@@ -302,13 +350,16 @@ export function DigPanel(p: DigPanelProps) {
 
   return (
     <motion.section
-      className="panel zk-lift p-6 flex flex-col gap-4"
+      className="panel zk-lift p-6 flex flex-col gap-4 zk-panel-scroll"
       aria-label="Dig"
       data-testid="dig-panel"
+      data-mode={p.mode}
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: EASE.out }}
     >
+      <AutoDigCard />
+      {modeSwitch}
       <div className="flex items-end justify-between">
         <div>
           <div className="label flex items-center gap-2">
@@ -321,6 +372,7 @@ export function DigPanel(p: DigPanelProps) {
         </button>
       </div>
       <AmountPicker value={p.amountEach} min={p.minDig} onChange={p.onAmount} />
+      {proTools}
       <div className="flex gap-3 flex-wrap items-center justify-between">
         <button
           type="button"
@@ -334,7 +386,11 @@ export function DigPanel(p: DigPanelProps) {
         <SeparateSwitch on={p.separate} onChange={p.onSeparate} short={false} />
       </div>
       {message}
-      <div className="border-t hair pt-4 flex items-end justify-between gap-3" data-testid="total">
+      <div
+        className="border-t hair pt-4 flex items-end justify-between gap-3"
+        data-testid="total"
+        hidden={pro}
+      >
         <div className="min-w-0">
           <div className="label flex items-center gap-2">
             <Icon name="coin" size={16} /> Total
@@ -360,6 +416,7 @@ export function DigPanel(p: DigPanelProps) {
           Other wallet
         </Link>
       </div>
+      {pro && <YourDigs />}
     </motion.section>
   );
 }

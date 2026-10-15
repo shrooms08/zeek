@@ -25,6 +25,7 @@ import { RevealLine } from "../components/RevealLine";
 import { TimeLeft } from "../components/TimeLeft";
 import { Loading, Offline } from "../components/ui";
 import { autoPick, cacheStage } from "../lib/digPlan";
+import { loadDigMode, saveDigMode, type DigMode } from "../lib/digMode";
 import { formatZec, zat } from "../lib/money";
 import { useMedia } from "../lib/useMedia";
 import { prefersReducedMotion, useNow } from "../lib/useNow";
@@ -61,6 +62,7 @@ export function FieldScreen() {
   const wide = useMedia("(min-width: 640px)");
   const [onboarding, setOnboarding] = useState(() => !hasSeenOnboarding());
   const [prizePulse, setPrizePulse] = useState(0);
+  const [mode, setMode] = useState<DigMode>(loadDigMode);
 
   // A round this browser dug in has closed: the reveal takes over once.
   useEffect(() => {
@@ -238,6 +240,20 @@ export function FieldScreen() {
       onAutoPick={doAutoPick}
       onClear={draft.clear}
       onDig={dig}
+      mode={mode}
+      onMode={(m) => {
+        setMode(m);
+        saveDigMode(m);
+      }}
+      onTiles={draft.setTiles}
+      spendable={
+        unlocked && balance.data !== undefined ? zat(balance.data.spendable_zat) : undefined
+      }
+      roundMs={
+        (config.data?.params.blocks_per_round ?? 24) *
+        (config.data?.params.target_spacing_secs ?? 25) *
+        1000
+      }
     />
   );
 

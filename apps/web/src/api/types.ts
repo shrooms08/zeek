@@ -141,6 +141,7 @@ export interface EngineConfig {
     dig_fee_zat?: number;
     marginal_fee_zat: number;
     blocks_per_round: number;
+    target_spacing_secs: number;
     genesis_height: number;
     rake_bps: number;
     cache_odds: number;

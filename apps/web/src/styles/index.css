@@ -916,6 +916,11 @@ body {
 .zk-field-mobile {
   padding-bottom: 236px;
 }
+/* Pro's sheet is taller: it scrolls within 62% of the screen, and the page
+   leaves room so the whole field can scroll above it. */
+.zk-field-mobile:has(.zk-sheet [data-mode="pro"]) {
+  padding-bottom: 62vh;
+}
 .zk-sheet {
   position: fixed;
   left: 0;
@@ -925,6 +930,8 @@ body {
   background: var(--color-night);
   border-top: var(--border-panel) solid var(--color-white);
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  max-height: 62vh;
+  overflow-y: auto;
 }
 .zk-dig {
   background: var(--color-white);
@@ -1320,4 +1327,30 @@ body {
   .zk-amount {
     flex-wrap: wrap;
   }
+}
+
+/* Lite / Pro switch on the dig panel. */
+.zk-mode {
+  border: 2px solid var(--color-white);
+  align-self: flex-start;
+}
+.zk-mode-option {
+  min-height: 36px;
+  padding: 0 14px;
+  font-weight: 800;
+  color: var(--color-fog);
+  background: transparent;
+}
+.zk-mode-option:focus-visible {
+  outline: 3px dashed var(--color-white);
+  outline-offset: 2px;
+}
+.zk-mode-on {
+  background: var(--color-white);
+  color: var(--color-night);
+}
+/* The desktop panel scrolls inside the viewport when Pro makes it tall. */
+.zk-panel-scroll {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
 }

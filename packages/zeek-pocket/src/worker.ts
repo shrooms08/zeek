@@ -630,6 +630,15 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   history() {
     return Promise.resolve(needCore().history() as HistoryEntry[]);
   },
+  async confirmPassphrase({ passphrase }) {
+    const c = needCore();
+    const stored = await storage.load();
+    if (stored === undefined) {
+      throw new PocketError("no_wallet", "no wallet in this browser");
+    }
+    c.confirmPassphrase(stored.seedEnvelope, passphrase);
+    return true;
+  },
   async exportSeed({ passphrase }) {
     const stored = await storage.load();
     if (stored === undefined) {
