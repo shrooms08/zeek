@@ -31,7 +31,8 @@ pub struct AppState {
     /// Classifies this node's notes for payout verification.
     pub processor: Processor,
     pub identity: Identity,
-    pub dkg: DkgState,
+    /// The DKG inbox (also served alone by `zeek-keyholder dkg`).
+    pub dkg: Arc<DkgNode>,
     pub signer: SignerState,
     pub keys: RwLock<Option<Arc<KeyMaterial>>>,
     /// This node's own chain view; the follower writes, handlers read.
@@ -75,16 +76,29 @@ impl IntoResponse for Reply {
     }
 }
 
-/// Builds the router.
-pub fn router(state: Arc<AppState>) -> Router {
+/// What the DKG endpoints need: this node's config and its inbox.
+pub struct DkgNode {
+    pub config: KeyholderConfig,
+    pub state: DkgState,
+}
+
+/// The DKG endpoints alone.
+pub fn dkg_router(node: Arc<DkgNode>) -> Router {
     Router::new()
         .route("/v1/dkg/round1", post(dkg_round1))
         .route("/v1/dkg/round2", post(dkg_round2))
         .route("/v1/dkg/confirm", post(dkg_confirm))
+        .with_state(node)
+}
+
+/// Builds the router.
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/v1/sign/request", post(sign_request))
         .route("/v1/sign/round2", post(sign_round2))
         .route("/v1/health", get(health))
-        .with_state(state)
+        .with_state(state.clone())
+        .merge(dkg_router(state.dkg.clone()))
 }
 
 fn bad_request(e: impl std::fmt::Display) -> Response {
@@ -98,22 +112,22 @@ fn bad_request(e: impl std::fmt::Display) -> Response {
         .into_response()
 }
 
-async fn dkg_round1(State(state): State<Arc<AppState>>, Json(env): Json<Envelope>) -> Response {
-    match state.dkg.accept_round1(&state.config, &env).await {
+async fn dkg_round1(State(node): State<Arc<DkgNode>>, Json(env): Json<Envelope>) -> Response {
+    match node.state.accept_round1(&node.config, &env).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => bad_request(e),
     }
 }
 
-async fn dkg_round2(State(state): State<Arc<AppState>>, Json(env): Json<Envelope>) -> Response {
-    match state.dkg.accept_round2(&state.config, &env).await {
+async fn dkg_round2(State(node): State<Arc<DkgNode>>, Json(env): Json<Envelope>) -> Response {
+    match node.state.accept_round2(&node.config, &env).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => bad_request(e),
     }
 }
 
-async fn dkg_confirm(State(state): State<Arc<AppState>>, Json(env): Json<Envelope>) -> Response {
-    match state.dkg.accept_confirm(&state.config, &env).await {
+async fn dkg_confirm(State(node): State<Arc<DkgNode>>, Json(env): Json<Envelope>) -> Response {
+    match node.state.accept_confirm(&node.config, &env).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => bad_request(e),
     }

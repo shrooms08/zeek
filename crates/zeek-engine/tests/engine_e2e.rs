@@ -129,8 +129,25 @@ async fn round_is_ingested_settled_served_and_reproducible() {
     }
 
     // API views.
-    let config_view = config_response(&config);
+    let config_view = config_response(&config, true);
     assert_eq!(config_view.genesis_height, GENESIS);
+    assert_eq!(
+        config_view.vault_address.as_deref(),
+        Some(config.vault_address.as_str())
+    );
+    // Readiness mode (digging off) withholds everything a payment needs.
+    let closed = config_response(&config, false);
+    assert!(!closed.digging_enabled);
+    assert!(
+        closed.vault_address.is_none()
+            && closed.sealing_public_key.is_none()
+            && closed.uivk.is_none()
+    );
+    let json = serde_json::to_string(&closed).expect("json");
+    assert!(
+        !json.contains(&config.vault_address),
+        "the address never appears"
+    );
     let round_view =
         round_response(&processor, &store.reader().expect("reader"), 0).expect("round view");
     assert_eq!(round_view.status, RoundStatus::Settled);
@@ -235,7 +252,7 @@ async fn cache_carry_over_is_the_first_previous_cache() {
             .expect("cache"),
         777_000
     );
-    assert_eq!(config_response(&config).initial_cache_zat, 777_000);
+    assert_eq!(config_response(&config, true).initial_cache_zat, 777_000);
     ingest(&mut chain, &store, &scanner, &config)
         .await
         .expect("ingest");
@@ -352,6 +369,7 @@ async fn http_api_serves_the_round() {
         started: std::time::Instant::now(),
         ledger: None,
         chain_servers: None,
+        digging: true,
         stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
             zeek_engine::api::MAX_STREAMS,
         )),
@@ -879,6 +897,7 @@ async fn campfire_messages_and_shouts() {
             started: std::time::Instant::now(),
             ledger: None,
             chain_servers: None,
+            digging: true,
             stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
                 zeek_engine::api::MAX_STREAMS,
             )),

@@ -149,6 +149,8 @@ export interface PinnedVault {
 }
 
 export interface EngineConfig {
+  /** False when digs are closed (mainnet readiness): the vault is withheld. */
+  digging_enabled?: boolean;
   params: {
     network: string;
     min_dig_zat: number;

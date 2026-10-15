@@ -223,7 +223,20 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         "engine starting"
     );
 
-    let coordinator = match CoordinatorSettings::from_env()? {
+    let digging = settings.digging(config.params.network);
+    if !digging {
+        tracing::warn!(network = ?config.params.network, "READINESS MODE: digging is off; the vault address is withheld and nothing is paid or served publicly");
+    }
+    let coordinator_settings = CoordinatorSettings::from_env()?;
+    anyhow::ensure!(
+        digging || coordinator_settings.is_none(),
+        "digging is off: the payout coordinator must not run (unset ZEEK_KEYHOLDERS)"
+    );
+    anyhow::ensure!(
+        digging || settings.public.is_none(),
+        "digging is off: the engine must not be exposed (unset ZEEK_PUBLIC_BIND)"
+    );
+    let coordinator = match coordinator_settings {
         Some(settings) => {
             let coordinator = Coordinator::new(settings, pool.clone())?;
             tracing::info!(
@@ -252,6 +265,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         started: Instant::now(),
         ledger: coordinator.as_ref().map(Coordinator::ledger_view),
         chain_servers: Some(pool.clone()),
+        digging,
         stream_slots: Arc::new(tokio::sync::Semaphore::new(zeek_engine::api::MAX_STREAMS)),
         relay: Some(Arc::new(RelayState::new(
             Box::new(LightwalletdBackend::new(pool.clone())),

@@ -93,6 +93,10 @@ impl GameConfig {
 /// verified public servers of the game's network).
 pub const LIGHTWALLETD_URL_VAR: &str = "ZEEK_LIGHTWALLETD_URL";
 pub const GAME_CONFIG_VAR: &str = "ZEEK_GAME_CONFIG";
+/// `on` or `off`: whether digs are open. Default: on for testnet, off for
+/// mainnet (mainnet digging is enabled only by following
+/// docs/mainnet-runbook.md).
+pub const DIGGING_VAR: &str = "ZEEK_DIGGING";
 /// Address of the public listener (the tunnel's target); unset disables it.
 pub const PUBLIC_BIND_VAR: &str = "ZEEK_PUBLIC_BIND";
 /// File holding the secret the Pages Function sends on every request.
@@ -122,6 +126,8 @@ pub struct EngineSettings {
     pub game_config_path: PathBuf,
     pub db_path: PathBuf,
     pub bind: String,
+    /// `ZEEK_DIGGING`, when set.
+    pub digging: Option<bool>,
     /// Public listener and the file holding its proxy secret.
     pub public: Option<(String, PathBuf)>,
     /// Allowed CORS origins; empty means CORS headers are not sent.
@@ -170,6 +176,16 @@ impl EngineSettings {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("data/zeek-engine.sqlite")),
             bind: var(BIND_VAR)?.unwrap_or_else(|| "127.0.0.1:8787".to_owned()),
+            digging: match var(DIGGING_VAR)?.as_deref() {
+                None => None,
+                Some("on") => Some(true),
+                Some("off") => Some(false),
+                Some(other) => {
+                    return Err(EngineError::Config(format!(
+                        "{DIGGING_VAR} must be `on` or `off`, got `{other}`"
+                    )))
+                }
+            },
             public: match var(PUBLIC_BIND_VAR)? {
                 Some(bind) => Some((
                     bind,
@@ -187,6 +203,12 @@ impl EngineSettings {
 }
 
 impl EngineSettings {
+    /// Whether digs are open on `network` (see [`DIGGING_VAR`]).
+    pub fn digging(&self, network: zeek_core::params::Network) -> bool {
+        self.digging
+            .unwrap_or(network == zeek_core::params::Network::Test)
+    }
+
     /// The `lightwalletd` servers to use on `network`.
     pub fn servers(&self, network: zeek_core::params::Network) -> Vec<String> {
         if self.lightwalletd_servers.is_empty() {

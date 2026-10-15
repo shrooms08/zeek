@@ -210,6 +210,7 @@ async fn api_reads_stay_fast_while_the_pass_is_stalled() {
         started: Instant::now(),
         ledger: None,
         chain_servers: None,
+        digging: true,
         stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
             zeek_engine::api::MAX_STREAMS,
         )),

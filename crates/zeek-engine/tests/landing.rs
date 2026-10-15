@@ -87,6 +87,7 @@ async fn board_serves_landing_digs_separately() {
         started: std::time::Instant::now(),
         ledger: None,
         chain_servers: None,
+        digging: true,
         stream_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(
             zeek_engine::api::MAX_STREAMS,
         )),

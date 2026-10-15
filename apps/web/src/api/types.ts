@@ -146,8 +146,10 @@ export interface EngineConfig {
     cache_odds: number;
     campfire?: { activation_height: number; min_shout_zat: number };
   };
-  vault_address: string;
-  uivk: string;
+  /** False when digs are closed (mainnet readiness): the vault is withheld. */
+  digging_enabled?: boolean;
+  vault_address?: string;
+  uivk?: string;
   genesis_height: number;
 }
 

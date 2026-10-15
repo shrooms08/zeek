@@ -43,6 +43,8 @@ pub struct AppState {
     pub ledger: Option<LedgerView>,
     /// The engine's `lightwalletd` servers (for the status page).
     pub chain_servers: Option<Arc<zeek_vault::pool::Pool>>,
+    /// Whether digs are open (false: mainnet readiness, vault withheld).
+    pub digging: bool,
     /// Open `/v1/stream` connections allowed at once.
     pub stream_slots: Arc<tokio::sync::Semaphore>,
     /// Present when this engine relays chain data to browser wallets.
@@ -122,9 +124,16 @@ pub struct StoredProof {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigResponse {
     pub params: GameParams,
-    pub vault_address: String,
-    pub sealing_public_key: SealingPublicKey,
-    pub uivk: String,
+    /// Whether this engine accepts digs. When false (mainnet readiness) the
+    /// vault's address, sealing key and viewing key are withheld, so nobody
+    /// can send funds to a vault that is not open.
+    pub digging_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealing_public_key: Option<SealingPublicKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uivk: Option<String>,
     pub genesis_height: u32,
     /// Confirmations the engine waits for after the timing-rule blocks.
     pub settle_confirmations: u32,
@@ -281,13 +290,15 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
     router
 }
 
-/// The public config response.
-pub fn config_response(config: &GameConfig) -> ConfigResponse {
+/// The public config response (`digging`: whether digs are open).
+pub fn config_response(config: &GameConfig, digging: bool) -> ConfigResponse {
+    let open = |v| if digging { Some(v) } else { None };
     ConfigResponse {
         params: config.params.clone(),
-        vault_address: config.vault_address.clone(),
-        sealing_public_key: config.sealing_public_key.clone(),
-        uivk: config.uivk.clone(),
+        digging_enabled: digging,
+        vault_address: open(config.vault_address.clone()),
+        sealing_public_key: digging.then(|| config.sealing_public_key.clone()),
+        uivk: open(config.uivk.clone()),
         genesis_height: config.genesis_height,
         settle_confirmations: SETTLE_CONFIRMATIONS,
         initial_cache_zat: config.initial_cache_zat,
@@ -295,7 +306,10 @@ pub fn config_response(config: &GameConfig) -> ConfigResponse {
 }
 
 async fn config(State(state): State<Arc<AppState>>) -> ApiResult<ConfigResponse> {
-    Ok(Json(config_response(state.processor.config())))
+    Ok(Json(config_response(
+        state.processor.config(),
+        state.digging,
+    )))
 }
 
 async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardResponse> {
