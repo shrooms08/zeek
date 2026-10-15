@@ -3,9 +3,15 @@
  * check passes; the second-source line is honest (unavailable without a
  * second source, then compared against the second relay).
  */
-import { engine, expect, loadState, shot, test, until } from "./support";
+import { APP, engine, expect, IS_PUBLIC, loadState, shot, test, until } from "./support";
 
-const SECOND_RELAY = "http://127.0.0.1:8790";
+// The deployed site's own relay (behind its proxy). Locally, zeek-up's relay
+// on 8790 only serves the proxy, so run an open one for this step:
+//   target/release/zeek-verify relay --lightwalletd https://testnet.zec.rocks:443 \
+//     --bind 127.0.0.1:8791 --cors http://localhost:4174
+const SECOND_RELAY = IS_PUBLIC
+  ? `${APP}/relay`
+  : (process.env.ZEEK_E2E_SECOND_RELAY ?? "http://127.0.0.1:8791");
 
 test("past rounds, round detail, and every applicable check passes", async ({ page }) => {
   const state = loadState();
