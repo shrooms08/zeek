@@ -134,3 +134,15 @@ created directly in its own user's directory.
   fields and API tokens were searched across every commit. None was found.
   The one 24-word match is the sample backup phrase drawn in
   `design/mono/Zeek More.html`.
+
+## Phase 8b additions (self-assessed)
+
+These were not part of the independent review; each is a decision.
+
+| Change | Risk | Decision |
+| --- | --- | --- |
+| Copy words (recovery phrase) | The phrase reaches the system clipboard, which other apps and clipboard history can read. | **Accepted with mitigations.** The warning sits next to the button; after 60 s the clipboard is overwritten if it still holds the phrase (never with a permission prompt); the phrase is never logged, stored or sent; the write-it-down check stays. Clipboard history managers may keep a copy, which the warning covers. |
+| Pro auto-dig | The Pocket spends in later rounds without a passphrase per dig, and the 15-minute auto-lock waits while a run is active. | **Accepted.** The passphrase is checked once at the start (the worker's `confirmPassphrase`; nothing secret returned), the spend cap and N rounds bound the total, and the run stops on low balance, the cap, a whole round hidden, any error, or Stop. It lives only in the open tab. |
+| Edge cache in the proxy | A poisoned or stale cached answer. | **Accepted.** Only three route shapes (share pages and cards, round proof bundles, stored proofs) are cached, only when the engine itself marks the answer `public` with a max-age, keyed by the full public URL; the engine is reached only through the secret-guarded tunnel from KV. Bundles still awaiting their payout are `no-store`. |
+| drand relays in `connect-src` | Four more hosts the page may contact. | **Accepted.** They are drand's own public relays, read only for the beacon of a saved round, and the BLS signature is verified locally regardless of what they answer. |
+| Replay snapshot | Publishing round data in the build. | **Accepted.** It is the same public data the engine serves (`/v1/rounds/{n}/proof`, `/v1/config`); `snapshot-rounds.mjs` refuses an engine that withholds its vault (mainnet before digging opens). |
