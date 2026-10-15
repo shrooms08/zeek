@@ -182,6 +182,11 @@ export default function DigPocketScreen() {
       }
       return (
         <Modal title="Check your dig" onClose={close} testId="dig-confirm">
+          {config.data?.params.network === "main" && (
+            <p className="text-fog text-sm mb-3">
+              18+. Not available where prohibited. Digging uses real ZEC.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="zk-stat p-3">
               <div className="label flex items-center gap-2">

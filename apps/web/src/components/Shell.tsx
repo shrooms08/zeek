@@ -84,6 +84,11 @@ export function Shell({ children }: { children: ReactNode }) {
           <span className="hidden sm:inline">Menu</span>
         </button>
       </header>
+      {config.data?.params.network === "main" && (
+        <p className="px-4 sm:px-10 py-1 text-fog text-xs" data-testid="legal-notice">
+          18+. Not available where prohibited.
+        </p>
+      )}
       <div id="main" className="flex-1 flex flex-col">
         {children}
       </div>

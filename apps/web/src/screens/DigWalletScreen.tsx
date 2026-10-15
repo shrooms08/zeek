@@ -132,6 +132,11 @@ export default function DigWalletScreen() {
       }
       return (
         <Modal title="Where should winnings go?" onClose={close} testId="wallet-address">
+          {config.data?.params.network === "main" && (
+            <p className="text-fog text-sm mb-3">
+              18+. Not available where prohibited. Digging uses real ZEC.
+            </p>
+          )}
           <p className="label mb-2">Step 1 of 3</p>
           <label className="flex flex-col gap-2">
             <span className="label">Private address</span>
