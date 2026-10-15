@@ -223,6 +223,14 @@ impl SyntheticChain {
         Ok(height)
     }
 
+    /// A serialized transaction holding one output per `spec`, built for the
+    /// next block but not mined: what a mempool stream would carry. Mine it
+    /// later with [`SyntheticChain::push_raw_transaction`].
+    pub fn unmined_transaction(&mut self, spec: &TxSpec) -> Vec<u8> {
+        let (_txid, raw, _compact) = self.build_transaction(self.next_height, spec);
+        raw
+    }
+
     /// Change to the vault's internal address (invisible to the external IVK).
     pub fn change(&self, value: u64) -> TxSpec {
         TxSpec {

@@ -747,6 +747,17 @@ impl Db {
         self.query_notes("height >= ?1 AND height < ?2", &[&start, &end])
     }
 
+    /// Whether any note of transaction `txid` (internal byte order) is
+    /// stored, i.e. the transaction was mined and ingested. Uses the index
+    /// behind `UNIQUE (txid, action_index, pool)`.
+    pub fn has_note_from_tx(&self, txid: &[u8; 32]) -> Result<bool, EngineError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM notes WHERE txid = ?1)",
+            [txid.as_slice()],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Notes stored before schema version 2, whose commitment is not recorded yet.
     pub fn notes_without_cmx(&self) -> Result<Vec<NoteRow>, EngineError> {
         self.query_notes("cmx IS NULL", &[])

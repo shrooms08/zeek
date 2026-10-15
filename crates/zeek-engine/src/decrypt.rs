@@ -143,6 +143,59 @@ impl DigScanner {
         Ok(action.cmx().to_bytes())
     }
 
+    /// Trial-decrypts every Ironwood and legacy Orchard action of the full
+    /// transaction `raw` (parsed under `branch`), with no compact hits to
+    /// guide it: used for mempool transactions, which have no compact form.
+    /// Returns the txid (internal byte order) and the outputs that pay the
+    /// vault, Ironwood first, each pool in action order.
+    pub fn decrypt_all(
+        &self,
+        raw: &[u8],
+        branch: BranchId,
+    ) -> Result<([u8; 32], Vec<FullNote>), EngineError> {
+        let tx = Transaction::read(raw, branch).map_err(|e| EngineError::MalformedTransaction {
+            txid: "(unparsed)".to_owned(),
+            reason: e.to_string(),
+        })?;
+        let txid: [u8; 32] = *tx.txid().as_ref();
+        let mut notes = Vec::new();
+        for pool in [Pool::Ironwood, Pool::Orchard] {
+            let bundle = match pool {
+                Pool::Ironwood => tx.ironwood_bundle(),
+                Pool::Orchard => tx.orchard_bundle(),
+            };
+            let Some(bundle) = bundle else {
+                continue;
+            };
+            for (index, action) in bundle.actions().iter().enumerate() {
+                let decrypted = match pool {
+                    Pool::Ironwood => {
+                        try_note_decryption(&IronwoodDomain::for_action(action), &self.ivk, action)
+                    }
+                    Pool::Orchard => {
+                        try_note_decryption(&OrchardDomain::for_action(action), &self.ivk, action)
+                    }
+                };
+                let Some((note, _address, memo)) = decrypted else {
+                    continue;
+                };
+                let action_index =
+                    u16::try_from(index).map_err(|_| EngineError::MalformedTransaction {
+                        txid: hex::encode(txid),
+                        reason: "more than 65535 actions".into(),
+                    })?;
+                notes.push(FullNote {
+                    pool,
+                    action_index,
+                    value: note.value().inner(),
+                    memo,
+                    cmx: action.cmx().to_bytes(),
+                });
+            }
+        }
+        Ok((txid, notes))
+    }
+
     /// Decrypts the hit outputs of the full transaction `raw` (mined under
     /// `branch`), returning value and memo for each.
     pub fn decrypt_full(
