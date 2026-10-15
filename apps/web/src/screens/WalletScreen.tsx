@@ -16,6 +16,7 @@ import { CountUp } from "../motion/CountUp";
 import { EASE } from "../motion/tokens";
 import { checkPayoutAddress, shortAddress } from "../lib/address";
 import { formatZec, parseZec, toNumber, zat } from "../lib/money";
+import { browserClearEnv, clearIfUnchanged, CLEAR_AFTER_MS } from "../lib/clipboard";
 import { checkPositions, passphraseStrength } from "../lib/passphrase";
 import { formatTimeOfDay } from "../lib/time";
 import { useNow } from "../lib/useNow";
@@ -162,6 +163,66 @@ function CreateCard() {
   );
 }
 
+/** Pending best-effort clear of a copied phrase (one at a time). */
+let clearTimer: number | undefined;
+
+/**
+ * Copies the recovery phrase, with the warning next to it. After 60 s the
+ * clipboard is cleared again if it still holds the phrase (best effort; the
+ * timer outlives this screen on purpose). The phrase is never logged,
+ * stored or sent.
+ */
+function CopyPhrase({ words }: { words: string[] }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (state !== "copied") return;
+    const id = window.setTimeout(() => {
+      setState("idle");
+    }, 2_000);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [state]);
+  const copy = () => {
+    const phrase = words.join(" ");
+    navigator.clipboard.writeText(phrase).then(
+      () => {
+        setState("copied");
+        if (clearTimer !== undefined) window.clearTimeout(clearTimer);
+        clearTimer = window.setTimeout(() => {
+          clearTimer = undefined;
+          void clearIfUnchanged(browserClearEnv(), phrase);
+        }, CLEAR_AFTER_MS);
+      },
+      () => {
+        setState("failed");
+      },
+    );
+  };
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+      <button
+        type="button"
+        className="btn flex items-center justify-center gap-2 shrink-0"
+        onClick={copy}
+        data-testid="copy-phrase"
+      >
+        {state === "copied" ? (
+          <Icon name="checkink" size={16} draw strokeWidth={3} />
+        ) : (
+          <Icon name="copy" size={16} />
+        )}
+        <span aria-live="polite">{state === "copied" ? "Copied" : "Copy words"}</span>
+      </button>
+      <p className="text-fog text-sm" data-testid="copy-phrase-warning">
+        {state === "failed"
+          ? "Couldn’t copy here. Write them down instead."
+          : "Anyone who gets these words gets your coins. Clipboards can be read by other apps."}
+      </p>
+    </div>
+  );
+}
+
 function BackupWords({ words, onDone }: { words: string[]; onDone: () => void }) {
   const [stage, setStage] = useState<"show" | "check">("show");
   const [positions] = useState(() => checkPositions(random, words.length));
@@ -186,6 +247,7 @@ function BackupWords({ words, onDone }: { words: string[]; onDone: () => void })
             </li>
           ))}
         </ol>
+        <CopyPhrase words={words} />
         <button
           type="button"
           className="btn btn-primary w-full"
