@@ -29,3 +29,6 @@ docs/examples/phase7b/.video/
 
 # wrangler local state and build output
 .wrangler/
+
+# Local wrangler secrets (never committed)
+.dev.vars

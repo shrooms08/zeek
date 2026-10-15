@@ -1,0 +1,10 @@
+# Cloudflare Pages project for the public Zeek site (written by
+# scripts/cloudflare-setup.sh). The KV namespace holds the current quick
+# tunnel hostnames; see functions/_lib/proxy.ts.
+name = "playzeek"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "ZEEK"
+id = "777fe8c57a5d4f66bab8ccca389bc39a"
