@@ -26,3 +26,6 @@ docs/examples/phase7b/.video/
 
 # Mainnet vault config: not published until digging opens (docs/mainnet-runbook.md).
 /config/game.mainnet.json
+
+# wrangler local state and build output
+.wrangler/

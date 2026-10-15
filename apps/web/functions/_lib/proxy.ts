@@ -76,7 +76,15 @@ const ISOLATION: Record<string, string> = {
 };
 
 /** Response headers copied from the upstream. */
-const PASS_RESPONSE = ["content-type", "cache-control", "location", "last-modified", "etag"];
+// The engine marks share images `cross-origin` so other sites can show them.
+const PASS_RESPONSE = [
+  "content-type",
+  "cache-control",
+  "location",
+  "last-modified",
+  "etag",
+  "cross-origin-resource-policy",
+];
 
 /** Request headers copied to the upstream. */
 const PASS_REQUEST = [

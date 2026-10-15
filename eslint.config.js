@@ -11,6 +11,7 @@ export default tseslint.config(
       "target/**",
       "crates/**",
       "vendor/**",
+      "**/.wrangler/**",
     ],
   },
   js.configs.recommended,
