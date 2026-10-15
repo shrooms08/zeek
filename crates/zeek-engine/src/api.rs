@@ -55,6 +55,18 @@ pub struct AppState {
     /// Rate limit of win proof submissions (verification costs about a
     /// second of CPU each).
     pub proof_limiter: crate::relay::RateLimiter,
+    /// Digs seen in the mempool, not mined yet (see [`crate::mempool`]).
+    pub landing: Arc<crate::mempool::Landing>,
+}
+
+/// `GET /v1/board`: the board, plus the digs still in the mempool as a
+/// separate field that nothing on the board counts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardResponse {
+    #[serde(flatten)]
+    pub board: BoardState,
+    /// Digs to the vault seen in the mempool, oldest first.
+    pub landing: Vec<crate::mempool::LandingDig>,
 }
 
 /// Win proof submissions per minute per client address.
@@ -278,9 +290,15 @@ async fn config(State(state): State<Arc<AppState>>) -> ApiResult<ConfigResponse>
     Ok(Json(config_response(state.processor.config())))
 }
 
-async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardState> {
-    let db = lock(&state).await;
-    Ok(Json(state.processor.board(&db)?))
+async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardResponse> {
+    let board = {
+        let db = lock(&state).await;
+        state.processor.board(&db)?
+    };
+    Ok(Json(BoardResponse {
+        board,
+        landing: state.landing.digs(),
+    }))
 }
 
 async fn pending(State(state): State<Arc<AppState>>) -> ApiResult<PendingResponse> {
@@ -840,6 +858,12 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         if send_event(&mut socket, &event).await.is_err() {
             return;
         }
+    }
+    let landing = Event::Landing {
+        digs: state.landing.digs(),
+    };
+    if send_event(&mut socket, &landing).await.is_err() {
+        return;
     }
     loop {
         tokio::select! {

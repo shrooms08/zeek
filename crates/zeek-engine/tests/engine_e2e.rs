@@ -397,6 +397,7 @@ async fn http_api_serves_the_round() {
         share_cache: zeek_engine::share::ShareCache::default(),
         app_url: "http://app".to_owned(),
         public_url: "http://engine".to_owned(),
+        landing: Default::default(),
     });
     let app = router(state, &["http://localhost:5173".to_owned()]);
 
@@ -911,6 +912,7 @@ async fn campfire_messages_and_shouts() {
             share_cache: zeek_engine::share::ShareCache::default(),
             app_url: "http://app".to_owned(),
             public_url: "http://engine".to_owned(),
+            landing: Default::default(),
         }),
         &[],
     );

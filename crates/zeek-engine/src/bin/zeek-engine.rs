@@ -16,6 +16,7 @@ use zeek_engine::config::{EngineSettings, GameConfig};
 use zeek_engine::coordinator::{Coordinator, CoordinatorSettings};
 use zeek_engine::db::Db;
 use zeek_engine::decrypt::DigScanner;
+use zeek_engine::mempool::{self, Landing, LightwalletdMempool};
 use zeek_engine::processor::{Event, Processor};
 use zeek_engine::relay::{LightwalletdBackend, RelayState};
 
@@ -253,7 +254,23 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         proof_limiter: zeek_engine::relay::RateLimiter::new(
             zeek_engine::api::PROOF_SUBMISSIONS_PER_MIN,
         ),
+        landing: Arc::new(Landing::new(events.clone())),
     });
+
+    // Mempool watcher: its own lightwalletd connection and task; it never
+    // takes the database lock and survives any server error.
+    {
+        let url = settings.lightwalletd_url.clone();
+        tokio::spawn(mempool::watch(
+            move || {
+                let url = url.clone();
+                async move { LightwalletdMempool::connect(&url).await }
+            },
+            DigScanner::new(config.incoming_viewing_key()?),
+            config.params.clone(),
+            state.landing.clone(),
+        ));
+    }
 
     let listener = tokio::net::TcpListener::bind(&settings.bind)
         .await
@@ -282,6 +299,18 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         let pass = async {
             let mut db = state.db.lock().await;
             let report = chain::ingest(&mut source, &mut db, &scanner, &config).await?;
+            // Landing digs whose transaction is now stored are de-duplicated:
+            // from here on the board counts them.
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Err(e) = state
+                .landing
+                .drop_mined(now_secs, |txid| db.has_note_from_tx(txid))
+            {
+                tracing::warn!(error = %e, "could not check landing digs against stored notes");
+            }
             if report.new_blocks > 0 || report.new_notes > 0 || report.reorg_from.is_some() {
                 tracing::info!(
                     tip = ?report.stored_tip,
