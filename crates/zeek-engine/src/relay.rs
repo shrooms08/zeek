@@ -46,7 +46,9 @@ use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_backend::proto::service::{
     BlockId, BlockRange, ChainSpec, RawTransaction, TreeState, TxFilter,
 };
-use zeek_vault::lightwalletd::Client;
+use zeek_vault::lightwalletd::{self, Client};
+use zeek_vault::pool::Pool;
+use zeek_vault::VaultError;
 
 use crate::api::ErrorBody;
 
@@ -88,23 +90,24 @@ pub trait RelayBackend: Send + Sync {
     async fn transaction(&self, txid: [u8; 32]) -> Result<RawTransaction, RelayError>;
 }
 
-/// lightwalletd as the relay backend.
+/// The engine's `lightwalletd` pool as the relay backend: every call fails
+/// over between the pool's servers.
 pub struct LightwalletdBackend {
-    client: Client,
+    pool: Arc<Pool>,
 }
 
 impl LightwalletdBackend {
-    /// Wraps a connected client (cheap to clone per call).
-    pub fn new(client: Client) -> Self {
-        LightwalletdBackend { client }
+    /// Serves from `pool` (shared with the chain follower).
+    pub fn new(pool: Arc<Pool>) -> Self {
+        LightwalletdBackend { pool }
     }
 }
 
-fn upstream(status: tonic::Status) -> RelayError {
-    if status.code() == tonic::Code::NotFound {
-        RelayError::NotFound
-    } else {
-        RelayError::Upstream(status.message().to_owned())
+fn upstream(e: VaultError) -> RelayError {
+    match e {
+        VaultError::Rpc(status) if status.code() == tonic::Code::NotFound => RelayError::NotFound,
+        VaultError::BroadcastRejected { message, .. } => RelayError::Rejected(message),
+        other => RelayError::Upstream(other.to_string()),
     }
 }
 
@@ -112,12 +115,10 @@ fn upstream(status: tonic::Status) -> RelayError {
 impl RelayBackend for LightwalletdBackend {
     async fn tip(&self) -> Result<(u32, String), RelayError> {
         let block = self
-            .client
-            .clone()
-            .get_latest_block(ChainSpec {})
+            .pool
+            .unary(|mut c| async move { Ok(c.get_latest_block(ChainSpec {}).await?.into_inner()) })
             .await
-            .map_err(upstream)?
-            .into_inner();
+            .map_err(upstream)?;
         let height = u32::try_from(block.height)
             .map_err(|_| RelayError::Upstream("tip height overflows u32".into()))?;
         let mut hash = block.hash;
@@ -126,75 +127,91 @@ impl RelayBackend for LightwalletdBackend {
     }
 
     async fn blocks(&self, start: u32, end: u32) -> Result<Vec<CompactBlock>, RelayError> {
-        let id = |h: u32| BlockId {
-            height: u64::from(h),
-            hash: vec![],
-        };
-        let mut stream = self
-            .client
-            .clone()
-            .get_block_range(BlockRange {
-                start: Some(id(start)),
-                end: Some(id(end)),
-                pool_types: vec![],
-            })
-            .await
-            .map_err(upstream)?
-            .into_inner();
-        let mut blocks = Vec::new();
-        while let Some(block) = tokio::time::timeout(crate::chain::STREAM_STALL, stream.message())
-            .await
-            .map_err(|_| RelayError::Upstream("block stream stalled".to_owned()))?
-            .map_err(upstream)?
-        {
-            blocks.push(block);
+        let mut last = None;
+        for _ in 0..self.pool.status().len() {
+            let (index, client) = self.pool.client().await.map_err(upstream)?;
+            match stream_range(client, start, end).await {
+                Ok(blocks) => return Ok(blocks),
+                Err(e) if matches!(&e, VaultError::Rpc(s) if s.code() == tonic::Code::NotFound || s.code() == tonic::Code::OutOfRange || s.code() == tonic::Code::InvalidArgument) => {
+                    return Err(upstream(e))
+                }
+                Err(e) => {
+                    self.pool.failed(index, &e);
+                    last = Some(e);
+                }
+            }
         }
-        Ok(blocks)
+        Err(last.map_or_else(
+            || RelayError::Upstream("no lightwalletd server".into()),
+            upstream,
+        ))
     }
 
     async fn tree_state(&self, height: u32) -> Result<TreeState, RelayError> {
-        Ok(self
-            .client
-            .clone()
-            .get_tree_state(BlockId {
-                height: u64::from(height),
-                hash: vec![],
+        self.pool
+            .unary(|mut c| async move {
+                Ok(c.get_tree_state(BlockId {
+                    height: u64::from(height),
+                    hash: vec![],
+                })
+                .await?
+                .into_inner())
             })
             .await
-            .map_err(upstream)?
-            .into_inner())
+            .map_err(upstream)
     }
 
     async fn broadcast(&self, raw: Vec<u8>) -> Result<(), RelayError> {
-        let response = self
-            .client
-            .clone()
-            .send_transaction(RawTransaction {
-                data: raw,
-                height: 0,
+        self.pool
+            .unary(|mut c| {
+                let raw = raw.clone();
+                async move { lightwalletd::broadcast(&mut c, raw).await }
             })
             .await
-            .map_err(upstream)?
-            .into_inner();
-        if response.error_code != 0 {
-            return Err(RelayError::Rejected(response.error_message));
-        }
-        Ok(())
+            .map_err(upstream)
     }
 
     async fn transaction(&self, txid: [u8; 32]) -> Result<RawTransaction, RelayError> {
-        Ok(self
-            .client
-            .clone()
-            .get_transaction(TxFilter {
-                block: None,
-                index: 0,
-                hash: txid.to_vec(),
+        self.pool
+            .unary(|mut c| async move {
+                Ok(c.get_transaction(TxFilter {
+                    block: None,
+                    index: 0,
+                    hash: txid.to_vec(),
+                })
+                .await?
+                .into_inner())
             })
             .await
-            .map_err(upstream)?
-            .into_inner())
+            .map_err(upstream)
     }
+}
+
+async fn stream_range(
+    mut client: Client,
+    start: u32,
+    end: u32,
+) -> Result<Vec<CompactBlock>, VaultError> {
+    let id = |h: u32| BlockId {
+        height: u64::from(h),
+        hash: vec![],
+    };
+    let mut stream = client
+        .get_block_range(BlockRange {
+            start: Some(id(start)),
+            end: Some(id(end)),
+            pool_types: vec![],
+        })
+        .await?
+        .into_inner();
+    let mut blocks = Vec::new();
+    while let Some(block) = tokio::time::timeout(crate::chain::STREAM_STALL, stream.message())
+        .await
+        .map_err(|_| VaultError::BadResponse("block stream stalled".to_owned()))??
+    {
+        blocks.push(block);
+    }
+    Ok(blocks)
 }
 
 /// Aggregate counters; no per-client or per-request detail.

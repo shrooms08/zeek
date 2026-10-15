@@ -40,7 +40,7 @@ use zeek_core::params::GameParams;
 use zeek_core::seal::SealingPrivateKey;
 use zeek_core::settle::{self, PayoutReason};
 use zeek_vault::frost::{self, PublicKeyPackage, SigningCommitments, SigningPackage};
-use zeek_vault::lightwalletd::{self, Client};
+use zeek_vault::pool::Pool;
 use zeek_vault::send::{self, NoteId, PendingSpend, PreparedPczt, ShapedOutput};
 use zeek_vault::store::{SecretsDir, VaultFile};
 use zeek_vault::wallet;
@@ -150,8 +150,7 @@ pub struct Coordinator {
     fvk: FullViewingKey,
     sealing: SealingPrivateKey,
     http: reqwest::Client,
-    lightwalletd_url: String,
-    client: Option<Client>,
+    pool: Arc<Pool>,
 }
 
 /// How long the API reuses a computed ledger (it opens the wallet database).
@@ -213,7 +212,7 @@ pub struct PayoutReport {
 
 impl Coordinator {
     /// Loads the coordinator's identity and the vault's public material.
-    pub fn new(settings: CoordinatorSettings, lightwalletd_url: &str) -> Result<Self, EngineError> {
+    pub fn new(settings: CoordinatorSettings, pool: Arc<Pool>) -> Result<Self, EngineError> {
         let identity = Identity::load(&settings.identity_path)?;
         let secrets = SecretsDir::new(&settings.vault_secrets_dir);
         let vault = secrets.load_vault()?;
@@ -234,8 +233,7 @@ impl Coordinator {
             fvk,
             sealing,
             http,
-            lightwalletd_url: lightwalletd_url.to_owned(),
-            client: None,
+            pool,
         })
     }
 
@@ -417,15 +415,6 @@ impl Coordinator {
         &self.vault.address
     }
 
-    async fn client(&mut self) -> Result<&mut Client, EngineError> {
-        if self.client.is_none() {
-            self.client = Some(lightwalletd::connect(&self.lightwalletd_url).await?);
-        }
-        self.client
-            .as_mut()
-            .ok_or_else(|| EngineError::Server("no lightwalletd client".into()))
-    }
-
     /// Opens the vault wallet and returns its account.
     fn vault_wallet(&self) -> Result<(wallet::Db, zcash_client_sqlite::AccountUuid), EngineError> {
         self.ledger_view().open()
@@ -513,8 +502,11 @@ impl Coordinator {
         // Vault wallet: sync, balance, ledger.
         let (mut wallet_db, account) = self.vault_wallet()?;
         {
-            let client = self.client().await?;
-            wallet::sync(&mut wallet_db, client).await?;
+            let (index, mut client) = self.pool.client().await?;
+            if let Err(e) = wallet::sync(&mut wallet_db, &mut client).await {
+                self.pool.failed(index, &e);
+                return Err(e.into());
+            }
         }
         let report = wallet::balance(&wallet_db, account)?;
         let (ledger_before, charged) = store.read(|db| {
@@ -701,9 +693,19 @@ impl Coordinator {
         // wallet storage failure must never hide a transaction that is on
         // the network (the wallet learns about it from the chain anyway).
         store.write(|db| db.set_payout_signers(round, &signers))?;
-        let client = self.client().await?;
+        let (index, mut client) = self.pool.client().await?;
         let transaction =
-            send::extract_and_broadcast(client, pczt, &verifying_key, target_height).await?;
+            match send::extract_and_broadcast(&mut client, pczt, &verifying_key, target_height)
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    if !matches!(e, zeek_vault::VaultError::BroadcastRejected { .. }) {
+                        self.pool.failed(index, &e);
+                    }
+                    return Err(e.into());
+                }
+            };
         let txid = transaction.txid().to_string();
         store.write(|db| {
             db.transaction(|tx| {

@@ -86,6 +86,7 @@ async fn board_serves_landing_digs_separately() {
         events,
         started: std::time::Instant::now(),
         ledger: None,
+        chain_servers: None,
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),

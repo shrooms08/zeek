@@ -209,6 +209,7 @@ async fn api_reads_stay_fast_while_the_pass_is_stalled() {
         events,
         started: Instant::now(),
         ledger: None,
+        chain_servers: None,
         relay: None,
         campfire_filter: zeek_engine::campfire::Filter::default(),
         proof_limiter: zeek_engine::relay::RateLimiter::new(10),

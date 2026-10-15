@@ -91,6 +91,8 @@ enum Command {
     /// transactions) from a lightwalletd of your choice, for browser
     /// verifiers that need an independent second source.
     Relay {
+        /// lightwalletd servers, comma-separated, tried in order with
+        /// failover. Choose servers other than the engine's.
         #[arg(long)]
         lightwalletd: String,
         #[arg(long, default_value = "127.0.0.1:8790")]
@@ -310,8 +312,51 @@ async fn run_win(proof_ref: String, sources: Sources) -> anyhow::Result<bool> {
 
 // ---- relay ----
 
+/// The relay's upstreams: a list tried in order, failing over when a call
+/// fails. Calls run concurrently on clones of one connected client.
 struct RelayState {
-    client: Mutex<Client>,
+    urls: Vec<String>,
+    current: Mutex<Option<(usize, Client)>>,
+}
+
+impl RelayState {
+    async fn client(&self) -> Result<(usize, Client), String> {
+        let mut current = self.current.lock().await;
+        if let Some((index, client)) = current.as_ref() {
+            return Ok((*index, client.clone()));
+        }
+        let mut errors = Vec::new();
+        for (index, url) in self.urls.iter().enumerate() {
+            match connect(url).await {
+                Ok(client) => {
+                    *current = Some((index, client.clone()));
+                    return Ok((index, client));
+                }
+                Err(e) => errors.push(format!("{url}: {e}")),
+            }
+        }
+        Err(format!("no lightwalletd answered: {}", errors.join("; ")))
+    }
+
+    /// Drops the connection to `index` after a failed call; the next call
+    /// connects again, starting after it.
+    async fn failed(&self, index: usize) {
+        let mut current = self.current.lock().await;
+        if current.as_ref().is_some_and(|(i, _)| *i == index) {
+            *current = None;
+            if self.urls.len() > 1 {
+                eprintln!("lightwalletd {} failed; failing over", self.urls[index]);
+            }
+        }
+    }
+}
+
+/// gRPC statuses that mean the request itself is at fault.
+fn upstream_fault(status: &tonic::Status) -> bool {
+    !matches!(
+        status.code(),
+        tonic::Code::NotFound | tonic::Code::InvalidArgument | tonic::Code::OutOfRange
+    )
 }
 
 fn relay_error(status: StatusCode, message: String) -> Response {
@@ -319,7 +364,10 @@ fn relay_error(status: StatusCode, message: String) -> Response {
 }
 
 async fn relay_tip(State(state): State<Arc<RelayState>>) -> Response {
-    let mut client = state.client.lock().await;
+    let (index, mut client) = match state.client().await {
+        Ok(c) => c,
+        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+    };
     match client.get_latest_block(ChainSpec {}).await {
         Ok(block) => {
             let block = block.into_inner();
@@ -328,7 +376,10 @@ async fn relay_tip(State(state): State<Arc<RelayState>>) -> Response {
             Json(serde_json::json!({ "height": block.height, "hash": hex::encode(hash) }))
                 .into_response()
         }
-        Err(e) => relay_error(StatusCode::BAD_GATEWAY, e.message().to_owned()),
+        Err(e) => {
+            state.failed(index).await;
+            relay_error(StatusCode::BAD_GATEWAY, e.message().to_owned())
+        }
     }
 }
 
@@ -348,7 +399,10 @@ async fn relay_blocks(
             "at most 500 blocks per request".into(),
         );
     }
-    let mut client = state.client.lock().await;
+    let (index, mut client) = match state.client().await {
+        Ok(c) => c,
+        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+    };
     match blocks(&mut client, q.start, q.end).await {
         Ok(list) => {
             let mut body = Vec::new();
@@ -365,7 +419,10 @@ async fn relay_blocks(
             )
                 .into_response()
         }
-        Err(e) => relay_error(StatusCode::BAD_GATEWAY, e.to_string()),
+        Err(e) => {
+            state.failed(index).await;
+            relay_error(StatusCode::BAD_GATEWAY, e.to_string())
+        }
     }
 }
 
@@ -376,7 +433,10 @@ async fn relay_tx(State(state): State<Arc<RelayState>>, Path(txid): Path<String>
             "txid is not 32 bytes of hex".into(),
         );
     };
-    let mut client = state.client.lock().await;
+    let (index, mut client) = match state.client().await {
+        Ok(c) => c,
+        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+    };
     match client
         .get_transaction(TxFilter {
             block: None,
@@ -390,15 +450,31 @@ async fn relay_tx(State(state): State<Arc<RelayState>>, Path(txid): Path<String>
             raw.into_inner().encode_to_vec(),
         )
             .into_response(),
-        Err(e) => relay_error(StatusCode::NOT_FOUND, e.message().to_owned()),
+        Err(e) => {
+            if upstream_fault(&e) {
+                state.failed(index).await;
+                return relay_error(StatusCode::BAD_GATEWAY, e.message().to_owned());
+            }
+            relay_error(StatusCode::NOT_FOUND, e.message().to_owned())
+        }
     }
 }
 
 async fn run_relay(lightwalletd: String, bind: SocketAddr, cors: String) -> anyhow::Result<()> {
-    let client = connect(&lightwalletd).await?;
+    let urls: Vec<String> = lightwalletd
+        .split(',')
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_owned)
+        .collect();
+    anyhow::ensure!(!urls.is_empty(), "--lightwalletd needs at least one URL");
     let state = Arc::new(RelayState {
-        client: Mutex::new(client),
+        urls,
+        current: Mutex::new(None),
     });
+    if let Err(e) = state.client().await {
+        bail!(e);
+    }
     let origins = if cors.trim() == "*" {
         AllowOrigin::any()
     } else {

@@ -2,41 +2,47 @@
 //! over this node's database and lightwalletd endpoints, so that every
 //! settlement the node later verifies against was computed by itself.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use zeek_engine::beacon::RelayFetcher;
-use zeek_engine::chain::{self, LightwalletdSource};
+use zeek_engine::chain::{self, PoolSource};
 use zeek_engine::config::GameConfig;
 use zeek_engine::decrypt::DigScanner;
 use zeek_engine::processor::Processor;
 use zeek_engine::store::Store;
+
+use zeek_vault::pool::Pool;
 
 use crate::error::KeyholderError;
 
 /// Follows the chain and settles rounds locally.
 pub struct Follower {
     config: GameConfig,
-    endpoints: Vec<String>,
-    source: Option<(String, LightwalletdSource)>,
+    source: PoolSource,
     scanner: DigScanner,
     processor: Processor,
     fetcher: RelayFetcher,
 }
 
 impl Follower {
-    /// Builds a follower over `endpoints` (tried in order) and `relays`.
+    /// Builds a follower over the `lightwalletd` servers `endpoints` (tried
+    /// starting at `prefer`, so the keyholders read from different servers
+    /// when several are healthy) and the drand `relays`.
     pub fn new(
         config: GameConfig,
         endpoints: Vec<String>,
+        prefer: usize,
         relays: Vec<String>,
     ) -> Result<Self, KeyholderError> {
         let scanner = DigScanner::new(config.incoming_viewing_key()?);
         let processor = Processor::new(config.clone());
         let fetcher = RelayFetcher::new(relays)?;
+        let pool = Pool::new(config.params.network, endpoints, prefer)
+            .map_err(|e| KeyholderError::Peer(e.to_string()))?;
         Ok(Follower {
             config,
-            endpoints,
-            source: None,
+            source: PoolSource::new(Arc::new(pool)),
             scanner,
             processor,
             fetcher,
@@ -48,44 +54,16 @@ impl Follower {
         &self.processor
     }
 
-    /// The endpoint currently in use.
-    pub fn endpoint(&self) -> Option<&str> {
-        self.source.as_ref().map(|(url, _)| url.as_str())
-    }
-
-    async fn connect(&mut self) -> Result<(), KeyholderError> {
-        if self.source.is_some() {
-            return Ok(());
-        }
-        let mut errors = Vec::new();
-        for url in &self.endpoints {
-            match LightwalletdSource::connect(url).await {
-                Ok(source) => {
-                    tracing::info!(url, "following the chain through this lightwalletd");
-                    self.source = Some((url.clone(), source));
-                    return Ok(());
-                }
-                Err(e) => {
-                    tracing::warn!(url, error = %e, "lightwalletd endpoint unavailable");
-                    errors.push(format!("{url}: {e}"));
-                }
-            }
-        }
-        Err(KeyholderError::Peer(format!(
-            "no lightwalletd endpoint answered: {}",
-            errors.join("; ")
-        )))
+    /// The pool's servers (shared with the health endpoint).
+    pub fn pool(&self) -> Arc<Pool> {
+        self.source.pool().clone()
     }
 
     /// One ingestion + settlement pass. A failing endpoint is dropped so the
     /// next pass tries the list again. No connection to `store` is held
     /// across a network call, so signing and health keep reading.
     pub async fn pass(&mut self, store: &Store) -> Result<(), KeyholderError> {
-        self.connect().await?;
-        let Some((url, source)) = self.source.as_mut() else {
-            return Ok(());
-        };
-        let result = chain::ingest(source, store, &self.scanner, &self.config).await;
+        let result = chain::ingest(&mut self.source, store, &self.scanner, &self.config).await;
         match result {
             Ok(report) => {
                 if report.new_blocks > 0 || report.new_notes > 0 || report.reorg_from.is_some() {
@@ -99,8 +77,7 @@ impl Follower {
                 }
             }
             Err(e) => {
-                tracing::warn!(url = %url, error = %e, "ingestion failed; endpoint will be re-selected");
-                self.source = None;
+                tracing::warn!(error = %e, "ingestion failed; the pool fails over on the next pass");
                 return Err(e.into());
             }
         }

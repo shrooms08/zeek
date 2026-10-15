@@ -113,8 +113,17 @@ pub enum VaultError {
     #[error("lightwalletd RPC error: {0}")]
     Rpc(#[from] tonic::Status),
 
-    #[error("lightwalletd is serving chain `{0}` but this vault only works on `test`")]
-    WrongNetwork(String),
+    #[error("lightwalletd is serving chain `{got}`, expected `{expected}`")]
+    WrongNetwork { got: String, expected: &'static str },
+
+    #[error("lightwalletd servers disagree about block {height}: {detail}")]
+    ServersDisagree { height: u32, detail: String },
+
+    #[error("no lightwalletd server answered: {0}")]
+    NoServer(String),
+
+    #[error("lightwalletd call timed out after {0:?}")]
+    Timeout(std::time::Duration),
 
     #[error(
         "the chain is at height {tip}, past NU7 activation ({activation}), but this binary was built without NU7 support; rebuild from the repository root so that .cargo/config.toml applies (`cargo build --release`), or export RUSTFLAGS='--cfg zcash_unstable=\"nu7\"', and do not run a binary built elsewhere"

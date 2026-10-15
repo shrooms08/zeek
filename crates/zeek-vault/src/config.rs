@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use crate::error::VaultError;
 
-/// Environment variable naming the `lightwalletd` gRPC endpoint.
+/// Environment variable naming the `lightwalletd` gRPC endpoints
+/// (comma-separated; default: the verified public testnet servers).
 pub const LIGHTWALLETD_URL_VAR: &str = "ZEEK_LIGHTWALLETD_URL";
 /// Environment variable overriding where key material is stored.
 pub const SECRETS_DIR_VAR: &str = "ZEEK_SECRETS_DIR";
@@ -22,10 +23,6 @@ pub struct Config {
 
 impl Config {
     /// Reads configuration from the process environment.
-    ///
-    /// The lightwalletd URL is optional here so that offline commands
-    /// (`keygen`, `address`) work without it; network commands call
-    /// [`Config::lightwalletd_url`], which reports a clear error if unset.
     pub fn from_env() -> Result<Self, VaultError> {
         let lightwalletd_url = optional_var(LIGHTWALLETD_URL_VAR)?;
         let secrets_dir = optional_var(SECRETS_DIR_VAR)?
@@ -41,13 +38,26 @@ impl Config {
         })
     }
 
-    /// The lightwalletd endpoint, or an error naming the variable to set.
-    pub fn lightwalletd_url(&self) -> Result<&str, VaultError> {
-        self.lightwalletd_url.as_deref().ok_or_else(|| {
-            VaultError::Config(format!(
-                "{LIGHTWALLETD_URL_VAR} is not set; copy .env.example to .env or export it"
-            ))
-        })
+    /// The testnet `lightwalletd` servers to use.
+    pub fn lightwalletd_servers(&self) -> Vec<String> {
+        match &self.lightwalletd_url {
+            Some(list) => crate::pool::parse_servers(list),
+            None => crate::pool::default_servers(zeek_core::params::Network::Test),
+        }
+    }
+
+    /// A pool over [`Config::lightwalletd_servers`].
+    pub fn pool(&self) -> Result<crate::pool::Pool, VaultError> {
+        crate::pool::Pool::new(
+            zeek_core::params::Network::Test,
+            self.lightwalletd_servers(),
+            0,
+        )
+    }
+
+    /// Connects to the first server of the pool that answers.
+    pub async fn connect(&self) -> Result<crate::lightwalletd::Client, VaultError> {
+        Ok(self.pool()?.client().await?.1)
     }
 
     /// Directory holding keyholder files and the public vault file.

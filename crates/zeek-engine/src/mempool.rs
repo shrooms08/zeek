@@ -55,6 +55,7 @@ use zeek_core::digs::{self, Classified, ReceivedNote};
 use zeek_core::params::GameParams;
 use zeek_core::rounds;
 use zeek_vault::lightwalletd::{self, Client};
+use zeek_vault::pool::Pool as ServerPool;
 
 use crate::chain::branch_for;
 use crate::db::Pool;
@@ -321,17 +322,19 @@ pub trait MempoolSource: Send {
     async fn next(&mut self) -> Result<Option<Vec<u8>>, EngineError>;
 }
 
-/// `lightwalletd` as a [`MempoolSource`], with its own connection.
+/// `lightwalletd` as a [`MempoolSource`], with its own stream on a server
+/// chosen from the pool (a new session picks again after a failure).
 pub struct LightwalletdMempool {
     client: Client,
     stream: Option<Streaming<RawTransaction>>,
 }
 
 impl LightwalletdMempool {
-    /// Connects to a testnet `lightwalletd`.
-    pub async fn connect(url: &str) -> Result<Self, EngineError> {
+    /// Connects through `pool` to its most preferred healthy server.
+    pub async fn connect(pool: &ServerPool) -> Result<Self, EngineError> {
+        let (_, client) = pool.client().await?;
         Ok(LightwalletdMempool {
-            client: lightwalletd::connect(url).await?,
+            client,
             stream: None,
         })
     }

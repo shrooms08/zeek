@@ -135,6 +135,11 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         bind = %config.bind,
         "keyholder starting"
     );
+    let relays: Vec<String> = DEFAULT_RELAYS.split(',').map(str::to_owned).collect();
+    // Keyholder n starts at server n-1, so with several healthy servers the
+    // three nodes read the chain from different upstreams.
+    let prefer = usize::from(config.identifier.saturating_sub(1));
+    let mut follower = Follower::new(game.clone(), config.lightwalletd.clone(), prefer, relays)?;
     let state = Arc::new(AppState {
         config: config.clone(),
         game: game.clone(),
@@ -145,7 +150,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         keys: RwLock::new(keys),
         chain: chain.clone(),
         node_db: Mutex::new(node_db),
-        endpoint: Mutex::new(None),
+        chain_servers: follower.pool(),
     });
 
     let listener = tokio::net::TcpListener::bind(&config.bind)
@@ -195,8 +200,6 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         }
     }
 
-    let relays: Vec<String> = DEFAULT_RELAYS.split(',').map(str::to_owned).collect();
-    let mut follower = Follower::new(game, config.lightwalletd.clone(), relays)?;
     loop {
         if server.is_finished() {
             break;
@@ -209,7 +212,6 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
                 "follower pass timed out after {FOLLOWER_PASS_TIMEOUT:?}"
             )),
         };
-        *state.endpoint.lock().await = follower.endpoint().map(str::to_owned);
         if let Err(e) = pass {
             tracing::error!(error = %e, "follower pass failed; retrying after the poll interval");
         }

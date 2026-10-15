@@ -16,6 +16,16 @@ pub type Client = CompactTxStreamerClient<Channel>;
 
 /// Chain name `lightwalletd` reports for testnet.
 pub const TESTNET_CHAIN_NAME: &str = "test";
+/// Chain name `lightwalletd` reports for mainnet.
+pub const MAINNET_CHAIN_NAME: &str = "main";
+
+/// The chain name a server must report for `network`.
+pub fn chain_name(network: zeek_core::params::Network) -> &'static str {
+    match network {
+        zeek_core::params::Network::Main => MAINNET_CHAIN_NAME,
+        zeek_core::params::Network::Test => TESTNET_CHAIN_NAME,
+    }
+}
 
 /// Testnet NU7 activation height (ZIP 259). Kept as a literal so the check
 /// below works even in a build whose `zcash_protocol` does not know NU7.
@@ -54,6 +64,15 @@ pub fn check_consensus_support(
 
 /// Connects to `url` (http or https) and checks that it serves testnet.
 pub async fn connect(url: &str) -> Result<Client, VaultError> {
+    connect_to(url, zeek_core::params::Network::Test).await
+}
+
+/// Connects to `url` (http or https) and checks that it serves `network`
+/// with a consensus branch this build knows.
+pub async fn connect_to(
+    url: &str,
+    network: zeek_core::params::Network,
+) -> Result<Client, VaultError> {
     // Without these a dead connection hangs a call forever (seen live: the
     // engine's pass stalled for an hour holding its database lock). The
     // request timeout (5 min: a wallet's first sync can wait that long for a
@@ -79,13 +98,20 @@ pub async fn connect(url: &str) -> Result<Client, VaultError> {
     let channel = endpoint.connect().await?;
     let mut client = CompactTxStreamerClient::new(channel);
     let info = lightd_info(&mut client).await?;
-    if info.chain_name != TESTNET_CHAIN_NAME {
-        return Err(VaultError::WrongNetwork(info.chain_name));
+    let expected = chain_name(network);
+    if info.chain_name != expected {
+        return Err(VaultError::WrongNetwork {
+            got: info.chain_name,
+            expected,
+        });
     }
     let tip = u32::try_from(info.block_height).map_err(|_| {
         VaultError::BadResponse(format!("chain height {} overflows u32", info.block_height))
     })?;
-    check_consensus_support(nu7_supported(), tip, &info.consensus_branch_id)?;
+    // The NU7 height check is testnet's (mainnet has no NU7 height yet); the
+    // branch check applies to both.
+    let supported = nu7_supported() || network == zeek_core::params::Network::Main;
+    check_consensus_support(supported, tip, &info.consensus_branch_id)?;
     Ok(client)
 }
 

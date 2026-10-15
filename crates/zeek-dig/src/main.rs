@@ -8,7 +8,7 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use zeek_vault::config::Config;
 use zeek_vault::store::SecretsDir;
-use zeek_vault::{lightwalletd, wallet as vault_wallet};
+use zeek_vault::wallet as vault_wallet;
 
 use crate::dig::RoundChoice;
 use crate::wallet::{balance_lines, Player};
@@ -144,7 +144,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Sync { name } => runtime.block_on(async {
             let player = Player::new(secrets.path(), &name)?;
-            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut client = config.connect().await?;
             let mut db = player.open_db()?;
             let account = player.ensure_account(&mut db, &mut client).await?;
             vault_wallet::sync(&mut db, &mut client).await?;
@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Notes { name, txid } => runtime.block_on(async {
             let player = Player::new(secrets.path(), &name)?;
-            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut client = config.connect().await?;
             let usk = player.spending_key()?;
             let listed = match txid {
                 Some(txid) => notes::notes_in_transaction(&mut client, &usk, &txid).await?,
@@ -207,7 +207,7 @@ fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("payment: {e}"))?;
             let request = zip321::TransactionRequest::new(vec![payment])
                 .map_err(|e| anyhow::anyhow!("payment request: {e}"))?;
-            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut client = config.connect().await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
@@ -276,7 +276,7 @@ fn main() -> anyhow::Result<()> {
             let player = Player::new(secrets.path(), &name)?;
             let request = zip321::TransactionRequest::from_uri(uri.trim())
                 .map_err(|e| anyhow::anyhow!("not a valid ZIP 321 request: {e:?}"))?;
-            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut client = config.connect().await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
@@ -317,7 +317,7 @@ fn main() -> anyhow::Result<()> {
                 "Board: round {} ({}) tip {} blocks remaining {}",
                 board.round, board.status, board.tip_height, board.blocks_remaining
             );
-            let mut client = lightwalletd::connect(config.lightwalletd_url()?).await?;
+            let mut client = config.connect().await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::dig(

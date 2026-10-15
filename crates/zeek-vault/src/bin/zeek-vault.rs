@@ -198,10 +198,11 @@ fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
 async fn sync(config: &Config, secrets: &SecretsDir, args: SyncArgs) -> anyhow::Result<()> {
     let mut vault = secrets.load_vault()?;
     let ufvk = vault.ufvk()?;
-    let url = config.lightwalletd_url()?;
-
-    println!("Connecting to {url} ...");
-    let mut client = lightwalletd::connect(url).await?;
+    println!(
+        "Connecting to {} ...",
+        config.lightwalletd_servers().join(", ")
+    );
+    let mut client = config.connect().await?;
     let info = lightwalletd::lightd_info(&mut client).await?;
     println!(
         "Connected: chain={} lightwalletd={} zcashd/zebra={} height={}",
@@ -316,8 +317,7 @@ async fn send_cmd(config: &Config, secrets: &SecretsDir, args: SendArgs) -> anyh
     let signers: Vec<&frost::KeyPackage> = key_packages.iter().collect();
 
     let ufvk = vault.ufvk()?;
-    let url = config.lightwalletd_url()?;
-    let mut client = lightwalletd::connect(url).await?;
+    let mut client = config.connect().await?;
     let mut db = wallet::open(config.data_dir())?;
     let account = wallet::find_account(&db, &ufvk)?.ok_or(VaultError::AccountMissing)?;
 

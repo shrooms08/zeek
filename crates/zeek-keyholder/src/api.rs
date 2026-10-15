@@ -37,7 +37,8 @@ pub struct AppState {
     /// This node's own chain view; the follower writes, handlers read.
     pub chain: Arc<Store>,
     pub node_db: Mutex<NodeDb>,
-    pub endpoint: Mutex<Option<String>>,
+    /// This node's `lightwalletd` servers.
+    pub chain_servers: Arc<zeek_vault::pool::Pool>,
 }
 
 /// `GET /v1/health`.
@@ -49,7 +50,7 @@ pub struct Health {
     pub tip_height: Option<u32>,
     pub settled_rounds: usize,
     pub open_sessions: usize,
-    pub lightwalletd: Option<String>,
+    pub lightwalletd: Vec<zeek_vault::pool::ServerStatus>,
 }
 
 /// JSON error body.
@@ -262,7 +263,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
         tip_height,
         settled_rounds,
         open_sessions: state.signer.open_sessions(),
-        lightwalletd: state.endpoint.lock().await.clone(),
+        lightwalletd: state.chain_servers.status(),
     };
     (StatusCode::OK, Json(body)).into_response()
 }

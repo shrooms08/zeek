@@ -41,6 +41,7 @@ pub mod error;
 pub mod frost;
 pub mod keys;
 pub mod lightwalletd;
+pub mod pool;
 pub mod send;
 pub mod store;
 pub mod wallet;

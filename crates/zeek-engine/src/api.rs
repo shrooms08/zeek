@@ -41,6 +41,8 @@ pub struct AppState {
     /// Present when this engine also coordinates payouts.
     /// The vault ledger (payout coordinator engines only).
     pub ledger: Option<LedgerView>,
+    /// The engine's `lightwalletd` servers (for the status page).
+    pub chain_servers: Option<Arc<zeek_vault::pool::Pool>>,
     /// Present when this engine relays chain data to browser wallets.
     pub relay: Option<Arc<crate::relay::RelayState>>,
     /// Campfire display filter.

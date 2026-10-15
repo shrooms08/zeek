@@ -89,6 +89,8 @@ impl GameConfig {
 }
 
 /// Environment variable names.
+/// One or more `lightwalletd` servers, comma-separated (default: the
+/// verified public servers of the game's network).
 pub const LIGHTWALLETD_URL_VAR: &str = "ZEEK_LIGHTWALLETD_URL";
 pub const GAME_CONFIG_VAR: &str = "ZEEK_GAME_CONFIG";
 pub const DB_PATH_VAR: &str = "ZEEK_ENGINE_DB";
@@ -110,7 +112,9 @@ pub const SETTLE_CONFIRMATIONS: u32 = 10;
 /// Runtime settings of the engine process.
 #[derive(Clone, Debug)]
 pub struct EngineSettings {
-    pub lightwalletd_url: String,
+    /// Configured `lightwalletd` servers; empty means the defaults for the
+    /// game's network (see [`EngineSettings::servers`]).
+    pub lightwalletd_servers: Vec<String>,
     pub game_config_path: PathBuf,
     pub db_path: PathBuf,
     pub bind: String,
@@ -133,11 +137,9 @@ impl EngineSettings {
                 ))),
             }
         };
-        let lightwalletd_url = var(LIGHTWALLETD_URL_VAR)?.ok_or_else(|| {
-            EngineError::Config(format!(
-                "{LIGHTWALLETD_URL_VAR} is not set; see .env.example"
-            ))
-        })?;
+        let lightwalletd_servers = var(LIGHTWALLETD_URL_VAR)?
+            .map(|v| zeek_vault::pool::parse_servers(&v))
+            .unwrap_or_default();
         let poll_secs = match var(POLL_SECS_VAR)? {
             Some(v) => v.parse::<u64>().ok().filter(|s| *s > 0).ok_or_else(|| {
                 EngineError::Config(format!("{POLL_SECS_VAR} must be a positive integer"))
@@ -154,7 +156,7 @@ impl EngineSettings {
                 .collect()
         };
         Ok(EngineSettings {
-            lightwalletd_url,
+            lightwalletd_servers,
             game_config_path: var(GAME_CONFIG_VAR)?
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from("config/game.testnet.json")),
@@ -166,6 +168,29 @@ impl EngineSettings {
             relays: list(var(RELAYS_VAR)?, DEFAULT_RELAYS),
             poll_secs,
         })
+    }
+}
+
+impl EngineSettings {
+    /// The `lightwalletd` servers to use on `network`.
+    pub fn servers(&self, network: zeek_core::params::Network) -> Vec<String> {
+        if self.lightwalletd_servers.is_empty() {
+            zeek_vault::pool::default_servers(network)
+        } else {
+            self.lightwalletd_servers.clone()
+        }
+    }
+
+    /// A pool over [`EngineSettings::servers`] (the engine prefers the first).
+    pub fn pool(
+        &self,
+        network: zeek_core::params::Network,
+    ) -> Result<zeek_vault::pool::Pool, EngineError> {
+        Ok(zeek_vault::pool::Pool::new(
+            network,
+            self.servers(network),
+            0,
+        )?)
     }
 }
 

@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use zeek_engine::api::{router, AppState};
 use zeek_engine::audit::{self, VaultSpec};
 use zeek_engine::beacon::RelayFetcher;
-use zeek_engine::chain::{self, LightwalletdSource};
+use zeek_engine::chain::{self, PoolSource};
 use zeek_engine::config::{EngineSettings, GameConfig};
 use zeek_engine::coordinator::{Coordinator, CoordinatorSettings};
 use zeek_engine::db::Db;
@@ -109,6 +109,7 @@ async fn run_recover(
         "the coordinator environment (ZEEK_KEYHOLDERS, ZEEK_VAULT_SECRETS_DIR) is required",
     )?;
     let db = Db::open(&settings.db_path)?;
+    let network = config.params.network;
     let processor = Processor::new(config);
     let record = db
         .payout(args.round)?
@@ -147,7 +148,7 @@ async fn run_recover(
         .from
         .or(vault.birthday_height)
         .context("no --from height and the vault file records no birthday")?;
-    let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    let mut source = PoolSource::new(Arc::new(settings.pool(network)?));
     let spent = audit::find_spending_tx(
         &mut source,
         from,
@@ -187,7 +188,8 @@ async fn run_audit(settings: EngineSettings, args: AuditArgs) -> anyhow::Result<
             .map(|v| VaultSpec::parse(v))
             .collect::<Result<_, _>>()?
     };
-    let mut source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    // The audited vaults are testnet vaults.
+    let mut source = PoolSource::new(Arc::new(settings.pool(zeek_core::params::Network::Test)?));
     let outcome = audit::run(&mut source, args.from, &specs).await?;
     print!("{}", outcome.report);
     if outcome.mismatches > 0 {
@@ -196,18 +198,21 @@ async fn run_audit(settings: EngineSettings, args: AuditArgs) -> anyhow::Result<
     Ok(())
 }
 
-fn settings_url(settings: &EngineSettings) -> String {
-    settings.lightwalletd_url.clone()
-}
+/// How often every lightwalletd server is health-checked.
+const PROBE_EVERY: Duration = Duration::from_secs(60);
 
 /// Longest an engine pass may run (a payout proof takes about a minute).
 const PASS_TIMEOUT: Duration = Duration::from_secs(600);
 
 async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()> {
-    let settings_ref = settings.clone();
     let scanner = DigScanner::new(config.incoming_viewing_key()?);
     let store = Arc::new(Store::open(&settings.db_path)?);
-    let source = LightwalletdSource::connect(&settings.lightwalletd_url).await?;
+    // One pool for the chain loop, the relay, the mempool watcher and the
+    // coordinator: one health view, one failover order.
+    let pool = Arc::new(settings.pool(config.params.network)?);
+    pool.probe().await;
+    tracing::info!(servers = ?settings.servers(config.params.network), "lightwalletd pool");
+    let source = PoolSource::new(pool.clone());
     let fetcher = RelayFetcher::new(settings.relays.clone())?;
     let (events, _) = broadcast::channel::<Event>(256);
     tracing::info!(
@@ -219,7 +224,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
 
     let coordinator = match CoordinatorSettings::from_env()? {
         Some(settings) => {
-            let coordinator = Coordinator::new(settings, &settings_url(&settings_ref))?;
+            let coordinator = Coordinator::new(settings, pool.clone())?;
             tracing::info!(
                 vault = coordinator.vault_address(),
                 "payout coordinator enabled"
@@ -245,10 +250,9 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         events: events.clone(),
         started: Instant::now(),
         ledger: coordinator.as_ref().map(Coordinator::ledger_view),
+        chain_servers: Some(pool.clone()),
         relay: Some(Arc::new(RelayState::new(
-            Box::new(LightwalletdBackend::new(
-                zeek_vault::lightwalletd::connect(&settings.lightwalletd_url).await?,
-            )),
+            Box::new(LightwalletdBackend::new(pool.clone())),
             RelayState::rate_from_env(),
         ))),
         campfire_filter: zeek_engine::campfire::Filter::from_env()?,
@@ -258,14 +262,14 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
         landing: Arc::new(Landing::new(events.clone())),
     });
 
-    // Mempool watcher: its own lightwalletd connection and task; it never
-    // takes the database lock and survives any server error.
+    // Mempool watcher: its own stream and task; it never touches the
+    // database and survives any server error (each session picks a server).
     {
-        let url = settings.lightwalletd_url.clone();
+        let pool = pool.clone();
         tokio::spawn(mempool::watch(
             move || {
-                let url = url.clone();
-                async move { LightwalletdMempool::connect(&url).await }
+                let pool = pool.clone();
+                async move { LightwalletdMempool::connect(&pool).await }
             },
             DigScanner::new(config.incoming_viewing_key()?),
             config.params.clone(),
@@ -320,7 +324,7 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
 /// Follows the chain, settles rounds and pays them, until Ctrl-C.
 async fn chain_loop(
     state: Arc<AppState>,
-    mut source: LightwalletdSource,
+    mut source: PoolSource,
     mut fetcher: RelayFetcher,
     mut coordinator: Option<Coordinator>,
     scanner: DigScanner,
@@ -338,7 +342,14 @@ async fn chain_loop(
             return;
         }
     };
+    let mut last_probe = Instant::now();
     loop {
+        // Health check of every server (tips, latency) for the status page;
+        // failures found by ordinary calls are recorded as they happen.
+        if last_probe.elapsed() >= PROBE_EVERY {
+            source.pool().probe().await;
+            last_probe = Instant::now();
+        }
         let pass = async {
             let report = chain::ingest(&mut source, &store, &scanner, &config).await?;
             // Landing digs whose transaction is now stored are de-duplicated:

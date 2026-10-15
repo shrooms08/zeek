@@ -11,14 +11,16 @@
 //! walks back until a stored block matches the chain again, forgets every
 //! block and note above that fork point, and rescans from there.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use zcash_client_backend::proto::compact_formats::CompactBlock;
-use zcash_client_backend::proto::service::{BlockId, BlockRange, TxFilter};
+use zcash_client_backend::proto::service::{BlockId, BlockRange, RawTransaction, TxFilter};
 use zcash_protocol::consensus::{BlockHeight, BranchId, MAIN_NETWORK, TEST_NETWORK};
 use zeek_core::params::Network;
 use zeek_vault::lightwalletd::{self, Client};
+use zeek_vault::pool::{Confirmation, Pool};
 
 use crate::config::GameConfig;
 use crate::db::{BlockRow, NoteRow};
@@ -64,25 +66,81 @@ pub async fn confirmed_height(
     Ok(included.then_some(height))
 }
 
-/// `lightwalletd` as a [`ChainSource`].
-pub struct LightwalletdSource {
-    client: Client,
+/// A [`Pool`] of `lightwalletd` servers as a [`ChainSource`]: calls fail
+/// over between servers, and the last block of every batch is confirmed by
+/// the other servers (the majority wins; a tie is never trusted).
+pub struct PoolSource {
+    pool: Arc<Pool>,
 }
 
-impl LightwalletdSource {
-    /// Connects to a testnet `lightwalletd` (the vault's connection checks
-    /// chain name and consensus branch support).
-    pub async fn connect(url: &str) -> Result<Self, EngineError> {
-        Ok(LightwalletdSource {
-            client: lightwalletd::connect(url).await?,
-        })
+impl PoolSource {
+    /// Follows the chain through `pool`.
+    pub fn new(pool: Arc<Pool>) -> Self {
+        PoolSource { pool }
+    }
+
+    /// The pool (for status reporting).
+    pub fn pool(&self) -> &Arc<Pool> {
+        &self.pool
     }
 }
 
+/// Streams blocks `start..=end` from one server.
+async fn stream_blocks(
+    mut client: Client,
+    start: u32,
+    end: u32,
+) -> Result<Vec<CompactBlock>, zeek_vault::VaultError> {
+    let block_id = |h: u32| BlockId {
+        height: u64::from(h),
+        hash: vec![],
+    };
+    let mut stream = client
+        .get_block_range(BlockRange {
+            start: Some(block_id(start)),
+            end: Some(block_id(end)),
+            pool_types: vec![],
+        })
+        .await?
+        .into_inner();
+    let mut blocks = Vec::new();
+    // The request timeout ends at the response headers; a connection that
+    // dies mid-stream would otherwise hang the pass.
+    while let Some(block) = tokio::time::timeout(STREAM_STALL, stream.message())
+        .await
+        .map_err(|_| {
+            zeek_vault::VaultError::BadResponse(format!(
+                "lightwalletd block stream stalled for {STREAM_STALL:?}"
+            ))
+        })??
+    {
+        blocks.push(block);
+    }
+    Ok(blocks)
+}
+
+async fn get_transaction(
+    mut client: Client,
+    txid: [u8; 32],
+) -> Result<RawTransaction, zeek_vault::VaultError> {
+    Ok(client
+        .get_transaction(TxFilter {
+            block: None,
+            index: 0,
+            hash: txid.to_vec(),
+        })
+        .await?
+        .into_inner())
+}
+
 #[async_trait]
-impl ChainSource for LightwalletdSource {
+impl ChainSource for PoolSource {
     async fn latest_height(&mut self) -> Result<u32, EngineError> {
-        Ok(lightwalletd::latest_height(&mut self.client).await?.into())
+        Ok(self
+            .pool
+            .unary(|mut c| async move { lightwalletd::latest_height(&mut c).await })
+            .await?
+            .into())
     }
 
     async fn block_range(
@@ -90,62 +148,51 @@ impl ChainSource for LightwalletdSource {
         start: u32,
         end: u32,
     ) -> Result<Vec<CompactBlock>, EngineError> {
-        let block_id = |h: u32| BlockId {
-            height: u64::from(h),
-            hash: vec![],
-        };
-        let mut stream = self
-            .client
-            .get_block_range(BlockRange {
-                start: Some(block_id(start)),
-                end: Some(block_id(end)),
-                pool_types: vec![],
-            })
-            .await
-            .map_err(zeek_vault::VaultError::from)?
-            .into_inner();
-        let mut blocks = Vec::new();
-        // The request timeout ends at the response headers; a connection that
-        // dies mid-stream would otherwise hang the pass (and its DB lock).
-        while let Some(block) = tokio::time::timeout(STREAM_STALL, stream.message())
-            .await
-            .map_err(|_| {
-                zeek_vault::VaultError::BadResponse(format!(
-                    "lightwalletd block stream stalled for {STREAM_STALL:?}"
-                ))
-            })?
-            .map_err(zeek_vault::VaultError::from)?
-        {
-            blocks.push(block);
+        // Streams are long, so they run without the unary deadline (the
+        // stall timeout bounds them); each server is tried at most once.
+        let mut errors = Vec::new();
+        let mut source = None;
+        for _ in 0..self.pool.status().len() {
+            let (index, client) = match source.take() {
+                Some(chosen) => chosen,
+                None => self.pool.client().await?,
+            };
+            let blocks = match stream_blocks(client, start, end).await {
+                Ok(blocks) => blocks,
+                Err(e) => {
+                    errors.push(e.to_string());
+                    self.pool.failed(index, &e);
+                    continue;
+                }
+            };
+            let Some(last) = blocks.last() else {
+                return Ok(blocks);
+            };
+            let height = u32::try_from(last.height).map_err(|_| EngineError::UnexpectedBlock {
+                expected: end,
+                got: last.height,
+            })?;
+            match self.pool.check_block(index, height, &last.hash).await? {
+                Confirmation::Agreed { .. } | Confirmation::SingleSource => return Ok(blocks),
+                Confirmation::Outvoted { majority, .. } => {
+                    // Refetch the batch from a server that holds the
+                    // majority's chain.
+                    let client = self.pool.client_at(majority).await?;
+                    source = Some((majority, client));
+                }
+            }
         }
-        Ok(blocks)
+        Err(zeek_vault::VaultError::NoServer(errors.join("; ")).into())
     }
 
     async fn transaction(&mut self, txid: &[u8; 32]) -> Result<Vec<u8>, EngineError> {
-        let raw = self
-            .client
-            .get_transaction(TxFilter {
-                block: None,
-                index: 0,
-                hash: txid.to_vec(),
-            })
-            .await
-            .map_err(zeek_vault::VaultError::from)?
-            .into_inner();
-        Ok(raw.data)
+        let txid = *txid;
+        Ok(self.pool.unary(|c| get_transaction(c, txid)).await?.data)
     }
 
     async fn transaction_height(&mut self, txid: &[u8; 32]) -> Result<u32, EngineError> {
-        let raw = self
-            .client
-            .get_transaction(TxFilter {
-                block: None,
-                index: 0,
-                hash: txid.to_vec(),
-            })
-            .await
-            .map_err(zeek_vault::VaultError::from)?
-            .into_inner();
+        let txid = *txid;
+        let raw = self.pool.unary(|c| get_transaction(c, txid)).await?;
         Ok(u32::try_from(raw.height).unwrap_or(0))
     }
 }
