@@ -127,3 +127,49 @@ async fn funded_vault_send() {
         .iter()
         .all(|s| s.pool == orchard::ValuePool::Ironwood));
 }
+
+#[tokio::test]
+#[ignore = "needs network access to the public mainnet lightwalletd servers"]
+async fn mainnet_pool_servers_answer_and_agree_on_a_block() {
+    use zeek_core::params::Network;
+    use zeek_vault::pool::{default_servers, Confirmation, Pool};
+    let pool = Pool::new(Network::Main, default_servers(Network::Main), 0).expect("pool");
+    pool.probe().await;
+    for s in pool.status() {
+        println!(
+            "{} healthy={} tip={:?} latency_ms={:?} error={:?}",
+            s.url, s.healthy, s.tip, s.latency_ms, s.last_error
+        );
+    }
+    let healthy = pool.status().iter().filter(|s| s.healthy).count();
+    assert!(healthy >= 3, "at least three mainnet servers answer");
+    let tip = pool
+        .unary(|mut c| async move { lightwalletd::latest_height(&mut c).await })
+        .await
+        .expect("tip");
+    let height = u32::from(tip) - 10;
+    let (block, source) = pool
+        .call(|mut c| async move {
+            Ok(c.get_block(zcash_client_backend::proto::service::BlockId {
+                height: u64::from(height),
+                hash: vec![],
+            })
+            .await?
+            .into_inner())
+        })
+        .await
+        .expect("block");
+    let confirmation = pool
+        .check_block(source, height, &block.hash)
+        .await
+        .expect("check");
+    println!("block {height}: {confirmation:?}");
+    assert!(matches!(confirmation, Confirmation::Agreed { servers } if servers >= 2));
+    // A forged hash is outvoted by the honest majority.
+    let forged = vec![0u8; 32];
+    let outvoted = pool
+        .check_block(source, height, &forged)
+        .await
+        .expect("check");
+    assert!(matches!(outvoted, Confirmation::Outvoted { ref hash, .. } if *hash == block.hash));
+}

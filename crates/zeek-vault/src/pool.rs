@@ -50,6 +50,8 @@ pub const MAINNET_SERVERS: &[&str] = &[
     "https://ap.zec.rocks:443",
     "https://zec.0xrpc.io:443",
     "https://zec-node.cakewallet.com:443",
+    "https://zcash.mysideoftheweb.com:9067",
+    "https://lwd.zcashexplorer.app:9067",
 ];
 
 /// The only public testnet `lightwalletd` that answered on 2026-10-15.
