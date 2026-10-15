@@ -116,8 +116,14 @@ until curl -fsS -m 10 "$ORIGIN/api/v1/health" 2>/dev/null | grep -q '"ok":true';
   i=$((i + 5))
 done
 wait_http "$ORIGIN/relay/v1/chain/tip" 150 || fail "$ORIGIN/relay does not reach the relay"
-node "$ZEEK_ROOT/scripts/ws-check.mjs" "$ORIGIN/api/v1/stream" ||
-  fail "the live stream does not connect through $ORIGIN"
+# Edge copies of KV may still say "no tunnel" for up to a minute after the
+# health check above first succeeds somewhere.
+i=0
+until node "$ZEEK_ROOT/scripts/ws-check.mjs" "$ORIGIN/api/v1/stream" 2>/dev/null; do
+  [ "$i" -lt 150 ] || fail "the live stream does not connect through $ORIGIN"
+  sleep 5
+  i=$((i + 5))
+done
 
 say ""
 say "Zeek is up: $ORIGIN"
