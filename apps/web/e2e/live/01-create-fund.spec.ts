@@ -86,6 +86,23 @@ test("create a Pocket and fund it from alice", async ({ page }) => {
         ).stdout,
     },
   ];
+  // Faucet TAZ (Valar) reached alice after the first 25-tile dig stopped
+  // part-way; this top-up pays for a fresh 25-tile round.
+  sources.push({
+    name: "alice-faucet-topup",
+    amount: "0.04",
+    send: () =>
+      zeekDig(
+        "send",
+        "alice",
+        "--to",
+        address,
+        "--amount",
+        "0.04",
+        "--memo",
+        "Zeek Pocket top-up from alice",
+      ),
+  });
   for (const source of sources) {
     const funded = loadState().funded ?? [];
     if (funded.some((f) => f.name === source.name)) continue;
@@ -96,7 +113,7 @@ test("create a Pocket and fund it from alice", async ({ page }) => {
   }
 
   // Sync until all three payments are spendable (10 confirmations).
-  const want = 3_130_000n;
+  const want = 5_000_000n;
   const start = Date.now();
   for (;;) {
     await page.getByRole("button", { name: "Sync" }).click();

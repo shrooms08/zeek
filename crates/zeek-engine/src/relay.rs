@@ -142,7 +142,11 @@ impl RelayBackend for LightwalletdBackend {
             .map_err(upstream)?
             .into_inner();
         let mut blocks = Vec::new();
-        while let Some(block) = stream.message().await.map_err(upstream)? {
+        while let Some(block) = tokio::time::timeout(crate::chain::STREAM_STALL, stream.message())
+            .await
+            .map_err(|_| RelayError::Upstream("block stream stalled".to_owned()))?
+            .map_err(upstream)?
+        {
             blocks.push(block);
         }
         Ok(blocks)

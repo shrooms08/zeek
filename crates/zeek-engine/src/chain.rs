@@ -11,6 +11,8 @@
 //! walks back until a stored block matches the chain again, forgets every
 //! block and note above that fork point, and rescans from there.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_backend::proto::service::{BlockId, BlockRange, TxFilter};
@@ -22,6 +24,9 @@ use crate::config::GameConfig;
 use crate::db::{BlockRow, Db, NoteRow};
 use crate::decrypt::DigScanner;
 use crate::error::EngineError;
+
+/// Longest wait for the next block of a block-range stream.
+pub const STREAM_STALL: Duration = Duration::from_secs(60);
 
 /// Where compact blocks and transactions come from.
 #[async_trait]
@@ -99,9 +104,15 @@ impl ChainSource for LightwalletdSource {
             .map_err(zeek_vault::VaultError::from)?
             .into_inner();
         let mut blocks = Vec::new();
-        while let Some(block) = stream
-            .message()
+        // The request timeout ends at the response headers; a connection that
+        // dies mid-stream would otherwise hang the pass (and its DB lock).
+        while let Some(block) = tokio::time::timeout(STREAM_STALL, stream.message())
             .await
+            .map_err(|_| {
+                zeek_vault::VaultError::BadResponse(format!(
+                    "lightwalletd block stream stalled for {STREAM_STALL:?}"
+                ))
+            })?
             .map_err(zeek_vault::VaultError::from)?
         {
             blocks.push(block);
