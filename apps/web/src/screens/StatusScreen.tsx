@@ -107,7 +107,9 @@ export default function StatusScreen() {
   const relay = useQuery({
     queryKey: ["relay-tip"],
     queryFn: async () => {
-      const response = await fetch(`${SECOND_SOURCE}/v1/chain/tip`);
+      const response = await fetch(`${SECOND_SOURCE}/v1/chain/tip`, {
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       return (await response.json()) as { height: number };
     },

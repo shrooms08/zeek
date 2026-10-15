@@ -52,11 +52,15 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="flex-1" />
         {live !== "open" && (
           <span
-            className="label text-fog normal-case tracking-normal"
+            className="label text-fog normal-case tracking-normal flex min-w-0 items-center gap-1.5"
             role="status"
             data-testid="reconnecting"
           >
-            {live === "connecting" ? "Connecting…" : "Reconnecting…"}
+            {/* On a phone only the icon shows, so the menu stays on screen. */}
+            <Icon name="offline" size={18} />
+            <span className="sr-only sm:not-sr-only">
+              {live === "connecting" ? "Connecting…" : "Reconnecting…"}
+            </span>
           </span>
         )}
         {board.data !== undefined && (
@@ -70,7 +74,7 @@ export function Shell({ children }: { children: ReactNode }) {
         )}
         <button
           type="button"
-          className="btn flex min-h-[52px] min-w-[52px] items-center justify-center gap-2.5 px-3 sm:px-5"
+          className="btn flex min-h-[52px] min-w-[52px] shrink-0 items-center justify-center gap-2.5 px-3 sm:px-5"
           style={{ fontSize: 18 }}
           onClick={() => {
             setOpen(true);

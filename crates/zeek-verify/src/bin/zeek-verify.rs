@@ -110,8 +110,22 @@ enum Command {
 
 type Client = CompactTxStreamerClient<Channel>;
 
+/// Longest wait for a connection, for one call, and for the next block of a
+/// block-range stream. Without them a dead connection hangs every request
+/// (seen live after a network outage: relay calls took 60 s each).
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const STREAM_STALL: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn connect(url: &str) -> anyhow::Result<Client> {
-    let mut endpoint = Endpoint::from_shared(url.to_owned())?;
+    // Keep-alives only during calls, no more often than lightwalletd allows
+    // (it answers frequent or idle pings with GOAWAY "too_many_pings").
+    let mut endpoint = Endpoint::from_shared(url.to_owned())?
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(CALL_TIMEOUT)
+        .http2_keep_alive_interval(std::time::Duration::from_secs(300))
+        .keep_alive_timeout(std::time::Duration::from_secs(20))
+        .keep_alive_while_idle(false);
     if url.starts_with("https://") {
         endpoint = endpoint.tls_config(ClientTlsConfig::new().with_webpki_roots())?;
     } else if !url.starts_with("http://") {
@@ -144,7 +158,10 @@ async fn blocks(client: &mut Client, start: u32, end: u32) -> anyhow::Result<Vec
         .await?
         .into_inner();
     let mut out = Vec::new();
-    while let Some(block) = stream.message().await? {
+    while let Some(block) = tokio::time::timeout(STREAM_STALL, stream.message())
+        .await
+        .map_err(|_| anyhow::anyhow!("block stream stalled for {STREAM_STALL:?}"))??
+    {
         out.push(block);
     }
     Ok(out)

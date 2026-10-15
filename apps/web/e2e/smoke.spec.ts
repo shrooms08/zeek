@@ -109,4 +109,21 @@ test.describe("at 390 wide", () => {
       expect(overflow).toBeLessThanOrEqual(0);
     });
   }
+
+  test("with the live stream down the menu stays on screen", async ({ page }) => {
+    await page.routeWebSocket(/\/v1\/stream/, (ws) => {
+      ws.close();
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("zeek.seenOnboarding", "1");
+    });
+    await page.goto("/nope");
+    await expect(page.getByTestId("reconnecting")).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    const menu = await page.getByTestId("menu-button").boundingBox();
+    expect((menu?.x ?? 0) + (menu?.width ?? 0)).toBeLessThanOrEqual(390);
+  });
 });
