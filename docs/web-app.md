@@ -137,3 +137,113 @@ details (totals, fees, payouts, history) show all 8.
   existing easing tokens and the reveal machine's stage timings.
 - The machines, API layer, money and e2e tests don't change. The live suite
   is the regression check for 7b.
+
+## Phase 7b: Zeek Mono applied
+
+### Art
+
+The design's art is generated at runtime by `zeek-art.js` (identical in
+all six design files). It is ported to typed modules under `src/art/`:
+
+| Module | Contents |
+| --- | --- |
+| `ink.ts` | palette, iso projection, seeded RNG, defs, boil variants |
+| `field.ts` | slab, tiles, holes, burst, puff, cracks, star |
+| `props.ts` | pines, rocks, lamps, rails and cart, chest, mine stages 1–5 and eruption, Zeb's six poses, campfire |
+| `world.ts` | the prop table |
+| `icons.ts` | the 57 pictograms, verbatim |
+| `logoGeometry.ts` | the Z mark |
+
+React wrappers live in `InkSvg.tsx`, `Characters.tsx` and `Logo.tsx`.
+
+The generators return markup built only from numbers and constants (no
+user text). `npm run`-free scripts reuse them:
+
+- `scripts/share-art.mjs` writes the engine's share-card art.
+- `scripts/brand-assets.mjs` writes the logo comparison, favicons, app
+  icons and the X avatar.
+
+Fixes from the design file:
+
+- The slab's shadow is a soft iso diamond.
+- Prop shadows are 2:1 footprints.
+- Non-finite coordinates throw instead of drawing at 0.
+- Markup is valid XML, so resvg can render it.
+- Pins never cover the treasure tile.
+- Units sit on the numeral's baseline.
+
+### Motion architecture
+
+Every animation touches only transform, opacity or stroke-dashoffset.
+
+| Technique | Used for |
+| --- | --- |
+| CSS keyframes | Loops (flicker, blink, sway, nod, flame frames, sparks, fireflies, stars, hourglass, seeking outline) and one-shots (pin drop, puff with steps(6), tremble, burst, chest, star, eruption, prop reactions) |
+| `stroke-dashoffset` (`pathLength=1`) | Hole rim, cracks, treasure split, seal ring, fuse, ink check and X, ink flight |
+| Framer Motion | Modals, menu, sheet, result card, count-ups (integer zatoshis), pulses, stamps, note unfold, shout spark, bubbles |
+| Line-variant swap | Boiling lines |
+
+Boiling lines use three seeded vertex-jitter variants on stacked SVGs,
+each its own compositor layer, swapped at 9 fps. This replaces the
+design's `feTurbulence` filters, which would re-filter the art every frame.
+
+The reveal is one timeline on the existing reveal machine:
+
+| Stage | Time | What happens |
+| --- | --- | --- |
+| draw | 0–860 ms | dim and star |
+| shake | 860–1700 ms | cracks and tremble |
+| burst | 1700–2600 ms | split, glint, burst |
+| result | from 2600 ms | card and count-up |
+
+Under `prefers-reduced-motion`:
+
+- Loops stop.
+- One-shots become instant changes or 150 ms fades.
+- There is no shake, and no particles or boil.
+- Prop taps become a static highlight.
+
+### Interactive environment
+
+The props are buttons over the island, kept outside the tile diamond:
+
+- **Trees** sway and drop leaves.
+- **Lamps** flicker.
+- **The cart** rolls along its rails.
+- **Rocks** wobble.
+- **The mine:** holding it rumbles and shows the Deep Cache.
+- **The campfire:** poking it throws sparks.
+- **Zeb** answers in pictograms; five quick taps make him pop out of a hole.
+
+Tab reaches the props, but the field's arrow keys skip them. They are
+disabled during the reveal and while sealing, and they never touch the
+chain.
+
+### Sound
+
+Cues are synthesized with Web Audio: thunk, pin, tick, crack, chime, rumble
+and crackle. Sound is muted by default, with one toggle in the menu,
+remembered in this browser.
+
+### Landing digs
+
+The engine's mempool watcher publishes digs that are seen but not yet mined
+(`landing` on `/v1/board` and the `landing` stream event). They are never
+counted in the prize or depths.
+
+- **On the field,** a landing dig shows as dust settling on its tile, with a
+  LANDING marker.
+- **In the other-wallet flow,** a payment shows "seen, landing" as soon as
+  the watcher sees it, then "landed" once it is mined.
+
+### Logo
+
+The "eek" slant is one value, `EEK_SLANT` in `src/art/logoGeometry.ts`.
+There are three options:
+
+- `"20"`
+- `"30"`
+- `"diagonal"`: 43.6°, measured from the Z's own diagonal. This is the
+  default.
+
+The comparison image is `docs/examples/phase7b/logo-options.png`.
