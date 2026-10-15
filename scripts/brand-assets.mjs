@@ -61,7 +61,8 @@ const markSvg = (fg, bg, size, pad, round) => {
 const b = await chromium.launch();
 const p = await b.newPage({ deviceScaleFactor: 1 });
 await p.setContent(page);
-await p.evaluate(() => document.fonts.ready);
+// Runs in the page.
+await p.evaluate(() => globalThis.document.fonts.ready);
 await p
   .locator("#sheet")
   .screenshot({ path: path.join(root, "docs/examples/phase7b/logo-options.png") });
