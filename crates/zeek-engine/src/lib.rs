@@ -28,6 +28,7 @@ pub mod decrypt;
 pub mod error;
 pub mod identity;
 pub mod ledger;
+pub mod mempool;
 pub mod processor;
 pub mod proof;
 pub mod protocol;

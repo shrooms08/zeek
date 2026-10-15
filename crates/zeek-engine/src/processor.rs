@@ -56,6 +56,12 @@ pub enum Event {
     /// A new Campfire message was mined (filtered ones arrive hidden, with
     /// their text omitted).
     Campfire(crate::campfire::CampfireMessage),
+    /// The set of digs seen in the mempool but not mined yet changed (see
+    /// [`crate::mempool`]). Always the complete current set; never counted
+    /// on the board.
+    Landing {
+        digs: Vec<crate::mempool::LandingDig>,
+    },
 }
 
 /// The public board.
