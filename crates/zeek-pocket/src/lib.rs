@@ -332,12 +332,20 @@ impl PocketCore {
     /// 24-word phrase.
     #[wasm_bindgen(js_name = exportPhrase)]
     pub fn export_phrase(&self, seed_envelope: &str, passphrase: &str) -> Result<String, JsValue> {
+        self.confirm_passphrase(seed_envelope, passphrase)?;
+        Ok(self.wallet.keys().phrase().map_err(js_err)?.to_string())
+    }
+
+    /// Checks `passphrase` against the stored seed of this open wallet
+    /// (before a send leaves the game, security review M4).
+    #[wasm_bindgen(js_name = confirmPassphrase)]
+    pub fn confirm_passphrase(&self, seed_envelope: &str, passphrase: &str) -> Result<(), JsValue> {
         let envelope: SeedEnvelope = from_json(seed_envelope, "seed envelope")?;
         let entropy = crypto::open_seed(&envelope, passphrase).map_err(js_err)?;
         if *entropy != *self.wallet.keys().entropy() {
             return Err(js_err(PocketError::BadPassphrase));
         }
-        Ok(self.wallet.keys().phrase().map_err(js_err)?.to_string())
+        Ok(())
     }
 
     /// The encrypted state to persist.

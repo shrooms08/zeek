@@ -242,8 +242,8 @@ async fn png_response(state: &AppState, key: String, card: Card) -> Response {
                 state.share_cache.0.lock().await.insert(key, png.clone());
                 png
             }
-            Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            Ok(Err(e)) => return internal_error(&e),
+            Err(e) => return internal_error(&e.to_string()),
         },
     };
     (
@@ -265,6 +265,16 @@ fn not_found(what: &str) -> Response {
 }
 
 /// `GET /share/round/{n}` and `/share/round/{n}.png`.
+/// Logs `detail` and answers with a body that reveals nothing internal.
+fn internal_error(detail: &str) -> Response {
+    tracing::error!(error = %detail, "share page failed");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal error; it has been logged",
+    )
+        .into_response()
+}
+
 pub async fn round_page(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     let (stem, png) = split(&name);
     let Ok(round) = stem.parse::<u32>() else {
@@ -273,7 +283,7 @@ pub async fn round_page(State(state): State<Arc<AppState>>, Path(name): Path<Str
     let row = match state.store.read(|db| db.settlement(round)) {
         Ok(Some(row)) => row,
         Ok(None) => return not_found("settled round"),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => return internal_error(&e.to_string()),
     };
     let headline = match row.outcome {
         zeek_core::settle::RoundOutcome::Drawn { treasure_tile, .. } => {
@@ -313,7 +323,7 @@ pub async fn win_page(State(state): State<Arc<AppState>>, Path(name): Path<Strin
     let stored = match state.store.read(|db| db.win_proof(id)) {
         Ok(Some(p)) => p,
         Ok(None) => return not_found("proof"),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => return internal_error(&e.to_string()),
     };
     let Ok(proof) = zeek_verify::win::WinProof::decode(&stored.2) else {
         return not_found("proof");

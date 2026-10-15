@@ -175,7 +175,12 @@ async fn sign_request(State(state): State<Arc<AppState>>, Json(env): Json<Envelo
         Ok(c) => c,
         Err(e) => return refusal(&state, &session, e.to_string()).into_response(),
     };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let ctx = VerifyContext {
+        now,
         processor: &state.processor,
         fvk: &keys.fvk,
         sealing: &keys.sealing,

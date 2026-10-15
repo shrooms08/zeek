@@ -59,6 +59,8 @@ export interface SendOptions {
   to: string;
   amountZat: number;
   memo?: string;
+  /** The wallet's passphrase, asked again before funds leave the game. */
+  passphrase: string;
 }
 
 export interface DigRequestOptions {

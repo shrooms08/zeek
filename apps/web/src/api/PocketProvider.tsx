@@ -9,6 +9,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -33,6 +34,9 @@ interface PocketApi {
 
 const PocketContext = createContext<PocketApi | undefined>(undefined);
 
+/** An unlocked Pocket locks itself after this long without interaction. */
+const IDLE_LOCK_MS = 15 * 60_000;
+
 export function PocketProvider({ children }: { children: ReactNode }) {
   const started = useRef<Promise<Pocket> | undefined>(undefined);
   const [wallet, dispatch] = useReducer(walletReducer, initialWallet);
@@ -45,6 +49,33 @@ export function PocketProvider({ children }: { children: ReactNode }) {
     const status = await p.status();
     dispatch({ type: "status", exists: status.exists, unlocked: status.unlocked });
   }, [pocket]);
+  // Auto-lock (security review M4): the keys leave memory after 15 minutes
+  // without a tap, click or key, except while a dig is being sent (its
+  // batches can wait minutes between payments).
+  const lastActive = useRef(Date.now());
+  const unlocked = wallet.kind === "unlocked";
+  useEffect(() => {
+    if (!unlocked) return;
+    const touch = () => {
+      lastActive.current = Date.now();
+    };
+    touch();
+    const events = ["pointerdown", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, touch, { passive: true });
+    const id = window.setInterval(() => {
+      const digging = window.location.pathname.startsWith("/dig/");
+      if (!digging && Date.now() - lastActive.current > IDLE_LOCK_MS) {
+        void (async () => {
+          await (await pocket()).lock();
+          dispatch({ type: "lock" });
+        })();
+      }
+    }, 30_000);
+    return () => {
+      for (const e of events) window.removeEventListener(e, touch);
+      window.clearInterval(id);
+    };
+  }, [unlocked, pocket]);
   const value = useMemo(() => ({ pocket, wallet, dispatch, refresh }), [pocket, wallet, refresh]);
   return <PocketContext.Provider value={value}>{children}</PocketContext.Provider>;
 }

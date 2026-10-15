@@ -51,19 +51,22 @@ impl NodeDb {
             .optional()?)
     }
 
-    /// Records that shares for `rounds` were released in `session`.
+    /// Records that shares for `rounds` were released in `session`: all of
+    /// them or, if any round was already signed, none (security review L2).
     pub fn mark_signed(
         &self,
         rounds: &[u32],
         session: &str,
         now: u64,
     ) -> Result<(), KeyholderError> {
+        let tx = self.conn.unchecked_transaction()?;
         for round in rounds {
-            self.conn.execute(
+            tx.execute(
                 "INSERT INTO signed_rounds (round, session, signed_at) VALUES (?1, ?2, ?3)",
                 params![round, session, now],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 }
@@ -82,5 +85,8 @@ mod tests {
             db.mark_signed(&[4], "def", 2).is_err(),
             "primary key forbids a second signing"
         );
+        // A request that includes a signed round marks none of its rounds.
+        assert!(db.mark_signed(&[5, 3], "ghi", 3).is_err());
+        assert_eq!(db.signed_session(5).expect("q"), None);
     }
 }

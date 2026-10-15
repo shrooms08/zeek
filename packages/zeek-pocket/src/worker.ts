@@ -612,8 +612,14 @@ const handlers: { [M in MethodName]: Handler<M> } = {
     const verdict = coreVerifyWinProof(encoded, bundle, tx, block) as WinVerdict;
     return { ...verdict, id: summary.id, round: summary.round, payoutIndex: summary.payoutIndex };
   },
-  async send({ to, amountZat, memo }, id) {
+  async send({ to, amountZat, memo, passphrase }, id) {
     const c = needCore();
+    // Funds leaving the game need the passphrase again (review M4).
+    const stored = await storage.load();
+    if (stored === undefined) {
+      throw new PocketError("no_wallet", "no wallet in this browser");
+    }
+    c.confirmPassphrase(stored.seedEnvelope, passphrase);
     const chainTip = await syncToTip(id);
     const built = c.buildSend(
       JSON.stringify({ to, amountZat, memo: memo ?? null, chainTip }),

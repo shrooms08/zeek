@@ -17,6 +17,9 @@
 # Keyholders listen on localhost only and are never tunneled.
 set -eu
 . "$(dirname "$0")/zeek-env.sh"
+# Databases, logs and secrets are readable by this user only (review L5).
+umask 077
+chmod -R go-rwx "$ZEEK_ROOT/data" "$ZEEK_ROOT/.secrets" 2>/dev/null || true
 
 command -v cloudflared >/dev/null || fail "cloudflared is not installed (brew install cloudflared)"
 [ -x "$WRANGLER" ] || fail "wrangler is missing: run pnpm install"

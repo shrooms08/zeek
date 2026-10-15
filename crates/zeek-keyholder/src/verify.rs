@@ -68,7 +68,16 @@ pub struct VerifyContext<'a> {
     pub chain: &'a Db,
     /// This node's signing records.
     pub node: &'a NodeDb,
+    /// Unix seconds now (for the freshness of this node's chain view).
+    pub now: u64,
 }
+
+/// How many target block spacings this node's newest block may be old
+/// before it refuses to sign (its chain view may have stalled).
+pub const MAX_TIP_AGE_SPACINGS: u64 = 40;
+/// How far this node's stored tip may trail the chain tip its servers last
+/// reported.
+pub const MAX_TIP_LAG_BLOCKS: u32 = 3;
 
 /// A PCZT this node is willing to sign.
 pub struct Approved {
@@ -155,7 +164,30 @@ pub fn verify_payout(
             effects.consensus_branch_id()
         )));
     }
-    let tip = ctx.chain.tip()?.map(|b| b.height).unwrap_or(0);
+    // A node whose chain view stalled could miss digs and take an unsettled
+    // dig for operator float (security review L3): sign only when current.
+    let stored = ctx
+        .chain
+        .tip()?
+        .ok_or_else(|| refuse("this node has not followed the chain yet"))?;
+    let max_age = params
+        .target_spacing_secs
+        .saturating_mul(MAX_TIP_AGE_SPACINGS);
+    if ctx.now.saturating_sub(stored.time) > max_age {
+        return Err(refuse(format!(
+            "this node's newest block ({}) is older than {max_age} s; its chain view may have stalled",
+            stored.height
+        )));
+    }
+    if let Some(chain_tip) = ctx.chain.chain_tip()? {
+        if chain_tip > stored.height.saturating_add(MAX_TIP_LAG_BLOCKS) {
+            return Err(refuse(format!(
+                "this node is {} blocks behind the chain tip {chain_tip}",
+                chain_tip - stored.height
+            )));
+        }
+    }
+    let tip = stored.height;
     if u32::from(expiry) <= tip {
         return Err(refuse(format!(
             "transaction expires at {expiry}, chain tip is already {tip}"

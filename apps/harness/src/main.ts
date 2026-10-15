@@ -256,8 +256,17 @@ function pocketSection(): HTMLElement {
             await wallet()
           ).send(
             memo.length > 0
-              ? { to: sendTo.value.trim(), amountZat: parseZec(sendAmount.value), memo }
-              : { to: sendTo.value.trim(), amountZat: parseZec(sendAmount.value) },
+              ? {
+                  to: sendTo.value.trim(),
+                  amountZat: parseZec(sendAmount.value),
+                  memo,
+                  passphrase: passphrase.value,
+                }
+              : {
+                  to: sendTo.value.trim(),
+                  amountZat: parseZec(sendAmount.value),
+                  passphrase: passphrase.value,
+                },
           );
           show(sendResult, result);
           await refresh();

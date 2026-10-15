@@ -463,6 +463,7 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
   const { pocket } = usePocket();
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
+  const [passphrase, setPassphrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const fee = 10_000n; // ZIP 317: one payment output + change, one input.
@@ -486,7 +487,8 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
             try {
               const sent = await (
                 await pocket()
-              ).send({ to: to.trim(), amountZat: toNumber(value) });
+              ).send({ to: to.trim(), amountZat: toNumber(value), passphrase });
+              setPassphrase("");
               setResult(`Sent privately. ${sent.txid}`);
               onDone();
             } catch (err) {
@@ -534,6 +536,20 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
             </button>
           </div>
         </label>
+        <label className="flex flex-col gap-1">
+          <span className="label">Passphrase</span>
+          <input
+            className="field-input"
+            type="password"
+            autoComplete="current-password"
+            value={passphrase}
+            onChange={(e) => {
+              setPassphrase(e.target.value);
+            }}
+            data-testid="withdraw-passphrase"
+          />
+          <span className="text-fog text-sm">Asked again before coins leave your Pocket.</span>
+        </label>
         <div className="flex justify-between text-fog">
           <span>Network fee</span>
           <span className="font-mono">{formatZec(fee, { decimals: 8 })}</span>
@@ -552,7 +568,9 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={busy || value === null || !verdict.ok || value + fee > spendable}
+          disabled={
+            busy || value === null || !verdict.ok || value + fee > spendable || passphrase === ""
+          }
         >
           {busy ? "Sending…" : "Withdraw privately"}
         </button>

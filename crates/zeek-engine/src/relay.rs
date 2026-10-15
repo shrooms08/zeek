@@ -352,9 +352,11 @@ impl RelayState {
             }
             RelayError::Upstream(m) => {
                 self.stats.upstream_errors.fetch_add(1, Ordering::Relaxed);
+                // The servers' own messages stay in the log (review L1).
+                tracing::warn!(error = %m, "relay upstream error");
                 error(
                     StatusCode::BAD_GATEWAY,
-                    format!("upstream lightwalletd error: {m}"),
+                    "the chain servers did not answer; try again shortly",
                 )
             }
         }

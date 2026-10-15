@@ -96,6 +96,12 @@ impl Filter {
 
     /// Why `text` is hidden, if it is.
     pub fn reason(&self, text: &str) -> Option<String> {
+        // Invisible and direction-changing characters can make a message
+        // read differently from what it says, or slip past the word list
+        // (security review L4).
+        if text.chars().any(is_invisible_or_bidi) {
+            return Some("contains invisible or text-direction characters".into());
+        }
         let lower = text.to_lowercase();
         if let Some(word) = self
             .words
@@ -132,6 +138,24 @@ impl Filter {
         }
         None
     }
+}
+
+/// Unicode format characters a reader cannot see: zero-width characters, the
+/// bidirectional embeddings, overrides and isolates, the word joiner and
+/// invisible operators, the byte order mark and the tag characters.
+pub fn is_invisible_or_bidi(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
 }
 
 /// Whether `needle` occurs in `haystack` as a whole word or phrase: the
@@ -346,6 +370,23 @@ mod tests {
             Some("mostly capital letters")
         );
         assert_eq!(filter.reason("Short CAPS"), None);
+        for sneaky in [
+            "gi\u{200B}veaway",
+            "paid \u{202E}3 ZEC",
+            "\u{2066}x\u{2069}",
+            "a\u{FEFF}b",
+        ] {
+            assert_eq!(
+                filter.reason(sneaky).as_deref(),
+                Some("contains invisible or text-direction characters"),
+                "{sneaky:?}"
+            );
+        }
+        assert_eq!(
+            filter.reason("café ☕ 你好"),
+            None,
+            "ordinary non-ASCII text is fine"
+        );
         assert_eq!(filter.reason("giveaways galore"), None, "whole words only");
         assert!(contains_word("a free giveaway!", "giveaway"));
         assert!(!contains_word("classic", "ass"));

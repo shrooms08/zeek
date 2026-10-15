@@ -238,10 +238,19 @@ pub struct ErrorBody {
 pub struct ApiError(StatusCode, String);
 
 impl From<EngineError> for ApiError {
+    /// Internal details (database, paths, configuration) stay in the log.
     fn from(e: EngineError) -> Self {
         tracing::error!(error = %e, "request failed");
-        ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        internal()
     }
+}
+
+/// The body of every internal error (security review L1).
+fn internal() -> ApiError {
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal error; it has been logged".into(),
+    )
 }
 
 impl IntoResponse for ApiError {
@@ -871,7 +880,10 @@ async fn submit_proof(
         zeek_verify::win::verify(&proof, &bundle, &mined, included)
     })
     .await
-    .map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "proof verification task failed");
+        internal()
+    })?;
     let round = verdict_round(&bytes);
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -914,8 +926,10 @@ async fn get_proof(
         .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))?;
     // Stored proofs were fully verified on submission; the stored verdict
     // is restated here (the claim depends only on public data).
-    let proof = zeek_verify::win::WinProof::decode(&bytes)
-        .map_err(|e| bad(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let proof = zeek_verify::win::WinProof::decode(&bytes).map_err(|e| {
+        tracing::error!(error = %e, "a stored proof does not decode");
+        internal()
+    })?;
     Ok(Json(StoredProof {
         id,
         round,

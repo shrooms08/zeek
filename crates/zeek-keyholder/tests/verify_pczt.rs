@@ -434,6 +434,7 @@ fn honest_payout_is_approved_and_tampered_ones_are_refused() {
     assert_eq!((alice_net, bob_net), (464_062, 276_437));
     assert_eq!(settlement.total_fees, 20_000, "2 dig fees + 2 output fees");
     let ctx = VerifyContext {
+        now: 2,
         processor: &processor,
         fvk: &v.fvk,
         sealing: &v.sealing,
@@ -460,6 +461,25 @@ fn honest_payout_is_approved_and_tampered_ones_are_refused() {
         approved.fee, 15_000,
         "3 actions x 5000 zat, within the 20,000 collected"
     );
+
+    // A node whose chain view stalled refuses (review L3), and so does one
+    // that knows the chain moved on without it.
+    let stale = VerifyContext {
+        now: 1 + 25 * zeek_keyholder::verify::MAX_TIP_AGE_SPACINGS + 1,
+        ..ctx
+    };
+    assert!(
+        refusal(verify_payout(&stale, &honest_bytes, &[0])).starts_with("this node's newest block")
+    );
+    chain.set_chain_tip(GENESIS + 10).expect("chain tip");
+    assert_eq!(
+        refusal(verify_payout(&ctx, &honest_bytes, &[0])),
+        format!(
+            "this node is 10 blocks behind the chain tip {}",
+            GENESIS + 10
+        )
+    );
+    chain.set_chain_tip(GENESIS).expect("chain tip");
 
     // Redirected output: the amount still matches a payout.
     let redirected = payout_pczt(&v, &digs, anchor, &[(mallory, alice_net), (bob, bob_net)]);
@@ -585,6 +605,7 @@ fn honest_payout_is_approved_and_tampered_ones_are_refused() {
     // Wrong sealing key: no receiver opens, so this node expects no payout
     // outputs at all and refuses to sign any.
     let wrong_key = VerifyContext {
+        now: 2,
         sealing: &other.sealing,
         ..ctx
     };
@@ -664,6 +685,7 @@ fn a_junk_receiver_is_left_in_the_vault_and_the_round_still_pays() {
     )
     .is_err());
     let ctx = VerifyContext {
+        now: 2,
         processor: &processor,
         fvk: &v.fvk,
         sealing: &v.sealing,
@@ -723,6 +745,7 @@ fn cache_payout_may_use_float_notes_but_only_within_the_collected_fees() {
     assert_eq!(settlement.payouts[0].net, 1_090_000);
     assert_eq!(settlement.total_fees, 10_000);
     let ctx = VerifyContext {
+        now: 2,
         processor: &processor,
         fvk: &v.fvk,
         sealing: &v.sealing,
@@ -771,6 +794,7 @@ fn rounds_settled_under_rules_v1_are_not_signed() {
         1,
     );
     let ctx = VerifyContext {
+        now: 2,
         processor: &processor,
         fvk: &v.fvk,
         sealing: &v.sealing,
@@ -843,6 +867,7 @@ fn rules_v4_payouts_never_spend_shouts() {
     assert_eq!(settlement.payouts.len(), 1);
     let net = settlement.payouts[0].net;
     let ctx = VerifyContext {
+        now: 2,
         processor: &processor_v4,
         fvk: &v.fvk,
         sealing: &v.sealing,

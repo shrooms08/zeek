@@ -147,6 +147,15 @@ pub fn open_seed(
     if envelope.version != 1 || envelope.kdf != "argon2id" {
         return Err(PocketError::Corrupt("unsupported seed envelope".into()));
     }
+    // Version 1 always uses these costs; anything else is a tampered
+    // envelope (huge costs would freeze the page, review L8).
+    if (envelope.m_cost_kib, envelope.t_cost, envelope.p_cost)
+        != (ARGON2_M_COST_KIB, ARGON2_T_COST, ARGON2_P_COST)
+    {
+        return Err(PocketError::Corrupt(
+            "seed envelope has unexpected key-derivation costs".into(),
+        ));
+    }
     let decode =
         |s: &str| hex::decode(s).map_err(|_| PocketError::Corrupt("seed envelope hex".into()));
     let key = passphrase_key(
@@ -225,6 +234,14 @@ mod tests {
         ));
         let again = seal_seed(&entropy, "correct horse").expect("seal");
         assert_ne!(again.salt, envelope.salt, "fresh salt per envelope");
+        let tampered = SeedEnvelope {
+            m_cost_kib: 4 * 1024 * 1024,
+            ..envelope
+        };
+        assert!(matches!(
+            open_seed(&tampered, "correct horse"),
+            Err(PocketError::Corrupt(_))
+        ));
     }
 
     #[test]
