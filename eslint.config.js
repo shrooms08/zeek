@@ -28,7 +28,7 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    files: ["apps/harness/e2e/**/*.mjs"],
+    files: ["apps/harness/e2e/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: { globals: { ...globals.node } },
   },
 );
