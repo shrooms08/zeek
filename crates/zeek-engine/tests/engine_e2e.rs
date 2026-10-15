@@ -412,6 +412,20 @@ async fn http_api_serves_the_round() {
     let health: HealthResponse = serde_json::from_slice(&body).expect("json");
     assert_eq!(health.settled_rounds, 1);
 
+    let (status, body) = get(&app, "/v1/status").await;
+    assert_eq!(status, StatusCode::OK);
+    let view: zeek_engine::api::StatusResponse = serde_json::from_slice(&body).expect("json");
+    assert_eq!(view.engine.last_settled_round, Some(0));
+    assert_eq!(view.engine.stored_tip, health.tip_height);
+    assert!(view.engine.last_block_time.is_some());
+    assert_eq!(
+        view.keyholders.len(),
+        3,
+        "configured keyholders listed even before a probe"
+    );
+    assert!(view.keyholders.iter().all(|k| k.reachable.is_none()));
+    assert!(view.digging_enabled);
+
     let (status, body) = get(&app, "/v1/rounds/0").await;
     assert_eq!(status, StatusCode::OK);
     let round: RoundResponse = serde_json::from_slice(&body).expect("json");

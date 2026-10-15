@@ -29,6 +29,7 @@ pub mod edge;
 pub mod error;
 pub mod identity;
 pub mod ledger;
+pub mod logging;
 pub mod mempool;
 pub mod processor;
 pub mod proof;

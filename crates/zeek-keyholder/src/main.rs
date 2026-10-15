@@ -88,13 +88,8 @@ struct ServeArgs {
 
 fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .init();
+    // Each keyholder service has its own ZEEK_LOG_DIR.
+    let _log_guard = zeek_engine::logging::init("keyholder")?;
     let cli = Cli::parse();
     let load = |path: &PathBuf| {
         KeyholderConfig::load(path).with_context(|| format!("loading {}", path.display()))

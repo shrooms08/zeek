@@ -260,6 +260,7 @@ pub fn router(state: Arc<AppState>, cors_origins: &[String]) -> Router {
         .route("/v1/rounds/{round}", get(round))
         .route("/v1/rounds/{round}/proof", get(proof))
         .route("/v1/health", get(health))
+        .route("/v1/status", get(status))
         .route("/v1/vault/ledger", get(vault_ledger))
         .route("/v1/stream", get(stream))
         .route("/v1/campfire", get(campfire))
@@ -448,6 +449,60 @@ async fn health(State(state): State<Arc<AppState>>) -> ApiResult<HealthResponse>
         tip_height: db.tip()?.map(|b| b.height),
         settled_rounds: db.settled_rounds()?.len(),
         uptime_secs: state.started.elapsed().as_secs(),
+    }))
+}
+
+/// The engine's own state, for the status page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineStatus {
+    pub uptime_secs: u64,
+    /// Highest block stored.
+    pub stored_tip: Option<u32>,
+    /// Chain tip the servers last reported.
+    pub chain_tip: Option<u32>,
+    /// `nTime` of the highest stored block.
+    pub last_block_time: Option<u64>,
+    pub last_settled_round: Option<u32>,
+}
+
+/// `GET /v1/status`: everything the public status page shows. Each part
+/// reports its own last success, so a stale or failing part is visible.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusResponse {
+    /// Unix seconds when this was produced.
+    pub now: u64,
+    pub network: zeek_core::params::Network,
+    pub digging_enabled: bool,
+    pub engine: EngineStatus,
+    pub threshold: u16,
+    pub keyholders: Vec<KeyholderStatus>,
+    pub chain_servers: Vec<zeek_vault::pool::ServerStatus>,
+}
+
+async fn status(State(state): State<Arc<AppState>>) -> ApiResult<StatusResponse> {
+    let db = reader(&state)?;
+    let tip = db.tip()?;
+    Ok(Json(StatusResponse {
+        now: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        network: state.processor.config().params.network,
+        digging_enabled: state.digging,
+        engine: EngineStatus {
+            uptime_secs: state.started.elapsed().as_secs(),
+            stored_tip: tip.as_ref().map(|b| b.height),
+            chain_tip: db.chain_tip()?,
+            last_block_time: tip.map(|b| b.time),
+            last_settled_round: db.last_settled_round()?,
+        },
+        threshold: state.threshold,
+        keyholders: keyholder_statuses(&state, &db)?,
+        chain_servers: state
+            .chain_servers
+            .as_ref()
+            .map(|p| p.status())
+            .unwrap_or_default(),
     }))
 }
 
@@ -661,11 +716,11 @@ pub struct KeyholdersResponse {
     pub refused_attempts: Vec<RefusedAttempt>,
 }
 
-async fn keyholders_status(State(state): State<Arc<AppState>>) -> ApiResult<KeyholdersResponse> {
-    let db = reader(&state)?;
+/// Every configured keyholder's public status.
+fn keyholder_statuses(state: &AppState, db: &Db) -> Result<Vec<KeyholderStatus>, EngineError> {
     let health = db.keyholder_health()?;
     let counts = db.keyholder_counts()?;
-    let keyholders = state
+    Ok(state
         .keyholder_ids
         .iter()
         .map(|id| {
@@ -687,7 +742,12 @@ async fn keyholders_status(State(state): State<Arc<AppState>>) -> ApiResult<Keyh
                 refused,
             }
         })
-        .collect();
+        .collect())
+}
+
+async fn keyholders_status(State(state): State<Arc<AppState>>) -> ApiResult<KeyholdersResponse> {
+    let db = reader(&state)?;
+    let keyholders = keyholder_statuses(&state, &db)?;
     let mut refused_attempts: Vec<RefusedAttempt> = Vec::new();
     let mut sessions: Vec<String> = Vec::new();
     for event in db.keyholder_events(500)? {
