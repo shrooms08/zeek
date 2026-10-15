@@ -1,7 +1,14 @@
 /** HTTP client for the engine's chain relay and game API. */
 
 import { PocketError } from "./errors.js";
-import type { BoardState, CampfirePage, EngineConfig, PendingRound, WinVerdict } from "./types.js";
+import type {
+  BoardState,
+  CampfirePage,
+  EngineConfig,
+  PendingRound,
+  PinnedVault,
+  WinVerdict,
+} from "./types.js";
 
 /** The engine's stored win proof. */
 export interface StoredProof {
@@ -22,13 +29,33 @@ export const MAX_BLOCK_RANGE = 500;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** The fields of `config` that differ from `pinned`. */
+export function pinMismatches(config: EngineConfig & { uivk?: string }, pinned: PinnedVault) {
+  const differ: string[] = [];
+  if (config.params.network !== pinned.network) differ.push("network");
+  if (config.vault_address !== pinned.vault_address) differ.push("vault address");
+  if (config.sealing_public_key !== pinned.sealing_public_key) differ.push("sealing key");
+  if (config.uivk !== pinned.uivk) differ.push("viewing key");
+  return differ;
+}
+
 export class RelayClient {
   readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
+  private readonly pinned: PinnedVault | undefined;
 
-  constructor(baseUrl: string, fetchImpl: FetchLike = (input, init) => fetch(input, init)) {
+  /**
+   * `pinned`, when given, is checked against every `/v1/config` read; a
+   * mismatch is refused with `config_mismatch`.
+   */
+  constructor(
+    baseUrl: string,
+    fetchImpl: FetchLike = (input, init) => fetch(input, init),
+    pinned?: PinnedVault,
+  ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.fetchImpl = fetchImpl;
+    this.pinned = pinned;
   }
 
   private async request(path: string, init?: RequestInit): Promise<Response> {
@@ -96,7 +123,17 @@ export class RelayClient {
   /** The engine's `/v1/config`: raw JSON text (handed to the wallet core) and parsed. */
   async config(): Promise<{ json: string; config: EngineConfig }> {
     const json = await (await this.request("/v1/config")).text();
-    return { json, config: JSON.parse(json) as EngineConfig };
+    const config = JSON.parse(json) as EngineConfig & { uivk?: string };
+    if (this.pinned !== undefined) {
+      const differ = pinMismatches(config, this.pinned);
+      if (differ.length > 0) {
+        throw new PocketError(
+          "config_mismatch",
+          `the engine names a different ${differ.join(", ")} than this app was built for; refusing to use it`,
+        );
+      }
+    }
+    return { json, config };
   }
 
   async board(): Promise<BoardState> {

@@ -26,6 +26,7 @@ import type {
   DigProgress,
   DigResult,
   HistoryEntry,
+  PinnedVault,
   RoundVerification,
   SendResult,
   SyncProgress,
@@ -60,12 +61,13 @@ export class Pocket {
 
   /**
    * Starts the wallet worker against the engine at `engineUrl` (its chain
-   * relay and game API). The page must be cross-origin isolated.
+   * relay and game API) for the vault `pinned`. The page must be
+   * cross-origin isolated.
    */
-  static async start(engineUrl: string): Promise<Pocket> {
+  static async start(engineUrl: string, pinned: PinnedVault): Promise<Pocket> {
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     const pocket = new Pocket(worker);
-    await pocket.call("init", { engineUrl });
+    await pocket.call("init", { engineUrl, pinned });
     return pocket;
   }
 
@@ -252,9 +254,10 @@ export class Pocket {
  */
 export async function buildDigRequest(
   engineUrl: string,
+  pinned: PinnedVault,
   options: DigRequestOptions,
 ): Promise<AnyWalletDig> {
-  const pocket = await Pocket.start(engineUrl);
+  const pocket = await Pocket.start(engineUrl, pinned);
   try {
     return await pocket.buildDigRequest(options);
   } finally {

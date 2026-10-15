@@ -8,6 +8,7 @@ import type {
   DigProgress,
   DigResult,
   HistoryEntry,
+  PinnedVault,
   RoundVerification,
   SendResult,
   SyncProgress,
@@ -72,7 +73,10 @@ export interface DigRequestOptions {
 
 /** Method name to [argument, result]. */
 export interface Methods {
-  init: [{ engineUrl: string }, { threads: number; crossOriginIsolated: boolean }];
+  init: [
+    { engineUrl: string; pinned: PinnedVault },
+    { threads: number; crossOriginIsolated: boolean },
+  ];
   status: [undefined, WalletStatus];
   create: [{ passphrase: string }, { address: string; birthdayHeight: number }];
   restore: [

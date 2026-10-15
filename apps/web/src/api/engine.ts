@@ -16,6 +16,9 @@ import type {
 export const ENGINE_URL: string =
   (import.meta.env.VITE_ZEEK_ENGINE_URL as string | undefined) ?? "http://127.0.0.1:8787";
 
+/** The vault this build serves; the Pocket refuses any other. */
+export const PINNED_VAULT = __ZEEK_PINNED_VAULT__;
+
 /** Why a request failed, in a form screens can show. */
 export class EngineError extends Error {
   readonly kind: "offline" | "not-found" | "server";

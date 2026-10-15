@@ -20,7 +20,7 @@ import {
   type WalletEvent,
   type WalletState,
 } from "../machines/wallet";
-import { ENGINE_URL } from "./engine";
+import { ENGINE_URL, PINNED_VAULT } from "./engine";
 
 interface PocketApi {
   /** Starts the worker if needed. */
@@ -37,7 +37,7 @@ export function PocketProvider({ children }: { children: ReactNode }) {
   const started = useRef<Promise<Pocket> | undefined>(undefined);
   const [wallet, dispatch] = useReducer(walletReducer, initialWallet);
   const pocket = useCallback(() => {
-    started.current ??= Pocket.start(ENGINE_URL);
+    started.current ??= Pocket.start(ENGINE_URL, PINNED_VAULT);
     return started.current;
   }, []);
   const refresh = useCallback(async () => {

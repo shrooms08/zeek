@@ -24,6 +24,7 @@ export type PocketErrorCode =
   | "broadcast_rejected"
   | "not_isolated"
   | "partial_dig"
+  | "config_mismatch"
   | "internal";
 
 const CODES: ReadonlySet<string> = new Set<PocketErrorCode>([
@@ -49,6 +50,7 @@ const CODES: ReadonlySet<string> = new Set<PocketErrorCode>([
   "broadcast_rejected",
   "not_isolated",
   "partial_dig",
+  "config_mismatch",
   "internal",
 ]);
 

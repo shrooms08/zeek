@@ -298,8 +298,8 @@ async function crossCheck(
 type Handler<M extends MethodName> = (arg: Methods[M][0], id: number) => Promise<Methods[M][1]>;
 
 const handlers: { [M in MethodName]: Handler<M> } = {
-  async init({ engineUrl }) {
-    relay = new RelayClient(engineUrl);
+  async init({ engineUrl, pinned }) {
+    relay = new RelayClient(engineUrl, undefined, pinned);
     const threads = await wasm();
     return { threads, crossOriginIsolated: globalThis.crossOriginIsolated };
   },

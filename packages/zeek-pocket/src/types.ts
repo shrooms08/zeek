@@ -135,6 +135,19 @@ export interface PendingRound {
 }
 
 /** The parts of the engine's `/v1/config` the wallet reads. */
+/**
+ * The vault this app was built for (from the public game config, compiled
+ * into the build). The wallet refuses an engine whose `/v1/config` names a
+ * different vault, sealing key, viewing key or network, so a compromised
+ * engine, proxy or tunnel cannot redirect digs or unseal receivers.
+ */
+export interface PinnedVault {
+  network: string;
+  vault_address: string;
+  sealing_public_key: string;
+  uivk: string;
+}
+
 export interface EngineConfig {
   params: {
     network: string;

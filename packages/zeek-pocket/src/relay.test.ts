@@ -74,4 +74,53 @@ describe("RelayClient", () => {
     expect(hexToBytes("00ff10")).toEqual(new Uint8Array([0, 255, 16]));
     expect(() => hexToBytes("abc")).toThrow(PocketError);
   });
+
+  it("refuses an engine config that names another vault (security review H3)", async () => {
+    const pinned = {
+      network: "test",
+      vault_address: "utest1vault",
+      sealing_public_key: "aa".repeat(32),
+      uivk: "uivktest1key",
+    };
+    const config = (overrides: Record<string, unknown>) => () =>
+      Response.json({
+        params: { network: "test", min_dig_zat: 1, blocks_per_round: 24, genesis_height: 1 },
+        vault_address: pinned.vault_address,
+        sealing_public_key: pinned.sealing_public_key,
+        uivk: pinned.uivk,
+        genesis_height: 1,
+        ...overrides,
+      });
+    const honest = new RelayClient(
+      "http://engine",
+      fakeFetch({ "/v1/config": config({}) }, []),
+      pinned,
+    );
+    expect((await honest.config()).config.vault_address).toBe("utest1vault");
+    for (const [field, value] of [
+      ["vault_address", "utest1attacker"],
+      ["sealing_public_key", "bb".repeat(32)],
+      ["uivk", "uivktest1other"],
+    ]) {
+      const swapped = new RelayClient(
+        "http://engine",
+        fakeFetch({ "/v1/config": config({ [field as string]: value }) }, []),
+        pinned,
+      );
+      await expect(swapped.config()).rejects.toMatchObject({ code: "config_mismatch" });
+    }
+    const mainnet = new RelayClient(
+      "http://engine",
+      fakeFetch(
+        {
+          "/v1/config": config({
+            params: { network: "main", min_dig_zat: 1, blocks_per_round: 24, genesis_height: 1 },
+          }),
+        },
+        [],
+      ),
+      pinned,
+    );
+    await expect(mainnet.config()).rejects.toMatchObject({ code: "config_mismatch" });
+  });
 });
