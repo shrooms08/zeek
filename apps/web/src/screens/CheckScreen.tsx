@@ -116,6 +116,7 @@ export default function CheckScreen() {
         {rows.map((r) => (
           <CheckRow
             key={r.id}
+            id={r.id}
             title={r.title}
             text={r.text}
             state={r.state}

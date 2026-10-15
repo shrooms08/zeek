@@ -24,6 +24,23 @@ export interface Board {
   depths: number[];
   stages: number[];
   digs: number;
+  /**
+   * Digs seen in the mempool, not yet mined: shown as "landing", never
+   * counted in the prize or depths. Present on /v1/board; the stream sends
+   * them as separate "landing" events.
+   */
+  landing?: LandingDig[];
+}
+
+/** A dig in the mempool (engine mempool watcher). No txid, no address. */
+export interface LandingDig {
+  id: string;
+  round: number;
+  tile: number;
+  value_zat: number;
+  /** SHA-256 of the 512-byte memo field (as /v1/rounds/{n}/digests). */
+  memo_sha256: string;
+  first_seen: number;
 }
 
 export interface PendingRound {
@@ -192,4 +209,5 @@ export type LiveEvent =
   | { event: "reveal"; round: number; treasure_tile: number; cache_triggered: boolean }
   | { event: "settled"; round: number; new_cache: number }
   | { event: "paid"; round: number; txid: string }
-  | ({ event: "campfire" } & CampfireMessage);
+  | ({ event: "campfire" } & CampfireMessage)
+  | { event: "landing"; digs: LandingDig[] };

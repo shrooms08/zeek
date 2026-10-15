@@ -1,12 +1,16 @@
 /**
- * <DigPanel>: <TileCount>, <AmountPicker>, Auto-pick, "Dig separately",
- * optional message, total with fees, <DigButton>, wallet choice.
+ * <DigPanel> (design: <DigTray>): tile count, <AmountPicker>, Auto-pick,
+ * "Dig separately", optional message, total with fees, <DigButton>, wallet
+ * choice. Empty, it shrinks to "Tap tiles to dig" and Auto-pick (1B).
+ * `compact` is the mobile bottom sheet (1C).
  */
 
+import { motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { digTotal } from "../lib/digPlan";
 import { AMOUNT_STEP, formatZec, parseZec, PRESETS, type Zat } from "../lib/money";
+import { EASE } from "../motion/tokens";
 import { Icon } from "./Icon";
 import { DigButton } from "./ui";
 
@@ -16,7 +20,12 @@ export function messageBytes(text: string): number {
 }
 export const MAX_DIG_MESSAGE_BYTES = 275;
 
-export function AmountPicker(props: { value: Zat; min: Zat; onChange: (v: Zat) => void }) {
+export function AmountPicker(props: {
+  value: Zat;
+  min: Zat;
+  onChange: (v: Zat) => void;
+  compact?: boolean;
+}) {
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? formatZec(props.value, { decimals: 8 });
   const commit = (raw: string) => {
@@ -28,69 +37,81 @@ export function AmountPicker(props: { value: Zat; min: Zat; onChange: (v: Zat) =
     }
     setText(null);
   };
+  const compact = props.compact === true;
+  const step = (
+    <>
+      <button
+        type="button"
+        className="btn zk-square"
+        aria-label="Less per tile"
+        onClick={() => {
+          props.onChange(
+            props.value - AMOUNT_STEP < props.min ? props.min : props.value - AMOUNT_STEP,
+          );
+        }}
+      >
+        <Icon name="minus" size={22} />
+      </button>
+      <label className="zk-amount-field flex-1 flex flex-col items-center justify-center">
+        <input
+          className="numeral bg-transparent text-center w-full"
+          style={{ fontSize: compact ? 22 : 30, border: "none", lineHeight: 1 }}
+          inputMode="decimal"
+          value={shown}
+          onChange={(e) => {
+            setText(e.target.value);
+          }}
+          onBlur={(e) => {
+            commit(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+          }}
+          data-testid="amount-input"
+          aria-label="ZEC per tile"
+        />
+        <span className="label text-fog" style={{ fontSize: 10 }} aria-hidden="true">
+          {compact ? "Per tile" : "ZEC per tile"}
+        </span>
+      </label>
+      <button
+        type="button"
+        className="btn zk-square"
+        aria-label="More per tile"
+        onClick={() => {
+          props.onChange(props.value + AMOUNT_STEP);
+        }}
+      >
+        <Icon name="plus" size={22} />
+      </button>
+    </>
+  );
+  const presets = PRESETS.map((p) => (
+    <button
+      key={p.toString()}
+      type="button"
+      className={`btn zk-preset ${p === props.value ? "btn-primary" : ""}`}
+      aria-pressed={p === props.value}
+      onClick={() => {
+        props.onChange(p);
+      }}
+    >
+      {compact ? formatZec(p).replace(/^0/, "") : formatZec(p)}
+    </button>
+  ));
   return (
     <div className="flex flex-col gap-2" role="group" aria-label="Amount per tile">
-      <div className="flex items-stretch gap-2">
-        <button
-          type="button"
-          className="btn"
-          aria-label="Less per tile"
-          onClick={() => {
-            props.onChange(
-              props.value - AMOUNT_STEP < props.min ? props.min : props.value - AMOUNT_STEP,
-            );
-          }}
-        >
-          <Icon name="minus" />
-        </button>
-        <label className="flex-1 panel flex flex-col items-center justify-center p-1">
-          <input
-            className="numeral bg-transparent text-center w-full"
-            style={{ fontSize: 28, border: "none" }}
-            inputMode="decimal"
-            value={shown}
-            onChange={(e) => {
-              setText(e.target.value);
-            }}
-            onBlur={(e) => {
-              commit(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
-            }}
-            data-testid="amount-input"
-            aria-label="ZEC per tile"
-          />
-          <span className="label text-fog" aria-hidden="true">
-            ZEC per tile
-          </span>
-        </label>
-        <button
-          type="button"
-          className="btn"
-          aria-label="More per tile"
-          onClick={() => {
-            props.onChange(props.value + AMOUNT_STEP);
-          }}
-        >
-          <Icon name="plus" />
-        </button>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {PRESETS.map((p) => (
-          <button
-            key={p.toString()}
-            type="button"
-            className={`btn ${p === props.value ? "btn-primary" : ""}`}
-            aria-pressed={p === props.value}
-            onClick={() => {
-              props.onChange(p);
-            }}
-          >
-            {formatZec(p)}
-          </button>
-        ))}
-      </div>
+      {compact ? (
+        <div className="flex items-stretch gap-2">
+          {step}
+          {presets}
+        </div>
+      ) : (
+        <>
+          <div className="flex items-stretch gap-2">{step}</div>
+          <div className="grid grid-cols-3 gap-2">{presets}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -104,6 +125,8 @@ export interface DigPanelProps {
   campfire: boolean;
   closed: boolean;
   pocketLabel: string;
+  /** The mobile bottom sheet. */
+  compact?: boolean;
   onAmount: (v: Zat) => void;
   onSeparate: (v: boolean) => void;
   onMessage: (v: string) => void;
@@ -112,29 +135,190 @@ export interface DigPanelProps {
   onDig: () => void;
 }
 
+function SeparateSwitch({
+  on,
+  onChange,
+  short,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  short: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-white cursor-pointer">
+      <input
+        type="checkbox"
+        role="switch"
+        checked={on}
+        onChange={(e) => {
+          onChange(e.target.checked);
+        }}
+        className="zk-switch"
+        data-testid="separate"
+      />
+      <span className="leading-tight">
+        {short ? "Separate" : "Dig separately"}
+        {!short && <span className="text-fog text-sm block">more private</span>}
+      </span>
+    </label>
+  );
+}
+
 export function DigPanel(p: DigPanelProps) {
   const total = digTotal(p.tiles, p.amountEach, p.separate);
   const n = p.tiles.length;
   const tooLong = messageBytes(p.message) > MAX_DIG_MESSAGE_BYTES;
+  const reduce = useReducedMotion() === true;
+  const [showMessage, setShowMessage] = useState(p.message !== "");
+  const compact = p.compact === true;
+  const state = p.closed ? "closed" : n === 0 ? "empty" : tooLong ? "closed" : "idle";
+
+  const message = p.campfire && (!compact || showMessage) && (
+    <label className="flex flex-col gap-1">
+      <span className="label text-fog" style={{ fontSize: 11 }}>
+        Campfire message (optional)
+      </span>
+      <input
+        className="field-input"
+        value={p.message}
+        maxLength={400}
+        onChange={(e) => {
+          p.onMessage(e.target.value);
+        }}
+        placeholder="Say something with your dig"
+        data-testid="dig-message"
+        aria-describedby="message-count"
+      />
+      <span
+        id="message-count"
+        className={`text-xs ${tooLong ? "text-white font-bold" : "text-fog"}`}
+      >
+        {messageBytes(p.message)} / {MAX_DIG_MESSAGE_BYTES} bytes · public, anonymous, permanent
+      </span>
+    </label>
+  );
+
+  const count = (
+    <motion.span
+      key={n}
+      className="numeral inline-block origin-left"
+      style={{ fontSize: compact ? 18 : 56, lineHeight: 1 }}
+      initial={reduce || n === 0 ? false : { scale: 1.12 }}
+      animate={{ scale: 1 }}
+      transition={{ duration: 0.16, ease: EASE.out }}
+      data-testid="tile-count"
+    >
+      {n}
+    </motion.span>
+  );
+
+  if (compact) {
+    return (
+      <section
+        className="zk-panel-compact flex flex-col gap-2"
+        aria-label="Dig"
+        data-testid="dig-panel"
+      >
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-2 text-white font-extrabold flex-1">
+            <Icon name="tile" size={18} />
+            {count} {n === 1 ? "tile" : "tiles"}
+          </span>
+          <button
+            type="button"
+            className="btn flex items-center gap-1.5"
+            onClick={p.onAutoPick}
+            disabled={p.closed}
+            data-testid="auto-pick"
+          >
+            <Icon name="wand" size={16} /> Auto
+          </button>
+          <SeparateSwitch on={p.separate} onChange={p.onSeparate} short />
+        </div>
+        <AmountPicker value={p.amountEach} min={p.minDig} onChange={p.onAmount} compact />
+        {message}
+        <DigButton
+          state={state}
+          count={n}
+          onClick={p.onDig}
+          total={n > 0 ? formatZec(total.total, { decimals: 8 }) : undefined}
+          compact
+        />
+        <div className="flex justify-between text-xs">
+          <span className="text-fog flex items-center gap-1.5">
+            <Icon name="wallet" size={14} /> {p.pocketLabel}
+          </span>
+          <span className="flex gap-3">
+            {p.campfire && (
+              <button
+                type="button"
+                className="underline text-white"
+                onClick={() => {
+                  setShowMessage((s) => !s);
+                }}
+              >
+                Message
+              </button>
+            )}
+            <Link to="/dig/wallet" className="underline text-white" data-testid="other-wallet">
+              Other wallet
+            </Link>
+          </span>
+        </div>
+      </section>
+    );
+  }
+
+  if (n === 0) {
+    return (
+      <section className="flex flex-col gap-4" aria-label="Dig" data-testid="dig-panel">
+        <DigButton state={state} count={0} onClick={p.onDig} />
+        <button
+          type="button"
+          className="btn flex items-center justify-center gap-2"
+          onClick={p.onAutoPick}
+          disabled={p.closed}
+          data-testid="auto-pick"
+        >
+          <Icon name="wand" size={18} /> Auto-pick 3 quiet tiles
+        </button>
+        <span className="sr-only" data-testid="tile-count">
+          0
+        </span>
+        <div className="flex justify-between text-sm">
+          <span className="text-fog flex items-center gap-2">
+            <Icon name="wallet" size={16} /> {p.pocketLabel}
+          </span>
+          <Link to="/dig/wallet" className="underline text-white" data-testid="other-wallet">
+            Other wallet
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className="panel p-4 flex flex-col gap-4" aria-label="Dig" data-testid="dig-panel">
+    <motion.section
+      className="panel zk-lift p-6 flex flex-col gap-4"
+      aria-label="Dig"
+      data-testid="dig-panel"
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: EASE.out }}
+    >
       <div className="flex items-end justify-between">
         <div>
           <div className="label flex items-center gap-2">
             <Icon name="tile" size={16} /> Tiles
           </div>
-          <div className="numeral" style={{ fontSize: 48 }} data-testid="tile-count">
-            {n}
-          </div>
+          {count}
         </div>
-        {n > 0 && (
-          <button type="button" className="underline text-white" onClick={p.onClear}>
-            Clear
-          </button>
-        )}
+        <button type="button" className="underline text-fog hover:text-white" onClick={p.onClear}>
+          Clear
+        </button>
       </div>
       <AmountPicker value={p.amountEach} min={p.minDig} onChange={p.onAmount} />
-      <div className="flex gap-2 flex-wrap items-center">
+      <div className="flex gap-3 flex-wrap items-center justify-between">
         <button
           type="button"
           className="btn flex items-center gap-2"
@@ -144,65 +328,27 @@ export function DigPanel(p: DigPanelProps) {
         >
           <Icon name="wand" size={18} /> Auto-pick
         </button>
-        <label className="flex items-center gap-2 text-white">
-          <input
-            type="checkbox"
-            checked={p.separate}
-            onChange={(e) => {
-              p.onSeparate(e.target.checked);
-            }}
-            className="w-6 h-6"
-            data-testid="separate"
-          />
-          <span>
-            Dig separately <span className="text-fog text-sm block">more private</span>
-          </span>
-        </label>
+        <SeparateSwitch on={p.separate} onChange={p.onSeparate} short={false} />
       </div>
-      {p.campfire && (
-        <label className="flex flex-col gap-1">
-          <span className="label">Message (optional)</span>
-          <input
-            className="field-input"
-            value={p.message}
-            maxLength={400}
-            onChange={(e) => {
-              p.onMessage(e.target.value);
-            }}
-            placeholder="Say something at the campfire"
-            data-testid="dig-message"
-            aria-describedby="message-count"
-          />
-          <span
-            id="message-count"
-            className={`text-sm ${tooLong ? "text-white font-bold" : "text-fog"}`}
-          >
-            {messageBytes(p.message)} / {MAX_DIG_MESSAGE_BYTES} bytes · public, anonymous, permanent
-          </span>
-        </label>
-      )}
-      <div className="border-t hair pt-3 flex items-end justify-between gap-2" data-testid="total">
-        <div>
+      {message}
+      <div className="border-t hair pt-4 flex items-end justify-between gap-3" data-testid="total">
+        <div className="min-w-0">
           <div className="label flex items-center gap-2">
             <Icon name="coin" size={16} /> Total
           </div>
-          <div className="font-mono text-mono text-fog">
+          <div className="font-mono text-xs text-fog mt-1">
             {n} × {formatZec(p.amountEach, { decimals: 8 })} + fee{" "}
             {formatZec(total.fee, { decimals: 8 })}
           </div>
           <div className="font-mono text-xs text-fog">
-            fee 0.00005 per tile + 0.00005 per payment ({total.payments.length})
+            fee 0.00005 per tile + per payment ({total.payments.length})
           </div>
         </div>
-        <div className="numeral" style={{ fontSize: 32 }} data-testid="total-amount">
+        <div className="numeral" style={{ fontSize: 30 }} data-testid="total-amount">
           {formatZec(total.total, { decimals: 8 })}
         </div>
       </div>
-      <DigButton
-        state={p.closed ? "closed" : n === 0 ? "empty" : tooLong ? "closed" : "idle"}
-        count={n}
-        onClick={p.onDig}
-      />
+      <DigButton state={state} count={n} onClick={p.onDig} />
       <div className="flex justify-between text-sm">
         <span className="text-fog flex items-center gap-2">
           <Icon name="wallet" size={16} /> {p.pocketLabel}
@@ -211,6 +357,6 @@ export function DigPanel(p: DigPanelProps) {
           Other wallet
         </Link>
       </div>
-    </section>
+    </motion.section>
   );
 }

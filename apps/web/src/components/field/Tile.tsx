@@ -1,95 +1,94 @@
 /**
- * One tile (an SVG group). Depth is drawn with shape, never colour alone:
- * the hole grows, its wall deepens and the floor darkens with the stage.
- * Phase 7b replaces the line art inside these groups.
+ * One tile's ink: the top face and grain, the hole at its depth stage, and
+ * the treasure's light. Depth reads at a glance and never by colour alone:
+ * each stage the hole widens, its walls deepen, the hatching gets denser
+ * and darker and the rim heavier.
+ *
+ * When the depth grows (someone dug), the tile plays the design's landing:
+ * a 240 ms shake, the hatch fading in and the rim drawing on (300 ms,
+ * stroke-dashoffset). With reduced motion the new hole simply appears.
+ * Picking, hover and focus live in <Field>'s hit layer, not here.
  */
 
-import { memo } from "react";
-import { center, diamond, HOLE_SCALE, WALL_DEPTH } from "./iso";
+import { memo, useEffect, useMemo, useRef } from "react";
+import { hole, tileFace, tileKnot } from "../../art/field";
+import { Markup } from "../../art/InkSvg";
+import { CSS_EASE, DUR } from "../../motion/tokens";
+import { prefersReducedMotion } from "../../lib/useNow";
 
 export type TileState = "idle" | "hover" | "selected" | "focus" | "disabled" | "treasure";
 
 export interface TileProps {
   index: number;
   depth: number;
-  hovered: boolean;
-  focused: boolean;
-  /** 1-based pick order, if selected. */
-  pick: number | null;
-  treasure: boolean;
-  disabled: boolean;
-  onToggle: (index: number) => void;
-  onHover: (index: number | null) => void;
+  /** Ink prefix of the SVG's defs. */
+  p: string;
+  lifted: boolean;
+  /** The revealed treasure tile's light ("gold" for the real treasure). */
+  lit: "gold" | "white" | null;
+  /** Tremble delay (ms) when the reveal's cracks run; null when still. */
+  tremble: number | null;
 }
 
-const FLOOR = ["#ECEBE6", "#D6D6D6", "#A6A6A6", "#6B6B6B", "#3A3A3A", "#0A0A0A"];
-
-export const Tile = memo(function Tile(props: TileProps) {
-  const { index, depth, hovered, focused, pick, treasure, disabled } = props;
-  const { x, y } = center(index);
+export const Tile = memo(function Tile({ index, depth, p, lifted, lit, tremble }: TileProps) {
   const stage = Math.max(0, Math.min(5, depth));
-  const hole = HOLE_SCALE[stage] ?? 0;
-  const wall = WALL_DEPTH[stage] ?? 0;
+  const ref = useRef<SVGGElement>(null);
+  const previous = useRef(stage);
+  const html = useMemo(
+    () =>
+      tileFace(index, lit) +
+      (stage === 0 ? tileKnot(index) : "") +
+      (stage > 0 ? hole(index, stage, p) : ""),
+    [index, lit, stage, p],
+  );
+
+  useEffect(() => {
+    const was = previous.current;
+    previous.current = stage;
+    const g = ref.current;
+    if (g === null || stage <= was || prefersReducedMotion()) return;
+    g.animate(
+      [
+        { transform: "translate(0,0)" },
+        { transform: "translate(-1.6px,.6px)" },
+        { transform: "translate(1.6px,-.4px)" },
+        { transform: "translate(-1px,0)" },
+        { transform: "translate(0,0)" },
+      ],
+      { duration: DUR.shake, delay: 120 },
+    );
+    g.querySelector("[data-hatch]")?.animate([{ opacity: 0.2 }, { opacity: 1 }], {
+      duration: DUR.dig,
+      delay: 100,
+      easing: CSS_EASE.out,
+      fill: "backwards",
+    });
+    const rim = g.querySelector<SVGPolygonElement>("[data-rim]");
+    if (rim !== null) {
+      rim.style.strokeDasharray = "1";
+      const a = rim.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], {
+        duration: DUR.dig,
+        delay: 100,
+        easing: CSS_EASE.out,
+        fill: "backwards",
+      });
+      a.onfinish = () => {
+        rim.style.strokeDasharray = "";
+      };
+    }
+  }, [stage]);
+
   return (
     <g
-      data-tile={index}
-      data-depth={stage}
-      data-selected={pick !== null}
-      onClick={() => {
-        if (!disabled) props.onToggle(index);
+      ref={ref}
+      data-t={index}
+      className={tremble === null ? "zk-tile" : "zk-tile zk-tremble"}
+      style={{
+        transform: lifted ? "translate(0px,-2px)" : undefined,
+        animationDelay: tremble === null ? undefined : `${tremble}ms`,
       }}
-      onMouseEnter={() => {
-        props.onHover(index);
-      }}
-      onMouseLeave={() => {
-        props.onHover(null);
-      }}
-      style={{ cursor: disabled ? "default" : "pointer" }}
     >
-      <polygon
-        points={diamond(x, y)}
-        fill={treasure ? "var(--color-gold)" : disabled ? "#1C1C1C" : "#ECEBE6"}
-        stroke="#0A0A0A"
-        strokeWidth={2}
-      />
-      {hole > 0 && (
-        <g aria-hidden="true">
-          {/* The wall: the hole's back edge seen through its opening. */}
-          <polygon
-            points={diamond(x, y - wall / 3, hole)}
-            fill="#3A3A3A"
-            stroke="#0A0A0A"
-            strokeWidth={1.5}
-          />
-          <polygon
-            points={diamond(x, y + wall / 3, hole * 0.82)}
-            fill={FLOOR[stage]}
-            stroke="#0A0A0A"
-            strokeWidth={1.5}
-          />
-        </g>
-      )}
-      {(hovered || focused || pick !== null) && !disabled && (
-        <polygon
-          points={diamond(x, y, 0.92)}
-          fill="none"
-          stroke={focused ? "#0A0A0A" : "#0A0A0A"}
-          strokeWidth={focused ? 5 : 3}
-          strokeDasharray={hovered && pick === null && !focused ? "8 6" : undefined}
-        />
-      )}
-      {focused && (
-        <polygon points={diamond(x, y, 1.04)} fill="none" stroke="#FFFFFF" strokeWidth={4} />
-      )}
-      {pick !== null && (
-        <g aria-hidden="true">
-          <line x1={x} y1={y} x2={x} y2={y - 34} stroke="#0A0A0A" strokeWidth={3} />
-          <circle cx={x} cy={y - 46} r={14} fill="#0A0A0A" stroke="#FFFFFF" strokeWidth={3} />
-          <text x={x} y={y - 41} textAnchor="middle" fontSize={15} fontWeight={900} fill="#FFFFFF">
-            {pick}
-          </text>
-        </g>
-      )}
+      <Markup html={html} />
     </g>
   );
 });

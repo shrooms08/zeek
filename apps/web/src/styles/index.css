@@ -54,7 +54,10 @@
   --shadow-lift: 6px 6px 0 #6b6b6b;
 
   --ease-snap: cubic-bezier(0.2, 0.9, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
   --ease-heave: cubic-bezier(0.6, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 :root {
@@ -153,6 +156,967 @@ body {
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 150ms !important;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Ink loops (design/mono Zeek Motion § 03 "CSS keyframes"). They only  */
+/* touch opacity and transform. Reduced motion: none play, and boiled */
+/* art shows its first variant.                                        */
+/* ------------------------------------------------------------------ */
+
+/* Boiling lines: three pre-built variants, one visible per 111 ms (9 fps). */
+.zk-boil {
+  will-change: opacity;
+  opacity: 0;
+  animation: zk-boil 0.333s step-end infinite;
+}
+.zk-boil-1 {
+  animation-delay: -0.111s;
+}
+.zk-boil-2 {
+  animation-delay: -0.222s;
+}
+@keyframes zk-boil {
+  0% {
+    opacity: 1;
+  }
+  33.3% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.zk-flicker {
+  animation: zk-flicker 4.2s linear infinite;
+}
+@keyframes zk-flicker {
+  0%,
+  40%,
+  100% {
+    opacity: 1;
+  }
+  42% {
+    opacity: 0.45;
+  }
+  44% {
+    opacity: 0.9;
+  }
+  47% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.zk-eyes {
+  animation: zk-blink 4.4s infinite;
+}
+@keyframes zk-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+.zk-lantern {
+  animation: zk-sway 2.6s ease-in-out infinite alternate;
+}
+@keyframes zk-sway {
+  from {
+    transform: rotate(-6deg);
+  }
+  to {
+    transform: rotate(6deg);
+  }
+}
+.zk-pose-cheer .zk-body {
+  animation: zk-hop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) infinite alternate;
+}
+@keyframes zk-hop {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-7px);
+  }
+}
+.zk-pose-shrug .zk-arms {
+  animation: zk-shrug 1.8s ease-in-out infinite;
+}
+@keyframes zk-shrug {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  20%,
+  40% {
+    transform: translateY(-4px);
+  }
+}
+.zk-pose-campfire .zk-head {
+  animation: zk-nod 3.4s ease-in-out infinite;
+}
+@keyframes zk-nod {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0);
+  }
+  80% {
+    transform: rotate(6deg);
+  }
+  90% {
+    transform: rotate(0);
+  }
+}
+.zk-pose-peek .zk-head {
+  animation: zk-peek 3s ease-in-out infinite;
+}
+@keyframes zk-peek {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+/* Flame: three frames, 120 ms each. */
+.zk-frames > g {
+  opacity: 0;
+  animation: zk-boil 0.36s step-end infinite;
+}
+.zk-frames > g:nth-child(2) {
+  animation-delay: -0.12s;
+}
+.zk-frames > g:nth-child(3) {
+  animation-delay: -0.24s;
+}
+.zk-spark {
+  animation: zk-rise 2.4s linear infinite;
+}
+@keyframes zk-rise {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-46px);
+    opacity: 0;
+  }
+}
+.zk-twinkle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zk-twinkle 1.4s ease-in-out infinite alternate;
+}
+@keyframes zk-twinkle {
+  from {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+/* Fireflies and dust drifting over the island. */
+.zk-drift {
+  animation: zk-drift 9s ease-in-out infinite alternate;
+}
+@keyframes zk-drift {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(18px, -26px);
+    opacity: 0.1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zk-boil,
+  .zk-frames > g {
+    animation: none !important;
+    opacity: 0;
+  }
+  .zk-boil-0,
+  .zk-frames > g:first-child {
+    opacity: 1;
+  }
+  .zk-flicker,
+  .zk-eyes,
+  .zk-lantern,
+  .zk-body,
+  .zk-arms,
+  .zk-head,
+  .zk-twinkle {
+    animation: none !important;
+  }
+  .zk-spark,
+  .zk-drift {
+    animation: none !important;
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Interactive environment (purely local delight).                     */
+/* ------------------------------------------------------------------ */
+.zk-prop-button {
+  pointer-events: auto;
+  border-radius: 9999px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.zk-prop-button:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+.zk-prop-button:focus-visible {
+  outline: 3px dashed var(--color-white);
+  outline-offset: 2px;
+}
+/* Reactions run on the prop's inner group, around its base. */
+.zk-prop,
+.zk-act {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.zk-act-sway-0 {
+  animation: zk-tree-sway-0 1.2s var(--ease-heave);
+}
+.zk-act-sway-1 {
+  animation: zk-tree-sway-1 1.2s var(--ease-heave);
+}
+@keyframes zk-tree-sway-0 {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(-7deg);
+  }
+  45% {
+    transform: rotate(5deg);
+  }
+  70% {
+    transform: rotate(-2deg);
+  }
+}
+@keyframes zk-tree-sway-1 {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(-7deg);
+  }
+  45% {
+    transform: rotate(5deg);
+  }
+  70% {
+    transform: rotate(-2deg);
+  }
+}
+.zk-act-flicker-0,
+.zk-act-flicker-1 {
+  animation: zk-lamp-off 1s steps(1, end);
+}
+@keyframes zk-lamp-off {
+  0% {
+    opacity: 0.1;
+  }
+  18% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.05;
+  }
+  60% {
+    opacity: 0.6;
+  }
+  72% {
+    opacity: 0.1;
+  }
+  85% {
+    opacity: 1;
+  }
+}
+.zk-act-roll-0 {
+  animation: zk-roll-0 2.4s var(--ease-heave);
+}
+.zk-act-roll-1 {
+  animation: zk-roll-1 2.4s var(--ease-heave);
+}
+@keyframes zk-roll-0 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(72px, 36px);
+  }
+}
+@keyframes zk-roll-1 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(72px, 36px);
+  }
+}
+.zk-act-wobble-0,
+.zk-act-wobble-1 {
+  animation: zk-wobble 0.6s linear;
+}
+@keyframes zk-wobble {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(-6deg);
+  }
+  40% {
+    transform: rotate(5deg);
+  }
+  60% {
+    transform: rotate(-3deg);
+  }
+  80% {
+    transform: rotate(2deg);
+  }
+}
+.zk-act-rumble-0,
+.zk-act-rumble-1 {
+  animation: zk-rumble 0.8s linear;
+}
+@keyframes zk-rumble {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  10%,
+  50%,
+  90% {
+    transform: translate(-2.5px, 0.5px);
+  }
+  30%,
+  70% {
+    transform: translate(2.5px, -0.5px);
+  }
+}
+.zk-act-zeb-0,
+.zk-act-zeb-1 {
+  animation: zk-zeb-hop 0.7s var(--ease-spring);
+}
+@keyframes zk-zeb-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-12px);
+  }
+}
+.zk-act-egg-0,
+.zk-act-egg-1 {
+  animation: zk-egg 2.4s var(--ease-spring);
+}
+@keyframes zk-egg {
+  0% {
+    transform: translateY(60px);
+    opacity: 0;
+  }
+  30% {
+    transform: translateY(60px);
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(-10px);
+  }
+  70%,
+  100% {
+    transform: translateY(0);
+  }
+}
+.zk-leaf {
+  animation: zk-leaf 1.6s var(--ease-out) forwards;
+  opacity: 0;
+}
+@keyframes zk-leaf {
+  0% {
+    transform: translate(0, 0) rotate(0);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(var(--sway), 22px) rotate(90deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 48px) rotate(200deg);
+    opacity: 0;
+  }
+}
+.zk-sparkout {
+  animation: zk-sparkout 0.8s var(--ease-out) forwards;
+  opacity: 0;
+}
+@keyframes zk-sparkout {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy));
+    opacity: 0;
+  }
+}
+.zk-sparkburst path {
+  animation: zk-sparkout 0.7s var(--ease-out) forwards;
+}
+.zk-bubble-body {
+  background: var(--color-bone);
+  color: var(--color-ink);
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 0 0 2px var(--color-white);
+  position: relative;
+}
+.zk-bubble-tail-bottom::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -11px;
+  width: 16px;
+  height: 16px;
+  background: var(--color-bone);
+  border-right: 3px solid var(--color-ink);
+  border-bottom: 3px solid var(--color-ink);
+  transform: translateX(-50%) rotate(45deg);
+}
+.zk-bubble-tail-left::after {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  background: var(--color-bone);
+  border-left: 3px solid var(--color-ink);
+  border-bottom: 3px solid var(--color-ink);
+  transform: translateY(-50%) rotate(45deg);
+}
+.zk-bubble-joiner {
+  font-weight: 900;
+  font-size: 60%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zk-act,
+  .zk-leaf,
+  .zk-sparkout,
+  .zk-sparkburst path {
+    animation: none !important;
+  }
+  .zk-leaf,
+  .zk-sparkout,
+  .zk-sparkburst path {
+    opacity: 0;
+  }
+  /* A tap only highlights the prop. */
+  .zk-prop-button[data-active="true"] {
+    outline: 3px dashed var(--color-white);
+    outline-offset: 2px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Field one-shots (Zeek Motion § 02 rows 2, 3, 9).                    */
+/* ------------------------------------------------------------------ */
+.zk-tile {
+  transition: transform 120ms var(--ease-snap);
+}
+.zk-tremble {
+  animation: zk-tremble 220ms linear;
+}
+@keyframes zk-tremble {
+  0% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(0, -3px);
+  }
+  66% {
+    transform: translate(1px, 1px);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+/* Ink draw-on: pathLength=1 on the element. */
+.zk-draw {
+  stroke-dasharray: 1;
+  animation: zk-draw 500ms var(--ease-out) both;
+}
+@keyframes zk-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.zk-fade-in {
+  animation: zk-fade 300ms var(--ease-out) both;
+}
+@keyframes zk-fade {
+  from {
+    opacity: 0;
+  }
+}
+.zk-dim {
+  animation: zk-dim 400ms var(--ease-out) both;
+}
+@keyframes zk-dim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+.zk-burst {
+  animation: zk-burst 320ms var(--ease-heave) 160ms both;
+}
+@keyframes zk-burst {
+  from {
+    transform: scale(0.15);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.zk-chest-drop {
+  animation: zk-chest 420ms var(--ease-snap) both;
+}
+@keyframes zk-chest {
+  0% {
+    transform: translateY(-18px) scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(2px) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+.zk-pin-drop {
+  animation: zk-pin 180ms var(--ease-snap) both;
+}
+@keyframes zk-pin {
+  0% {
+    transform: translateY(-30px);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(3px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+.zk-puff {
+  animation: zk-puff 380ms steps(6, end) both;
+}
+@keyframes zk-puff {
+  0% {
+    transform: scale(0.45);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+.zk-star-fall {
+  animation: zk-star 600ms var(--ease-in) both;
+}
+@keyframes zk-star {
+  0% {
+    transform: translateY(-360px) rotate(-120deg);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+}
+/* Waiting / landing: a dashed outline that seeks. */
+.zk-seek {
+  animation: zk-seek 1.4s linear infinite;
+}
+@keyframes zk-seek {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.zk-settle {
+  animation: zk-settle 1.4s var(--ease-out) infinite;
+}
+@keyframes zk-settle {
+  0% {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(18px);
+    opacity: 0;
+  }
+}
+.zk-flight {
+  stroke-dasharray: 1;
+  animation: zk-flight 650ms var(--ease-out) both;
+}
+@keyframes zk-flight {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  69% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zk-tile {
+    transition: none;
+  }
+  .zk-seek,
+  .zk-settle {
+    animation: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Components (Zeek Design System § 03–04).                            */
+/* ------------------------------------------------------------------ */
+.zk-lift {
+  box-shadow: var(--shadow-lift);
+}
+.zk-square {
+  min-width: 52px;
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.zk-stat,
+.zk-timer {
+  border: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+}
+/* Big numbers: the unit sits on the numeral's baseline, right next to it. */
+.zk-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.zk-unit {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-white);
+  letter-spacing: 0.02em;
+}
+.zk-badge {
+  border: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+  padding: 8px 14px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.zk-netbadge {
+  border: 2px dashed var(--color-white);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.zk-netbadge-main {
+  border-style: solid;
+  background: var(--color-white);
+  color: var(--color-ink);
+}
+.zk-stamp {
+  right: 14px;
+  bottom: 14px;
+  border: 4px solid var(--color-white);
+  color: var(--color-white);
+  padding: 2px 10px;
+  font-weight: 900;
+  font-stretch: 115%;
+  font-size: 22px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--color-night);
+}
+.zk-field-desktop {
+  position: relative;
+  height: calc(100dvh - 80px);
+  min-height: 760px;
+  overflow: hidden;
+}
+.zk-field-stage {
+  position: absolute;
+  left: 9.7%;
+  top: 0;
+  width: 75%;
+}
+.zk-field-mobile {
+  padding-bottom: 236px;
+}
+.zk-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  background: var(--color-night);
+  border-top: var(--border-panel) solid var(--color-white);
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}
+.zk-dig {
+  background: var(--color-white);
+  color: var(--color-ink);
+  border: var(--border-panel) solid var(--color-white);
+  box-shadow: var(--shadow-lift);
+  min-height: 72px;
+  padding: 0 22px;
+  font-size: 30px;
+  font-weight: 900;
+  font-stretch: 115%;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.zk-dig:disabled {
+  background: var(--color-coal);
+  color: var(--color-ash);
+  border-color: var(--color-ash);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.zk-panel-compact .zk-dig {
+  min-height: 56px;
+  font-size: 22px;
+}
+.zk-dig-empty {
+  min-height: 72px;
+  border: var(--border-panel) dashed var(--color-ash);
+  background: var(--color-coal);
+  color: var(--color-fog);
+  font-size: 22px;
+  font-weight: 800;
+}
+.zk-preset {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+}
+.zk-amount-field {
+  border: var(--border-panel) solid var(--color-white);
+  min-height: 52px;
+  padding: 4px;
+}
+/* "Dig separately": an ink switch. */
+.zk-switch {
+  appearance: none;
+  width: 48px;
+  height: 28px;
+  border: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+}
+.zk-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: var(--color-white);
+  transition: transform 160ms var(--ease-snap);
+}
+.zk-switch:checked {
+  background: var(--color-white);
+}
+.zk-switch:checked::after {
+  background: var(--color-ink);
+  transform: translateX(20px);
+}
+.zk-step {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  border: var(--border-panel) solid var(--color-white);
+  flex: none;
+}
+.zk-step-next {
+  border-style: dashed;
+  border-color: var(--color-ash);
+  color: var(--color-fog);
+}
+.zk-step-done {
+  background: var(--color-white);
+  color: var(--color-ink);
+}
+.zk-segment {
+  height: 12px;
+  border: 2px solid var(--color-white);
+  overflow: hidden;
+}
+.zk-segment-fill {
+  height: 100%;
+  background: var(--color-white);
+  transform-origin: left center;
+}
+.zk-qr {
+  border: var(--border-panel) solid var(--color-white);
+  padding: 16px;
+}
+.zk-check {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--border-panel) solid var(--color-white);
+  color: var(--color-white);
+}
+.zk-check-pending {
+  border-style: dashed;
+  border-color: var(--color-ash);
+  color: var(--color-ash);
+}
+.zk-check-fail {
+  border-style: dashed;
+}
+.zk-check-na {
+  border-color: var(--color-ash);
+  color: var(--color-fog);
+}
+.zk-mark {
+  width: 36px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-white);
+}
+.zk-ellipsis {
+  animation: zk-flicker 1.2s linear infinite;
+}
+.zk-menurow {
+  font-size: 22px;
+  border-bottom: var(--border-hair) solid var(--color-slate);
+}
+.zk-menurow:hover {
+  background: var(--color-coal);
+}
+.zk-hourglass {
+  animation: zk-hourglass 4s var(--ease-heave) infinite;
+}
+@keyframes zk-hourglass {
+  0%,
+  85% {
+    transform: rotate(0);
+  }
+  100% {
+    transform: rotate(180deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .zk-hourglass,
+  .zk-ellipsis {
+    animation: none !important;
+  }
+  .zk-switch::after {
+    transition: none;
+  }
+}
+
+.zk-panel-compact .zk-square {
+  min-width: 44px;
+  min-height: 48px;
+}
+.zk-panel-compact .zk-preset {
+  min-width: 44px;
+  padding: 0 6px;
+}
+.zk-panel-compact .zk-amount-field {
+  min-width: 96px;
+  min-height: 48px;
+}
+
+.zk-header {
+  height: 80px;
+  flex: none;
+  border-bottom: var(--border-panel) solid var(--color-white);
+  background: var(--color-night);
+}
+@media (max-width: 639px) {
+  .zk-header {
+    height: 64px;
+  }
+}
+.zk-menu {
+  border-left: var(--border-panel) solid var(--color-white);
 }

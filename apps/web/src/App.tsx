@@ -8,6 +8,7 @@ import { Shell } from "./components/Shell";
 import { Loading } from "./components/ui";
 import { FieldScreen } from "./screens/FieldScreen";
 import { DraftProvider } from "./state/draft";
+import { FieldFxProvider } from "./state/fieldFx";
 
 const DigPocketScreen = lazy(() => import("./screens/DigPocketScreen"));
 const DigWalletScreen = lazy(() => import("./screens/DigWalletScreen"));
@@ -29,27 +30,32 @@ export function App() {
       <LiveProvider>
         <PocketProvider>
           <DraftProvider>
-            <Shell>
-              <Suspense fallback={<Loading text="Loading…" />}>
-                <Routes>
-                  <Route path="/" element={<FieldScreen />} />
-                  <Route path="/dig/pocket" element={<DigPocketScreen />} />
-                  <Route path="/dig/wallet" element={<DigWalletScreen />} />
-                  <Route path="/reveal/:round" element={<RevealScreen />} />
-                  <Route path="/rounds" element={<PastRoundsScreen />} />
-                  <Route path="/rounds/:round" element={<RoundDetailScreen />} />
-                  <Route path="/check" element={<CheckScreen />} />
-                  <Route path="/check/:round" element={<CheckScreen />} />
-                  <Route path="/wallet" element={<WalletScreen />} />
-                  <Route path="/prove/:round" element={<ProveWinScreen />} />
-                  <Route path="/win/:id" element={<VerifiedWinScreen />} />
-                  <Route path="/keys" element={<KeysScreen />} />
-                  <Route path="/campfire" element={<CampfireScreen />} />
-                  <Route path="/how" element={<HowToPlayScreen />} />
-                  <Route path="*" element={<NotFoundScreen />} />
-                </Routes>
-              </Suspense>
-            </Shell>
+            <FieldFxProvider>
+              <Shell>
+                <Suspense fallback={<Loading text="Loading…" />}>
+                  <Routes>
+                    {/* The field stays mounted under the dig modals (child routes). */}
+                    <Route element={<FieldScreen />}>
+                      <Route path="/" element={null} />
+                      <Route path="/dig/pocket" element={<DigPocketScreen />} />
+                      <Route path="/dig/wallet" element={<DigWalletScreen />} />
+                      <Route path="/how" element={<HowToPlayScreen />} />
+                    </Route>
+                    <Route path="/reveal/:round" element={<RevealScreen />} />
+                    <Route path="/rounds" element={<PastRoundsScreen />} />
+                    <Route path="/rounds/:round" element={<RoundDetailScreen />} />
+                    <Route path="/check" element={<CheckScreen />} />
+                    <Route path="/check/:round" element={<CheckScreen />} />
+                    <Route path="/wallet" element={<WalletScreen />} />
+                    <Route path="/prove/:round" element={<ProveWinScreen />} />
+                    <Route path="/win/:id" element={<VerifiedWinScreen />} />
+                    <Route path="/keys" element={<KeysScreen />} />
+                    <Route path="/campfire" element={<CampfireScreen />} />
+                    <Route path="*" element={<NotFoundScreen />} />
+                  </Routes>
+                </Suspense>
+              </Shell>
+            </FieldFxProvider>
           </DraftProvider>
         </PocketProvider>
       </LiveProvider>

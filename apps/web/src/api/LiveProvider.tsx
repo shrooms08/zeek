@@ -8,7 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import { ENGINE_URL } from "./engine";
 import { LiveClient, streamUrl, type LiveState } from "./live";
-import type { Board, LiveEvent } from "./types";
+import type { Board, LandingDig, LiveEvent } from "./types";
 
 export const LiveContext = createContext<LiveState>("connecting");
 
@@ -17,6 +17,7 @@ export function applyEvent(
   event: LiveEvent,
   cache: {
     setBoard: (board: Board) => void;
+    setLanding: (digs: LandingDig[]) => void;
     invalidate: (key: readonly unknown[]) => void;
   },
 ): void {
@@ -40,6 +41,9 @@ export function applyEvent(
     case "campfire":
       cache.invalidate(["campfire"]);
       return;
+    case "landing":
+      cache.setLanding(event.digs);
+      return;
   }
 }
 
@@ -52,7 +56,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       onState: setState,
       onEvent: (event) => {
         applyEvent(event, {
-          setBoard: (board) => client.setQueryData(["board"], board),
+          // A board event carries no landing digs: keep the last known set.
+          setBoard: (board) =>
+            client.setQueryData<Board>(["board"], (old) => ({
+              ...board,
+              landing: board.landing ?? old?.landing ?? [],
+            })),
+          setLanding: (digs) =>
+            client.setQueryData<Board>(["board"], (old) =>
+              old === undefined ? old : { ...old, landing: digs },
+            ),
           invalidate: (key) => void client.invalidateQueries({ queryKey: key }),
         });
       },

@@ -1,109 +1,83 @@
 /**
- * Design-system components (names from Zeek Design System § 04). Minimal
- * Mono styling; Phase 7b restyles and animates them in place.
+ * Design-system components (names from Zeek Design System § 04), styled to
+ * Zeek Mono and animated per Zeek Motion (transform, opacity and
+ * stroke-dashoffset only; reduced motion: fades or instant).
  */
 
-import { motion } from "framer-motion";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Icon } from "./Icon";
+import { Zeb } from "../art/Characters";
+import { EASE } from "../motion/tokens";
+import { Icon, type IconName } from "./Icon";
 
-/** <BigStat icon label value unit progress? /> */
-export function BigStat(props: {
-  icon: string;
-  label: string;
-  value: string;
-  unit?: string;
-  gold?: boolean;
-  /** 0–1: the last-minute bar. */
-  progress?: number | undefined;
-  note?: string | undefined;
-  stale?: boolean;
-  testId?: string;
-  size?: "xl" | "l" | "m";
-}) {
-  const size = props.size ?? "l";
-  const fontSize =
-    size === "xl"
-      ? "clamp(64px, 11vw, 160px)"
-      : size === "l"
-        ? "clamp(44px, 7vw, 96px)"
-        : "clamp(28px, 4vw, 56px)";
-  return (
-    <section className="panel p-4" aria-label={props.label} data-testid={props.testId}>
-      <div className="label flex items-center gap-2">
-        <Icon name={props.icon} size={16} />
-        {props.label}
-        {props.stale === true && (
-          <span className="text-fog normal-case tracking-normal font-normal">· reconnecting</span>
-        )}
-      </div>
-      <div className="flex items-baseline gap-2">
-        <span
-          className="numeral"
-          style={{
-            fontSize,
-            lineHeight: 1,
-            color: props.gold === true ? "var(--color-gold)" : undefined,
-          }}
-        >
-          {props.value}
-        </span>
-        {props.unit !== undefined && <span className="label">{props.unit}</span>}
-      </div>
-      {props.progress !== undefined && (
-        <div className="mt-2 h-2 border border-white" aria-hidden="true">
-          <div
-            className="h-full bg-white"
-            style={{ width: `${Math.round(props.progress * 100)}%` }}
-          />
-        </div>
-      )}
-      {props.note !== undefined && <p className="text-fog text-sm mt-1">{props.note}</p>}
-    </section>
-  );
-}
-
-/** <NetBadge net /> */
+/** <NetBadge net />: Testnet dashed with a flask, Mainnet solid with a globe. */
 export function NetBadge({ net }: { net: "test" | "main" }) {
+  const test = net === "test";
   return (
     <span
-      className="label px-2 py-1"
-      style={{ border: `2px ${net === "test" ? "dashed" : "solid"} var(--color-white)` }}
+      className={`zk-netbadge label flex items-center gap-1.5 px-2.5 py-1 ${test ? "" : "zk-netbadge-main"}`}
       data-testid="net-badge"
     >
-      {net === "test" ? "Testnet" : "Mainnet"}
+      <Icon name={test ? "flask" : "globe"} size={14} strokeWidth={2.5} />
+      {test ? "Testnet" : "Mainnet"}
     </span>
   );
 }
 
-/** <DigButton state count /> */
+/** <DigButton state count />: the one big action. */
 export function DigButton(props: {
   state: "idle" | "empty" | "loading" | "closed";
   count: number;
   onClick: () => void;
   testId?: string;
+  /** Compact sheet: the total sits on the button's right. */
+  total?: string | undefined;
+  compact?: boolean;
 }) {
+  const reduce = useReducedMotion() === true;
+  if (props.state === "empty") {
+    return (
+      <button
+        type="button"
+        className="zk-dig-empty w-full flex items-center justify-center gap-3"
+        disabled
+        data-testid={props.testId ?? "dig-button"}
+      >
+        <Icon name="hand" size={24} />
+        Tap tiles to dig
+      </button>
+    );
+  }
   const text =
-    props.state === "empty"
-      ? "Tap tiles to dig"
-      : props.state === "loading"
-        ? "Sealing…"
-        : props.state === "closed"
-          ? "Round closed"
+    props.state === "loading"
+      ? "Sealing…"
+      : props.state === "closed"
+        ? "Round closed"
+        : props.compact === true
+          ? "Dig"
           : `Dig ${props.count} ${props.count === 1 ? "tile" : "tiles"}`;
   return (
-    <button
+    <motion.button
       type="button"
-      className="btn btn-primary w-full flex items-center justify-center gap-3 uppercase"
-      style={{ fontSize: 28, fontWeight: 900, fontStretch: "115%", minHeight: 64 }}
+      className="zk-dig w-full flex items-center gap-3"
+      style={{ justifyContent: props.total === undefined ? "center" : "space-between" }}
       disabled={props.state !== "idle"}
       onClick={props.onClick}
+      {...(reduce || props.state !== "idle" ? {} : { whileTap: { x: 3, y: 3 } })}
+      transition={{ duration: 0.09 }}
       data-testid={props.testId ?? "dig-button"}
     >
-      <Icon name="shovel" size={24} />
-      {text}
-    </button>
+      <span className="flex items-center gap-3">
+        <Icon name="shovel" size={props.compact === true ? 24 : 28} />
+        {text}
+      </span>
+      {props.total !== undefined && (
+        <span className="numeral" style={{ fontSize: 20, color: "inherit" }}>
+          {props.total} ZEC
+        </span>
+      )}
+    </motion.button>
   );
 }
 
@@ -120,63 +94,85 @@ export function Panel({
   testId?: string;
 }) {
   return (
-    <section className={`panel p-4 ${className}`} aria-label={label} data-testid={testId}>
+    <section className={`panel p-5 ${className}`} aria-label={label} data-testid={testId}>
       {children}
     </section>
   );
 }
 
-/** <Modal title onClose /> — one idea per modal, primary action at the bottom. */
+/**
+ * <Modal title onClose />: one idea per modal, primary action at the bottom,
+ * full width. Rises 12 px in 200 ms (out), fades out in 150 ms (in); a
+ * bottom sheet on phones. Focus moves in; Esc closes.
+ */
 export function Modal(props: {
   title: string;
   onClose?: () => void;
   children: ReactNode;
   testId?: string;
+  /** Wider body (QR codes side by side on desktop). */
+  wide?: boolean;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion() === true;
+  const onClose = useRef(props.onClose);
+  onClose.current = props.onClose;
   useEffect(() => {
     const first = ref.current?.querySelector<HTMLElement>("button, a, input, textarea, [tabindex]");
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") props.onClose?.();
+      if (e.key === "Escape") onClose.current?.();
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [props]);
+  }, []);
   return (
-    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-night/80 p-0 sm:p-6">
+    <motion.div
+      className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-night/80 p-0 sm:p-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
+    >
       <motion.div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="panel w-full sm:max-w-[560px] max-h-[100dvh] overflow-auto p-6"
-        style={{ boxShadow: "var(--shadow-lift)" }}
-        initial={{ opacity: 0, y: 16 }}
+        className={`panel zk-lift w-full ${props.wide === true ? "sm:max-w-[880px]" : "sm:max-w-[520px]"} max-h-[100dvh] overflow-auto p-6 sm:p-8`}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: [0.2, 0.9, 0.2, 1] }}
+        transition={{ duration: 0.2, ease: EASE.out }}
         data-testid={props.testId}
       >
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <h2 id={titleId} className="text-heading font-extrabold text-white">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <h2
+            id={titleId}
+            className="text-heading font-extrabold text-white"
+            style={{ fontSize: 28, lineHeight: 1.1 }}
+          >
             {props.title}
           </h2>
           {props.onClose !== undefined && (
-            <button type="button" className="btn" onClick={props.onClose} aria-label="Close">
+            <button
+              type="button"
+              className="btn zk-square"
+              onClick={props.onClose}
+              aria-label="Close"
+            >
               <Icon name="x" size={18} />
             </button>
           )}
         </div>
         {props.children}
       </motion.div>
-    </div>
+    </motion.div>
   );
 }
 
-/** <StepList /> with <BatchProgress batches current />. */
+/** <StepList />: each step ticks with a hand-drawn check (250 ms). */
 export function StepList({
   steps,
   current,
@@ -187,7 +183,7 @@ export function StepList({
   done?: boolean;
 }) {
   return (
-    <ol className="flex flex-col gap-2" aria-label="Steps">
+    <ol className="flex flex-col gap-3" aria-label="Steps">
       {steps.map((s, i) => {
         const state = done === true || i < current ? "done" : i === current ? "now" : "next";
         return (
@@ -197,17 +193,10 @@ export function StepList({
             data-state={state}
             aria-current={state === "now" ? "step" : undefined}
           >
-            <span
-              className="w-7 h-7 flex items-center justify-center"
-              style={{
-                border: `3px ${state === "next" ? "dashed" : "solid"} var(--color-white)`,
-                background: state === "done" ? "var(--color-white)" : undefined,
-                color: state === "done" ? "var(--color-ink)" : undefined,
-              }}
-            >
-              {state === "done" ? <Icon name="check" size={16} /> : i + 1}
+            <span className={`zk-step zk-step-${state}`}>
+              {state === "done" ? <Icon name="checkink" size={18} draw strokeWidth={3} /> : i + 1}
             </span>
-            <span className={state === "next" ? "text-fog" : "text-white"}>{s}</span>
+            <span className={state === "next" ? "text-fog" : "text-white font-semibold"}>{s}</span>
           </li>
         );
       })}
@@ -215,19 +204,39 @@ export function StepList({
   );
 }
 
+/** <BatchProgress batches current />: one segment per payment (≤ 6 tiles). */
 export function BatchProgress({
   batches,
   current,
+  fill,
 }: {
   batches: readonly number[][];
   current: number;
+  /** 0–1 progress of the current payment's segment. */
+  fill?: number;
 }) {
+  const reduce = useReducedMotion() === true;
   return (
-    <div data-testid="batch-progress">
-      <div className="label">
-        Payment {Math.min(current + 1, batches.length)} of {batches.length}
+    <div data-testid="batch-progress" className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="label">
+          Payment {Math.min(current + 1, batches.length)} of {batches.length}
+        </div>
+        <div className="text-fog text-sm">{batches.map((b) => b.length).join(" + ")} tiles</div>
       </div>
-      <div className="text-fog">{batches.map((b) => b.length).join(" + ")} tiles</div>
+      <div className="flex gap-1.5" aria-hidden="true">
+        {batches.map((b, k) => (
+          <div key={k} className="zk-segment" style={{ flexGrow: Math.max(1, b.length) }}>
+            <div
+              className="zk-segment-fill"
+              style={{
+                transform: `scaleX(${k < current ? 1 : k === current ? (fill ?? 0) : 0})`,
+                transition: reduce ? "none" : "transform 5s linear",
+              }}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -244,7 +253,7 @@ export function QrCard(props: {
 }) {
   return (
     <section
-      className="panel p-4 flex flex-col gap-3"
+      className="zk-qr flex flex-col gap-3"
       aria-label={`Payment ${props.index + 1} of ${props.total}`}
       data-testid="qr-card"
       data-uri={props.uri}
@@ -256,19 +265,25 @@ export function QrCard(props: {
           : `${props.tiles.length} tiles`}
       </div>
       <div
-        className="bg-white p-2 max-w-[240px]"
+        className="bg-white p-3 w-full max-w-[220px] self-center"
         dangerouslySetInnerHTML={{ __html: props.qrSvg }}
         aria-label="QR code of the payment request"
         role="img"
       />
-      <div className="numeral" style={{ fontSize: 32 }}>
-        {props.amount} <span className="label">ZEC</span>
+      <div className="zk-amount justify-center">
+        <span className="numeral" style={{ fontSize: 32 }}>
+          {props.amount}
+        </span>
+        <span className="zk-unit">ZEC</span>
       </div>
-      <p className="text-fog text-sm">Plus your wallet’s network fee. The memo is filled in.</p>
-      <div className="flex gap-2 flex-wrap">
-        <CopyButton text={props.uri} label="Copy request" />
-        <a className="btn" href={props.uri}>
-          Open wallet
+      <p className="text-fog text-sm text-center">
+        {props.tiles.length} {props.tiles.length === 1 ? "tile" : "tiles"} · fee included · memo
+        filled in
+      </p>
+      <div className="flex gap-2 justify-center flex-wrap">
+        <CopyButton text={props.uri} label="Copy" />
+        <a className="btn flex items-center gap-2" href={props.uri}>
+          <Icon name="wallet" size={16} /> Open wallet
         </a>
       </div>
       {props.status !== undefined && (
@@ -280,30 +295,59 @@ export function QrCard(props: {
   );
 }
 
+/** Copy: the icon swaps to an ink check for 1.2 s. */
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => {
+      setCopied(false);
+    }, 1200);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [copied]);
   return (
     <button
       type="button"
       className="btn flex items-center gap-2"
       onClick={() => {
-        void navigator.clipboard.writeText(text);
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+        });
       }}
     >
-      <Icon name="copy" size={16} />
-      {label}
+      {copied ? (
+        <Icon name="checkink" size={16} draw strokeWidth={3} />
+      ) : (
+        <Icon name="copy" size={16} />
+      )}
+      <span aria-live="polite">{copied ? "Copied" : label}</span>
     </button>
   );
 }
 
-/** <CheckRow icon text state /> */
+const CHECK_ICONS: Record<string, IconName> = {
+  beacon: "dice",
+  digs: "chain",
+  timing: "clock",
+  settlement: "math",
+  payout: "coin",
+};
+
+/**
+ * <CheckRow icon text state />: the icon draws, then a hand-drawn check (or
+ * an ink X that shakes). Not applicable: a dash.
+ */
 export function CheckRow(props: {
+  id?: string;
   title: string;
   text: string;
   state: "pending" | "checking" | "pass" | "fail" | "na";
   detail: string[];
   testId?: string;
 }) {
-  const mark = { pending: "·", checking: "…", pass: "✓", fail: "✕", na: "–" }[props.state];
+  const reduce = useReducedMotion() === true;
   const sr = {
     pending: "waiting",
     checking: "checking",
@@ -311,28 +355,21 @@ export function CheckRow(props: {
     fail: "failed",
     na: "not applicable",
   }[props.state];
+  const icon = CHECK_ICONS[props.id ?? ""] ?? "check";
   return (
     <li
-      className="flex gap-3 py-3 border-b hair"
+      className="flex gap-4 py-4 border-b hair"
       data-state={props.state}
       data-testid={props.testId}
     >
-      <span
-        aria-hidden="true"
-        className="w-8 h-8 shrink-0 flex items-center justify-center font-black"
-        style={{
-          border: `3px ${props.state === "fail" || props.state === "pending" ? "dashed" : "solid"} var(--color-white)`,
-          background: props.state === "pass" ? "var(--color-white)" : undefined,
-          color: props.state === "pass" ? "var(--color-ink)" : undefined,
-        }}
-      >
-        {mark}
+      <span className={`zk-check zk-check-${props.state}`} aria-hidden="true">
+        <Icon name={icon} size={20} />
       </span>
-      <div>
-        <div className="text-white font-extrabold">
+      <div className="flex-1 min-w-0">
+        <div className="text-white font-extrabold text-lg">
           {props.title} <span className="sr-only">: {sr}</span>
         </div>
-        <p className="text-mist">{props.text}</p>
+        <p className={props.state === "fail" ? "text-white" : "text-mist"}>{props.text}</p>
         {props.detail.length > 0 && (
           <details className="text-fog text-sm mt-1">
             <summary className="cursor-pointer">Technical detail</summary>
@@ -344,6 +381,25 @@ export function CheckRow(props: {
           </details>
         )}
       </div>
+      <span className="zk-mark" aria-hidden="true">
+        <AnimatePresence initial={false}>
+          {props.state === "pass" && (
+            <Icon key="pass" name="checkink" size={28} draw strokeWidth={3} />
+          )}
+          {props.state === "fail" && (
+            <motion.span
+              key="fail"
+              className="inline-flex"
+              {...(reduce ? {} : { animate: { x: [0, -6, 6, -4, 4, -2, 0] } })}
+              transition={{ duration: 0.3, delay: 0.25 }}
+            >
+              <Icon name="xink" size={28} draw strokeWidth={3} />
+            </motion.span>
+          )}
+          {props.state === "na" && <span className="text-fog font-black text-xl">–</span>}
+          {props.state === "checking" && <span className="zk-ellipsis text-fog font-black">…</span>}
+        </AnimatePresence>
+      </span>
     </li>
   );
 }
@@ -356,7 +412,7 @@ export function MenuRow({
   onClick,
 }: {
   to: string;
-  icon: string;
+  icon: IconName;
   label: string;
   onClick?: () => void;
 }) {
@@ -364,16 +420,17 @@ export function MenuRow({
     <Link
       to={to}
       onClick={onClick}
-      className="flex items-center gap-4 p-4 text-white font-extrabold text-heading border-b hair"
+      className="zk-menurow flex items-center gap-4 px-5 py-4 text-white font-extrabold"
       data-testid={`menu-${to}`}
     >
       <Icon name={icon} size={24} />
-      {label}
+      <span className="flex-1">{label}</span>
+      <Icon name="arrow" size={20} />
     </Link>
   );
 }
 
-/** Loading state. */
+/** Loading: Zeb peeks out while we wait. */
 export function Loading({ text = "Finding the field…" }: { text?: string }) {
   return (
     <div
@@ -381,26 +438,32 @@ export function Loading({ text = "Finding the field…" }: { text?: string }) {
       role="status"
       data-testid="loading"
     >
-      <Icon name="hourglass" size={32} />
-      {text}
+      <Zeb pose="peek" width={96} label={null} />
+      <span className="flex items-center gap-2">
+        <span className="zk-hourglass inline-flex">
+          <Icon name="hourglass" size={18} />
+        </span>
+        {text}
+      </span>
     </div>
   );
 }
 
-/** Empty state. */
+/** Empty state: Zeb waits with his lantern. */
 export function Empty({ title, text }: { title: string; text: string }) {
   return (
     <div
-      className="flex flex-col items-center justify-center gap-2 p-12 text-center"
+      className="flex flex-col items-center justify-center gap-2 p-10 text-center"
       data-testid="empty"
     >
+      <Zeb pose="idle" width={88} label={null} />
       <h2 className="text-heading font-extrabold text-white">{title}</h2>
       <p className="text-fog">{text}</p>
     </div>
   );
 }
 
-/** Offline/error state. */
+/** Offline/error state: Zeb shrugs. */
 export function Offline({
   onRetry,
   text = "Can’t reach the field",
@@ -414,12 +477,14 @@ export function Offline({
       role="alert"
       data-testid="offline"
     >
-      <Icon name="offline" size={32} />
-      <h2 className="text-heading font-extrabold text-white">{text}</h2>
+      <Zeb pose="shrug" width={96} label={null} />
+      <h2 className="text-heading font-extrabold text-white flex items-center gap-2">
+        <Icon name="offline" size={24} /> {text}
+      </h2>
       <p className="text-fog">Your digs are safe. We’ll keep trying.</p>
       {onRetry !== undefined && (
-        <button type="button" className="btn" onClick={onRetry}>
-          Try again
+        <button type="button" className="btn flex items-center gap-2" onClick={onRetry}>
+          <Icon name="refresh" size={18} /> Try again
         </button>
       )}
     </div>
@@ -433,28 +498,34 @@ export function Screen({
   back = "/",
   testId,
   wide = false,
+  kicker,
 }: {
   title: string;
   children: ReactNode;
   back?: string;
   testId?: string;
   wide?: boolean;
+  /** Small caps line above the title. */
+  kicker?: string;
 }) {
   return (
     <main
-      className={`mx-auto w-full ${wide ? "max-w-[1200px]" : "max-w-[720px]"} px-4 py-6 flex flex-col gap-6`}
+      className={`mx-auto w-full ${wide ? "max-w-[1200px]" : "max-w-[720px]"} px-4 sm:px-6 py-6 sm:py-10 flex flex-col gap-6`}
       data-testid={testId}
     >
-      <div className="flex items-center gap-3">
-        <Link to={back} className="btn" aria-label="Back">
-          <Icon name="back" size={18} />
+      <div className="flex items-center gap-4">
+        <Link to={back} className="btn zk-square" aria-label="Back">
+          <Icon name="back" size={20} />
         </Link>
-        <h1
-          className="text-title font-black text-white"
-          style={{ fontSize: "clamp(28px, 5vw, 40px)" }}
-        >
-          {title}
-        </h1>
+        <div>
+          {kicker !== undefined && <div className="label text-fog">{kicker}</div>}
+          <h1
+            className="font-black text-white"
+            style={{ fontSize: "clamp(30px, 5vw, 44px)", lineHeight: 1.05, fontStretch: "112%" }}
+          >
+            {title}
+          </h1>
+        </div>
       </div>
       {children}
     </main>
