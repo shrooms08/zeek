@@ -19,6 +19,10 @@ describe("proxy", () => {
     // Each route may only answer with its own kind of content (review N3).
     expect(allowed("engine", "GET", "/v1/board")?.kind).toBe("json");
     expect(allowed("engine", "GET", "/v1/chain/blocks")?.kind).toBe("binary");
+    // The engine's relay answers tree states as protobuf (the Pocket needs
+    // them to create a wallet).
+    expect(allowed("engine", "GET", "/v1/chain/tree-state")?.kind).toBe("binary");
+    expect(allowed("engine", "GET", "/v1/chain/tip")?.kind).toBe("json");
     expect(allowed("engine", "GET", "/share/round/205")?.kind).toBe("share");
   });
 

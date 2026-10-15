@@ -79,8 +79,9 @@ const ENGINE_RULES: Rule[] = [
   { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}(/proof|/digests)?$`), kind: "json" },
   { method: "GET", pattern: /^\/v1\/proofs\/[0-9a-f]{32}$/, kind: "json" },
   { method: "POST", pattern: /^\/v1\/proofs$/, kind: "json", maxBody: 32 * 1024 },
-  { method: "GET", pattern: /^\/v1\/chain\/(tip|tree-state)$/, kind: "json" },
-  { method: "GET", pattern: /^\/v1\/chain\/blocks$/, kind: "binary" },
+  { method: "GET", pattern: /^\/v1\/chain\/tip$/, kind: "json" },
+  // Tree states and compact blocks are protobuf.
+  { method: "GET", pattern: /^\/v1\/chain\/(tree-state|blocks)$/, kind: "binary" },
   { method: "GET", pattern: new RegExp(`^/v1/tx/${TXID}$`), kind: "binary" },
   { method: "POST", pattern: /^\/v1\/tx\/broadcast$/, kind: "json", maxBody: 256 * 1024 },
   { method: "GET", pattern: /^\/v1\/relay\/stats$/, kind: "json" },
