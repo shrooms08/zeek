@@ -27,7 +27,13 @@ interface Pair {
 }
 
 /** Screenshots a design frame by its caption (next sibling) or screen label. */
-async function designFrame(page: Page, pageName: string, caption: string | undefined, label: string | undefined, file: string) {
+async function designFrame(
+  page: Page,
+  pageName: string,
+  caption: string | undefined,
+  label: string | undefined,
+  file: string,
+) {
   await page.goto(pathToFileURL(path.join(DESIGN, `${pageName}.html`)).href);
   await page.waitForTimeout(2500);
   const handle = await page.evaluateHandle(
@@ -39,7 +45,9 @@ async function designFrame(page: Page, pageName: string, caption: string | undef
           .map((n) => n.textContent ?? "")
           .join("")
           .trim();
-      const hit = [...document.querySelectorAll("*")].find((e) => own(e).startsWith(cap ?? "\u0000"));
+      const hit = [...document.querySelectorAll("*")].find((e) =>
+        own(e).startsWith(cap ?? "\u0000"),
+      );
       return hit?.nextElementSibling ?? null;
     },
     [caption, label] as const,
@@ -49,7 +57,14 @@ async function designFrame(page: Page, pageName: string, caption: string | undef
   await el.screenshot({ path: file });
 }
 
-async function compose(page: Page, design: string, app: string, out: string, title: string, note: string) {
+async function compose(
+  page: Page,
+  design: string,
+  app: string,
+  out: string,
+  title: string,
+  note: string,
+) {
   await page.setViewportSize({ width: 1600, height: 1000 });
   const img = (f: string) => pathToFileURL(f).href;
   await page.setContent(`<html><body style="margin:0;background:#000;font:600 14px system-ui;color:#D6D6D6">
@@ -64,7 +79,12 @@ async function compose(page: Page, design: string, app: string, out: string, tit
 const seedDigs = (page: Page, round: number, tiles: number[]) =>
   page.evaluate(
     ([r, t]) => {
-      localStorage.setItem("zeek.myDigs.v1", JSON.stringify([{ round: r, tiles: t, amountEach: "100000", via: "pocket", txids: [], at: Date.now() }]));
+      localStorage.setItem(
+        "zeek.myDigs.v1",
+        JSON.stringify([
+          { round: r, tiles: t, amountEach: "100000", via: "pocket", txids: [], at: Date.now() },
+        ]),
+      );
       localStorage.setItem("zeek.seenReveal", String(r));
     },
     [round, tiles] as const,
@@ -73,7 +93,8 @@ const seedDigs = (page: Page, round: number, tiles: number[]) =>
 test("design frames beside the live app", async ({ page }) => {
   test.setTimeout(30 * 60_000);
   const state = loadState();
-  if (state.passphrase === undefined || state.dig === undefined) throw new Error("run the live steps first");
+  if (state.passphrase === undefined || state.dig === undefined)
+    throw new Error("run the live steps first");
   const { passphrase, dig } = state;
   const winRound = state.win?.round ?? 188;
   mkdirSync(OUT, { recursive: true });
@@ -99,20 +120,39 @@ test("design frames beside the live app", async ({ page }) => {
   const cacheFixture = async (p: Page) => {
     await p.route(`**/v1/rounds/${winRound}`, async (r) => {
       const res = await r.fetch();
-      const body = (await res.json()) as { settled: { outcome: { cache_triggered?: boolean }; cache_triggered: boolean; cache_paid: number } };
+      const body = (await res.json()) as {
+        settled: {
+          outcome: { cache_triggered?: boolean };
+          cache_triggered: boolean;
+          cache_paid: number;
+        };
+      };
       body.settled.outcome.cache_triggered = true;
       body.settled.cache_triggered = true;
       body.settled.cache_paid = 1_849_000_000;
       await r.fulfill({ response: res, json: body });
     });
-    await reveal(winRound, Array.from({ length: 25 }, (_, i) => i))(p);
+    await reveal(
+      winRound,
+      Array.from({ length: 25 }, (_, i) => i),
+    )(p);
     await p.waitForTimeout(3000);
     return "FIXTURE: no Deep Cache round on testnet yet";
   };
 
   const pairs: Pair[] = [
-    { name: "field", size: 1440, design: { page: "Zeek Field", label: "Field desktop" }, app: pickField([6, 12, 18]) },
-    { name: "field", size: 390, design: { page: "Zeek Field", label: "Field mobile selected" }, app: pickField([6, 12]) },
+    {
+      name: "field",
+      size: 1440,
+      design: { page: "Zeek Field", label: "Field desktop" },
+      app: pickField([6, 12, 18]),
+    },
+    {
+      name: "field",
+      size: 390,
+      design: { page: "Zeek Field", label: "Field mobile selected" },
+      app: pickField([6, 12]),
+    },
     {
       name: "dig-confirm",
       size: 390,
@@ -120,7 +160,9 @@ test("design frames beside the live app", async ({ page }) => {
       app: async (p) => {
         await pickField([6, 12, 18])(p);
         await p.getByTestId("dig-button").click();
-        await expect(p.getByTestId("dig-confirm").or(p.getByTestId("dig-short"))).toBeVisible({ timeout: 60_000 });
+        await expect(p.getByTestId("dig-confirm").or(p.getByTestId("dig-short"))).toBeVisible({
+          timeout: 60_000,
+        });
       },
     },
     {
@@ -130,16 +172,51 @@ test("design frames beside the live app", async ({ page }) => {
       app: async (p) => {
         await pickField([6, 12, 18])(p);
         await p.getByTestId("dig-button").click();
-        await expect(p.getByTestId("dig-confirm").or(p.getByTestId("dig-short"))).toBeVisible({ timeout: 60_000 });
+        await expect(p.getByTestId("dig-confirm").or(p.getByTestId("dig-short"))).toBeVisible({
+          timeout: 60_000,
+        });
         return "the design's desktop dig frame is the other-wallet scan step";
       },
     },
-    { name: "reveal-win", size: 390, design: { page: "Zeek Reveal", label: "Reveal win" }, app: reveal(winRound, Array.from({ length: 25 }, (_, i) => i)) },
-    { name: "reveal-lose", size: 390, design: { page: "Zeek Reveal", label: "Reveal lose" }, app: reveal(dig.round, dig.tiles) },
-    { name: "reveal-deep-cache", size: 390, design: { page: "Zeek Reveal", label: "Reveal deep cache" }, app: cacheFixture },
-    { name: "reveal-deep-cache", size: 1440, design: { page: "Zeek Reveal", label: "Reveal deep cache desktop" }, app: cacheFixture },
-    { name: "past-rounds", size: 1440, design: { page: "Zeek More", caption: "7 · LIST · DESKTOP 1440" }, app: route("/rounds", "round-row") },
-    { name: "past-rounds", size: 390, design: { page: "Zeek More", caption: "7 · LIST · MOBILE 390" }, app: route("/rounds", "round-row") },
+    {
+      name: "reveal-win",
+      size: 390,
+      design: { page: "Zeek Reveal", label: "Reveal win" },
+      app: reveal(
+        winRound,
+        Array.from({ length: 25 }, (_, i) => i),
+      ),
+    },
+    {
+      name: "reveal-lose",
+      size: 390,
+      design: { page: "Zeek Reveal", label: "Reveal lose" },
+      app: reveal(dig.round, dig.tiles),
+    },
+    {
+      name: "reveal-deep-cache",
+      size: 390,
+      design: { page: "Zeek Reveal", label: "Reveal deep cache" },
+      app: cacheFixture,
+    },
+    {
+      name: "reveal-deep-cache",
+      size: 1440,
+      design: { page: "Zeek Reveal", label: "Reveal deep cache desktop" },
+      app: cacheFixture,
+    },
+    {
+      name: "past-rounds",
+      size: 1440,
+      design: { page: "Zeek More", caption: "7 · LIST · DESKTOP 1440" },
+      app: route("/rounds", "round-row"),
+    },
+    {
+      name: "past-rounds",
+      size: 390,
+      design: { page: "Zeek More", caption: "7 · LIST · MOBILE 390" },
+      app: route("/rounds", "round-row"),
+    },
     {
       name: "check",
       size: 1440,
@@ -160,8 +237,18 @@ test("design frames beside the live app", async ({ page }) => {
         await expect(p.getByTestId("check-summary")).toBeVisible({ timeout: 10 * 60_000 });
       },
     },
-    { name: "wallet", size: 1440, design: { page: "Zeek More", caption: "9F · DESKTOP · HOME" }, app: route("/wallet", "wallet-home") },
-    { name: "wallet", size: 390, design: { page: "Zeek More", caption: "9D · HOME" }, app: route("/wallet", "wallet-home") },
+    {
+      name: "wallet",
+      size: 1440,
+      design: { page: "Zeek More", caption: "9F · DESKTOP · HOME" },
+      app: route("/wallet", "wallet-home"),
+    },
+    {
+      name: "wallet",
+      size: 390,
+      design: { page: "Zeek More", caption: "9D · HOME" },
+      app: route("/wallet", "wallet-home"),
+    },
     {
       name: "prove-card",
       size: 1440,
@@ -184,10 +271,30 @@ test("design frames beside the live app", async ({ page }) => {
       design: { page: "Zeek More", caption: "10B · VERIFIED WIN PAGE · MOBILE 390" },
       app: route(`/win/${state.proofId ?? "a9cce3fda3c035c555468fb3ae306ec7"}`, "win-verdict"),
     },
-    { name: "keys", size: 1440, design: { page: "Zeek More", caption: "11 · DESKTOP 1440" }, app: route("/keys", "keyholder-card") },
-    { name: "keys", size: 390, design: { page: "Zeek More", caption: "11 · MOBILE 390" }, app: route("/keys", "keyholder-card") },
-    { name: "campfire", size: 1440, design: { page: "Zeek More", caption: "12 · DESKTOP 1440" }, app: route("/campfire", "campfire-message") },
-    { name: "campfire", size: 390, design: { page: "Zeek More", caption: "12 · MOBILE 390" }, app: route("/campfire", "campfire-message") },
+    {
+      name: "keys",
+      size: 1440,
+      design: { page: "Zeek More", caption: "11 · DESKTOP 1440" },
+      app: route("/keys", "keyholder-card"),
+    },
+    {
+      name: "keys",
+      size: 390,
+      design: { page: "Zeek More", caption: "11 · MOBILE 390" },
+      app: route("/keys", "keyholder-card"),
+    },
+    {
+      name: "campfire",
+      size: 1440,
+      design: { page: "Zeek More", caption: "12 · DESKTOP 1440" },
+      app: route("/campfire", "campfire-message"),
+    },
+    {
+      name: "campfire",
+      size: 390,
+      design: { page: "Zeek More", caption: "12 · MOBILE 390" },
+      app: route("/campfire", "campfire-message"),
+    },
     {
       name: "first-time",
       size: 390,
@@ -216,13 +323,28 @@ test("design frames beside the live app", async ({ page }) => {
     const base = `${pair.name}-${pair.size}`;
     const designFile = path.join(TMP, `${base}-design.png`);
     const appFile = path.join(TMP, `${base}-app.png`);
-    await designFrame(designPage, pair.design.page, pair.design.caption, pair.design.label, designFile);
-    await page.setViewportSize(pair.size === 1440 ? { width: 1440, height: 900 } : { width: 390, height: 844 });
+    await designFrame(
+      designPage,
+      pair.design.page,
+      pair.design.caption,
+      pair.design.label,
+      designFile,
+    );
+    await page.setViewportSize(
+      pair.size === 1440 ? { width: 1440, height: 900 } : { width: 390, height: 844 },
+    );
     await unlock(page, passphrase);
     const note = (await pair.app(page)) ?? "";
     await page.screenshot({ path: appFile });
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    await compose(composer, designFile, appFile, path.join(OUT, `${base}.png`), `${pair.name} · ${pair.size}`, note);
+    await compose(
+      composer,
+      designFile,
+      appFile,
+      path.join(OUT, `${base}.png`),
+      `${pair.name} · ${pair.size}`,
+      note,
+    );
     await page.evaluate(() => {
       localStorage.setItem("zeek.seenOnboarding", "1");
     });

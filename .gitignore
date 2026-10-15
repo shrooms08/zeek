@@ -22,3 +22,4 @@ dist/
 /packages/zeek-pocket/wasm/
 test-results*/
 playwright-report/
+docs/examples/phase7b/.video/
