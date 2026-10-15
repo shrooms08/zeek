@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkReducer, visibleRows } from "./check";
 import { digReducer, initialDig } from "./dig";
 import {
+  withLanding,
   initialOtherWallet,
   memoDigest,
   otherWalletReducer,
@@ -183,6 +184,23 @@ describe("other wallet machine", () => {
     );
     expect(all).toEqual(["landed", "late"]);
     s = otherWalletReducer(s, { type: "seen", status: all });
+    expect(s.kind).toBe("confirmed");
+  });
+
+  it("shows mempool payments as landing, and only mined ones confirm", async () => {
+    const d1 = await memoDigest("zeek1:abc");
+    const d2 = await memoDigest("zeek1:def");
+    const payments: PaymentModel[] = [
+      { uri: "zcash:a", tiles: [1], amount: 1n, memoDigests: [d1], qrSvg: "" },
+      { uri: "zcash:b", tiles: [2], amount: 1n, memoDigests: [d2], qrSvg: "" },
+    ];
+    const mined = paymentStatus(payments, [], 20);
+    expect(withLanding(payments, mined, new Set([d1]))).toEqual(["landing", "not-sent"]);
+    let s = otherWalletReducer(initialOtherWallet, { type: "built", round: 5, payments });
+    s = otherWalletReducer(s, { type: "sent" });
+    s = otherWalletReducer(s, { type: "seen", status: ["landing", "landing"] });
+    expect(s.kind).toBe("waiting");
+    s = otherWalletReducer(s, { type: "seen", status: ["landed", "landed"] });
     expect(s.kind).toBe("confirmed");
   });
 });

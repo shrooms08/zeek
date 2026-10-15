@@ -22,10 +22,14 @@ export type RevealState = {
 export type RevealEvent =
   { type: "settled"; result: RevealResult } | { type: "advance" } | { type: "skip" };
 
-/** How long each stage plays before advancing (ms; design motion table). */
+/**
+ * How long each stage plays before advancing (ms), from the design's reveal
+ * timeline (Zeek Motion 9a–9d): dim + star 0–860, cracks + tremble
+ * 860–1700, split + light burst 1700–2600, result card at 2600.
+ */
 export const STAGE_MS: Record<Exclude<RevealStage, "closed" | "result">, number> = {
-  draw: 1_400,
-  shake: 700,
+  draw: 860,
+  shake: 840,
   burst: 900,
 };
 

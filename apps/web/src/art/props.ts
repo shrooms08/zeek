@@ -88,7 +88,7 @@ export function mine(stage: number, erupt: boolean, gold: boolean, p: string): s
   let s = `<ellipse cx="0" cy="-2" rx="62" ry="24" fill="#000" opacity=".4"/>`;
   const lc = gold ? GOLD : WHITE;
   if (erupt) {
-    s += `<circle data-mglow cx="0" cy="-30" r="150" fill="url(#${p}${gold ? "gg" : "gw"})"/><g data-mrays style="transform-origin:0px -20px">`;
+    s += `<circle data-mglow class="zk-mglow" cx="0" cy="-30" r="150" fill="url(#${p}${gold ? "gg" : "gw"})"/><g data-mrays class="zk-mrays" style="transform-origin:0px -20px">`;
     for (let k = 0; k < 13; k++) {
       const a = ((-172 + k * 13) * Math.PI) / 180;
       const L = k % 2 ? 120 : 165;
@@ -101,7 +101,7 @@ export function mine(stage: number, erupt: boolean, gold: boolean, p: string): s
     }
     s += "</g>";
   }
-  s += "<g data-mound>";
+  s += erupt ? '<g data-mound class="zk-mound">' : "<g data-mound>";
   s += `<path d="M-58 2 Q-62 -36 -36 -58 Q-8 -80 22 -68 Q54 -54 60 2 Z" fill="#8E8E8E" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round"/>`;
   s += `<path d="M24 -64 Q52 -50 57 0 L36 0 Q36 -36 20 -62Z" fill="url(#${p}h3)"/><path d="M-42 -30 l8 4 l-2 8 M-22 -62 l6 8 l-4 6 M42 -40 l-6 6" fill="none" stroke="${INK}" stroke-width="1.6"/>`;
   const k = stage <= 1 ? 0.72 : 1;
@@ -127,7 +127,7 @@ export function mine(stage: number, erupt: boolean, gold: boolean, p: string): s
       const x = (rr() - 0.5) * 170;
       const y = -40 - rr() * 90;
       const z = 4 + rr() * 4;
-      s += `<g data-gem="${f(x)},${f(y)}"><path d="M${f(x)} ${f(y - z * 1.3)} L${f(x + z)} ${f(y)} L${f(x)} ${f(y + z * 1.3)} L${f(x - z)} ${f(y)}Z" fill="${lc}" stroke="${INK}" stroke-width="1.8" stroke-linejoin="round"/><path d="M${f(x - z)} ${f(y)} H${f(x + z)}" stroke="${INK}" stroke-width="1"/></g>`;
+      s += `<g data-gem="${f(x)},${f(y)}" class="zk-gem" style="--gx:${f(-x)}px;--gy:${f(-20 - y)}px;animation-delay:${700 + i * 60}ms"><path d="M${f(x)} ${f(y - z * 1.3)} L${f(x + z)} ${f(y)} L${f(x)} ${f(y + z * 1.3)} L${f(x - z)} ${f(y)}Z" fill="${lc}" stroke="${INK}" stroke-width="1.8" stroke-linejoin="round"/><path d="M${f(x - z)} ${f(y)} H${f(x + z)}" stroke="${INK}" stroke-width="1"/></g>`;
     }
     for (let i = 0; i < 8; i++) {
       const x = (rr() - 0.5) * 200;

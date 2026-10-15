@@ -6,6 +6,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { engine } from "../api/engine";
 import { usePocket } from "../api/PocketProvider";
 import { useBoard, useConfig } from "../api/queries";
+import { Zeb } from "../art/Characters";
+import { Icon } from "../components/Icon";
 import { Modal, QrCard } from "../components/ui";
 import { checkPayoutAddress } from "../lib/address";
 import { planPayments } from "../lib/digPlan";
@@ -15,9 +17,11 @@ import { useNow } from "../lib/useNow";
 import {
   initialOtherWallet,
   memoDigest,
+  withLanding,
   otherWalletReducer,
   paymentStatus,
   type PaymentModel,
+  type PaymentStatus,
 } from "../machines/otherWallet";
 import { useDraft } from "../state/draft";
 import { recordMyDig } from "../state/myDigs";
@@ -111,6 +115,7 @@ export default function DigWalletScreen() {
     }
   };
 
+  const landingDigests = new Set((board.data?.landing ?? []).map((d) => d.memo_sha256));
   const closesIn =
     board.data === undefined ? null : Math.max(0, board.data.estimated_close_time - now);
 
@@ -198,34 +203,58 @@ export default function DigWalletScreen() {
           </button>
         </Modal>
       );
-    case "waiting":
+    case "waiting": {
+      const shown = withLanding(state.payments, state.status, landingDigests);
       return (
         <Modal title="Waiting for your dig" onClose={close} testId="wallet-waiting">
-          <p className="label mb-2">Step 3 of 3</p>
-          <p className="text-fog mb-4">
-            Usually a minute or two (it counts once mined). You can close this; it still counts if
-            it lands before the round ends.
+          <p className="label text-fog mb-3">Step 3 of 3</p>
+          <div className="flex justify-center mb-3">
+            <Zeb pose="peek" width={110} label={null} />
+          </div>
+          <p className="text-mist mb-5 text-center">
+            You’ll see it the moment it reaches the network; it counts once mined, usually within a
+            minute or two. You can close this: it still counts if it lands before the round ends.
           </p>
-          <ul className="flex flex-col gap-2 mb-4">
-            {state.payments.map((p, i) => (
-              <li key={p.uri} className="flex justify-between" data-testid="payment-row">
-                <span className="text-white">
-                  Payment {i + 1} ·{" "}
-                  {state.status[i] === "landed"
-                    ? "landed"
-                    : state.status[i] === "late"
-                      ? "late (refunded)"
-                      : "looking…"}
-                </span>
-                <span className="numeral">{formatZec(p.amount, { decimals: 8 })}</span>
-              </li>
-            ))}
+          <ul className="zk-rows mb-5">
+            {state.payments.map((p, i) => {
+              const st = shown[i] ?? "not-sent";
+              return (
+                <li
+                  key={p.uri}
+                  className="flex items-center gap-3 px-4 py-3"
+                  data-testid="payment-row"
+                  data-status={st}
+                >
+                  <PaymentMark status={st} />
+                  <span
+                    className={
+                      st === "not-sent" ? "text-white font-bold flex-1" : "text-white flex-1"
+                    }
+                  >
+                    Payment {i + 1} ·{" "}
+                    {st === "landed"
+                      ? "landed"
+                      : st === "landing"
+                        ? "seen, landing"
+                        : st === "late"
+                          ? "late (refunded)"
+                          : "looking…"}
+                  </span>
+                  <span className="font-mono text-sm text-fog">
+                    {formatZec(p.amount, { decimals: 8 })}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
           {closesIn !== null && board.data?.round === state.round && (
-            <p className="label">Round closes in {formatClock(closesIn)}</p>
+            <p className="text-fog text-sm flex items-center justify-center gap-2">
+              <Icon name="hourglass" size={16} /> Round closes in {formatClock(closesIn)}
+            </p>
           )}
         </Modal>
       );
+    }
     case "confirmed": {
       const late = state.status.filter((s) => s === "late").length;
       return (
@@ -262,4 +291,27 @@ export default function DigWalletScreen() {
       );
     }
   }
+}
+
+/** A payment's state mark: ink check, settling dust, ink X, or a spinner. */
+function PaymentMark({ status }: { status: PaymentStatus }) {
+  if (status === "landed")
+    return (
+      <span className="zk-step zk-step-done">
+        <Icon name="checkink" size={18} draw strokeWidth={3} />
+      </span>
+    );
+  if (status === "landing")
+    return (
+      <span className="zk-step" aria-hidden="true">
+        <Icon name="down2" size={18} />
+      </span>
+    );
+  if (status === "late")
+    return (
+      <span className="zk-step">
+        <Icon name="xink" size={18} strokeWidth={3} />
+      </span>
+    );
+  return <span className="zk-spinner" aria-hidden="true" />;
 }

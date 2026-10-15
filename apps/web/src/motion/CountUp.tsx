@@ -33,19 +33,25 @@ export function CountUp({
   const start = from ?? value;
   const mv = useMotionValue(Number(start));
   const [shown, setShown] = useState<Zat>(start);
-  const last = useRef<Zat>(start);
+  const previous = useRef<Zat>(start);
 
   useEffect(() => {
-    const before = last.current;
-    last.current = value;
-    if (before === value) return;
-    if (value > before) onGrow?.();
-    if (reduce) {
-      mv.set(Number(value));
+    // Report growth once per new value (effects may run twice in dev).
+    if (previous.current !== value) {
+      if (value > previous.current) onGrow?.();
+      previous.current = value;
+    }
+    const target = Number(value);
+    if (mv.get() === target) {
       setShown(value);
       return;
     }
-    const controls = animate(mv, Number(value), {
+    if (reduce) {
+      mv.set(target);
+      setShown(value);
+      return;
+    }
+    const controls = animate(mv, target, {
       duration: duration / 1000,
       delay: delay / 1000,
       ease: [0.33, 1, 0.68, 1],

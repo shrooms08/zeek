@@ -1,7 +1,8 @@
 /**
  * Digging from another wallet: where should winnings go → scan the
- * payments → waiting (each payment "looking…" until it is mined; the
- * engine cannot see the mempool) → confirmed (or late: refunded).
+ * payments → waiting (each payment "looking…", then "seen, landing" as soon
+ * as the engine's mempool watcher sees it, then mined) → confirmed (or late:
+ * refunded).
  */
 
 export interface PaymentModel {
@@ -14,7 +15,12 @@ export interface PaymentModel {
   qrSvg: string;
 }
 
-export type PaymentStatus = "not-sent" | "landed" | "late";
+/**
+ * not-sent: nothing seen yet; landing: seen in the mempool (the engine's
+ * mempool watcher), not mined yet; landed: mined inside the round; late:
+ * mined after it (refunded).
+ */
+export type PaymentStatus = "not-sent" | "landing" | "landed" | "late";
 
 export type OtherWalletState =
   | { kind: "address"; error: string | null }
@@ -51,7 +57,8 @@ export function otherWalletReducer(
         : state;
     case "seen": {
       if (state.kind !== "waiting") return state;
-      const all = event.status.every((s) => s !== "not-sent");
+      // Confirmed once every payment is mined (landing is not yet final).
+      const all = event.status.every((s) => s === "landed" || s === "late");
       return all
         ? { kind: "confirmed", round: state.round, payments: state.payments, status: event.status }
         : { ...state, status: event.status };
@@ -83,4 +90,22 @@ export async function memoDigest(memoText: string): Promise<string> {
   field.set(new TextEncoder().encode(memoText).slice(0, 512));
   const hash = await crypto.subtle.digest("SHA-256", field);
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Marks payments that are not mined yet but whose every tile memo is among
+ * the engine's landing digs (seen in the mempool).
+ */
+export function withLanding(
+  payments: readonly PaymentModel[],
+  status: readonly PaymentStatus[],
+  landingDigests: ReadonlySet<string>,
+): PaymentStatus[] {
+  return payments.map((p, i) => {
+    const s = status[i] ?? "not-sent";
+    if (s !== "not-sent") return s;
+    return p.memoDigests.length > 0 && p.memoDigests.every((d) => landingDigests.has(d))
+      ? "landing"
+      : s;
+  });
 }

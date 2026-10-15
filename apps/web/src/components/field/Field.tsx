@@ -157,7 +157,7 @@ export function Field(props: FieldProps) {
   const liveId = useId();
   const reduce = prefersReducedMotion();
   const viewBox = world ? VIEWBOX_WORLD : VIEWBOX_FIELD;
-  const [vx, vy, vw, vh] = viewBox.split(" ").map(Number) as [number, number, number, number];
+  const [, , vw, vh] = viewBox.split(" ").map(Number) as [number, number, number, number];
   const { active, fire } = usePropReactions(props.onReact);
 
   const toggle = useCallback(
@@ -286,17 +286,6 @@ export function Field(props: FieldProps) {
           {[...landingTiles].map((i) => (
             <LandingMarker key={i} i={i} reduce={reduce} />
           ))}
-          {reveal.dim === true && (
-            <rect
-              x={vx}
-              y={vy}
-              width={vw}
-              height={vh}
-              fill="#000"
-              opacity={0.55}
-              className="zk-dim"
-            />
-          )}
           {reveal.cracks === true &&
             CRACKS.map((d, k) => (
               <path
@@ -381,7 +370,6 @@ export function Field(props: FieldProps) {
               }}
             />
           ))}
-          {reveal.star === true && <Star p={p} reduce={reduce} />}
           {flight !== null && !reduce && <Flight key={flight.n} tiles={flight.tiles} />}
         </g>
         <g data-layer="hit">
@@ -410,6 +398,14 @@ export function Field(props: FieldProps) {
         </g>
       </svg>
       {world ? <WorldFront {...worldProps} active={active} /> : null}
+      {reveal.dim === true && (
+        <div className="zk-dim absolute inset-0 bg-black pointer-events-none" aria-hidden="true" />
+      )}
+      {reveal.star === true && (
+        <svg viewBox={viewBox} style={LAYER_STYLE} overflow="visible" aria-hidden="true">
+          <Star p={p} reduce={reduce} />
+        </svg>
+      )}
       {world ? (
         <PropButtons
           interactive={interactive}

@@ -7,12 +7,17 @@ import { Link, useNavigate } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance } from "../api/pocketQueries";
 import { useBoard, useConfig } from "../api/queries";
+import { Zeb } from "../art/Characters";
+import { Icon } from "../components/Icon";
+import { SealRing } from "../components/SealRing";
 import { BatchProgress, Loading, Modal, StepList } from "../components/ui";
+import { useFieldFx } from "../state/fieldFx";
 import { digTotal, MARGINAL_FEE, planPayments, paymentFee } from "../lib/digPlan";
 import { formatZec, toNumber, zat } from "../lib/money";
 import { digReducer, SEAL_STEPS } from "../machines/dig";
 import { useDraft } from "../state/draft";
 import { recordMyDig } from "../state/myDigs";
+import { play } from "../sound/sound";
 
 /** Most tiles affordable from `spendable` at `amountEach`. */
 function affordable(spendable: bigint, amountEach: bigint, separate: boolean): number {
@@ -39,6 +44,23 @@ export default function DigPocketScreen() {
   const client = useQueryClient();
   const [state, dispatch] = useReducer(digReducer, { kind: "confirm" });
   const close = () => void navigate("/");
+  const fx = useFieldFx();
+  const sealing = state.kind === "sealing";
+  const { setSealing, launch } = fx;
+  useEffect(() => {
+    setSealing(sealing);
+    return () => {
+      setSealing(false);
+    };
+  }, [sealing, setSealing]);
+  // Sealed: ink flies from the seal into your tiles on the field behind.
+  const doneTiles = state.kind === "done" ? state.sent.flatMap((b) => b.tiles) : null;
+  const doneKey = doneTiles?.join(",") ?? "";
+  useEffect(() => {
+    if (doneKey === "") return;
+    launch(doneKey.split(",").map(Number));
+    play("thunk");
+  }, [doneKey, launch]);
   // Opened directly (or after a reload): ask the Pocket where it stands.
   useEffect(() => {
     if (wallet.kind === "unknown") void refresh();
@@ -121,16 +143,24 @@ export default function DigPocketScreen() {
         const fits = affordable(spendable, amountEach, draft.separate);
         return (
           <Modal title="Not enough in your Pocket" onClose={close} testId="dig-short">
-            <p className="text-mist mb-4">
-              You have {formatZec(spendable)} spendable · this dig needs{" "}
-              {formatZec(total.total, { decimals: 8 })}
-              {balance.data !== undefined && balance.data.pending_zat > 0
-                ? ` (${formatZec(zat(balance.data.pending_zat))} more is still confirming)`
-                : ""}
-            </p>
+            <div className="flex flex-col items-center gap-3 mb-5 text-center">
+              <Zeb pose="shrug" width={96} label={null} />
+              <p className="text-mist">
+                You have <strong className="text-white">{formatZec(spendable)}</strong> spendable ·
+                this dig needs{" "}
+                <strong className="text-white">{formatZec(total.total, { decimals: 8 })}</strong>
+                {balance.data !== undefined && balance.data.pending_zat > 0
+                  ? ` (${formatZec(zat(balance.data.pending_zat))} more is still confirming)`
+                  : ""}
+              </p>
+            </div>
             <div className="flex flex-col gap-2">
-              <Link className="btn btn-primary text-center" to="/wallet">
-                Add ZEC
+              <Link
+                className="zk-dig flex items-center justify-center gap-2"
+                style={{ fontSize: 22, minHeight: 60 }}
+                to="/wallet"
+              >
+                <Icon name="plus" size={20} /> Add ZEC
               </Link>
               {fits > 0 && (
                 <button
@@ -140,7 +170,7 @@ export default function DigPocketScreen() {
                     draft.setTiles(tiles.slice(0, fits));
                   }}
                 >
-                  Dig {fits} {fits === 1 ? "tile" : "tiles"}
+                  Dig {fits} {fits === 1 ? "tile" : "tiles"} instead
                 </button>
               )}
               <Link className="btn text-center" to="/dig/wallet">
@@ -152,55 +182,87 @@ export default function DigPocketScreen() {
       }
       return (
         <Modal title="Check your dig" onClose={close} testId="dig-confirm">
-          <dl className="grid grid-cols-2 gap-y-2 mb-4">
-            <dt className="label">Tiles</dt>
-            <dd className="numeral text-right">{tiles.length}</dd>
-            <dt className="label">Each</dt>
-            <dd className="numeral text-right">{formatZec(amountEach, { decimals: 8 })}</dd>
-            <dt className="text-fog">
-              Dig · {tiles.length} × {formatZec(amountEach, { decimals: 8 })}
-            </dt>
-            <dd className="text-right text-white">{formatZec(total.dug, { decimals: 8 })}</dd>
-            <dt className="text-fog">
-              Fee · {formatZec(MARGINAL_FEE, { decimals: 8 })} per tile + per payment
-            </dt>
-            <dd className="text-right text-white">{formatZec(total.fee, { decimals: 8 })}</dd>
-            <dt className="label">Total</dt>
-            <dd className="numeral text-right" data-testid="confirm-total">
-              {formatZec(total.total, { decimals: 8 })} ZEC
-            </dd>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="zk-stat p-3">
+              <div className="label flex items-center gap-2">
+                <Icon name="tile" size={16} /> Tiles
+              </div>
+              <div className="numeral" style={{ fontSize: 44, lineHeight: 1 }}>
+                {tiles.length}
+              </div>
+            </div>
+            <div className="zk-stat p-3">
+              <div className="label flex items-center gap-2">
+                <Icon name="coin" size={16} /> Each
+              </div>
+              <div className="numeral" style={{ fontSize: 44, lineHeight: 1 }}>
+                {formatZec(amountEach)}
+              </div>
+            </div>
+          </div>
+          <dl className="flex flex-col gap-1.5 text-sm mb-3">
+            <div className="flex justify-between">
+              <dt className="text-fog">
+                Dig · {tiles.length} × {formatZec(amountEach, { decimals: 8 })}
+              </dt>
+              <dd className="font-mono text-white">{formatZec(total.dug, { decimals: 8 })}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-fog">
+                Fee · {formatZec(MARGINAL_FEE, { decimals: 8 })} per tile + per payment
+              </dt>
+              <dd className="font-mono text-white">{formatZec(total.fee, { decimals: 8 })}</dd>
+            </div>
           </dl>
+          <div className="flex items-baseline justify-between border-t hair pt-3 mb-3">
+            <span className="text-white font-extrabold text-xl">Total</span>
+            <span className="numeral" style={{ fontSize: 26 }} data-testid="confirm-total">
+              {formatZec(total.total, { decimals: 8 })} ZEC
+            </span>
+          </div>
           {total.payments.length > 1 && (
-            <p className="text-fog mb-2">
+            <p className="text-fog text-sm mb-2">
               {total.payments.length} payments: {total.payments.map((p) => p.length).join(" + ")}{" "}
               tiles
               {draft.separate ? ", sent 2–20 s apart" : ""}.
             </p>
           )}
-          {message.length > 0 && <p className="text-fog mb-2">Message: “{message}”</p>}
-          <p className="text-fog mb-4 text-sm">
-            From Zeek Pocket · {spendable === undefined ? "…" : formatZec(spendable)} ZEC. Round{" "}
-            {round ?? "…"}. The game also takes 0.00005 per dig from the prize at the end of the
-            round.
+          {message.length > 0 && <p className="text-fog text-sm mb-2">Message: “{message}”</p>}
+          <p className="text-fog mb-5 text-sm flex items-center gap-2">
+            <Icon name="wallet" size={16} />
+            From Zeek Pocket · {spendable === undefined ? "…" : formatZec(spendable)} ZEC · round{" "}
+            {round ?? "…"}
           </p>
           <button
             type="button"
-            className="btn btn-primary w-full"
+            className="zk-dig flex items-center justify-center gap-3"
+            style={{ fontSize: 24, minHeight: 64 }}
             disabled={tiles.length === 0 || spendable === undefined}
             onClick={() => void start()}
             data-testid="dig-privately"
           >
-            Dig privately
+            <Icon name="shovel" size={24} /> Dig privately
           </button>
+          <p className="text-fog text-xs mt-3">
+            The game also takes 0.00005 per dig from the prize at the end of the round.
+          </p>
         </Modal>
       );
     }
-    case "sealing":
+    case "sealing": {
+      const fraction = (state.current + (state.step + 1) / 3) / Math.max(1, state.batches.length);
       return (
         <Modal title="Sealing your dig" testId="dig-sealing">
-          <div className="label mb-2">Round {round ?? "…"}</div>
-          <BatchProgress batches={state.batches} current={state.current} />
-          <div className="my-4">
+          <div className="label text-fog mb-4">Round {round ?? "…"}</div>
+          <div className="flex justify-center mb-6">
+            <SealRing fraction={Math.min(0.97, fraction)} />
+          </div>
+          <BatchProgress
+            batches={state.batches}
+            current={state.current}
+            fill={(state.step + 1) / 3}
+          />
+          <div className="my-5">
             <StepList steps={SEAL_STEPS} current={state.step} />
           </div>
           {state.waiting !== null && (
@@ -215,31 +277,42 @@ export default function DigPocketScreen() {
               Sent: {state.sent.length} of {state.batches.length}
             </p>
           )}
-          <p className="text-fog text-sm mt-2">
+          <p className="text-fog text-sm mt-3">
             Keep this open. Sealing happens on your device; nobody else sees it.
           </p>
         </Modal>
       );
+    }
     case "done":
       return (
-        <Modal title={`Your dig is in round ${state.round}`} onClose={close} testId="dig-done">
-          <p className="label mb-2">In the ground</p>
+        <Modal
+          title={`Your dig is in round ${state.round}`}
+          onClose={close}
+          testId="dig-done"
+          dim={false}
+        >
+          <p className="label text-fog mb-2 flex items-center gap-2">
+            <Icon name="checkink" size={18} draw strokeWidth={3} /> In the ground
+          </p>
           <p className="text-white mb-1">
             {state.sent.flatMap((s) => s.tiles).length} tiles ·{" "}
             {formatZec(total.total, { decimals: 8 })} ZEC
           </p>
           <p className="text-fog mb-4">The holes got a little deeper. Only you know why.</p>
-          <ul className="font-mono text-xs text-fog mb-4 break-all" data-testid="dig-txids">
-            {state.sent.map((s) => (
-              <li key={s.txid}>{s.txid}</li>
-            ))}
-          </ul>
+          <details className="mb-4 text-fog text-sm">
+            <summary className="cursor-pointer">Transactions</summary>
+            <ul className="font-mono text-xs mt-2 break-all" data-testid="dig-txids">
+              {state.sent.map((s) => (
+                <li key={s.txid}>{s.txid}</li>
+              ))}
+            </ul>
+          </details>
           <div className="flex flex-col gap-2">
             <button type="button" className="btn btn-primary" onClick={close}>
               Back to the field
             </button>
-            <Link className="btn text-center" to="/campfire">
-              Say something at the campfire
+            <Link className="btn text-center flex items-center justify-center gap-2" to="/campfire">
+              <Icon name="fire" size={18} /> Say something at the campfire
             </Link>
           </div>
         </Modal>
@@ -247,15 +320,17 @@ export default function DigPocketScreen() {
     case "partial":
       return (
         <Modal title="Part of your dig went in" onClose={close} testId="dig-partial">
-          <p className="text-mist mb-2">{state.message}</p>
-          <p className="text-white">
+          <p className="text-mist mb-3">{state.message}</p>
+          <p className="text-white flex items-start gap-2">
+            <Icon name="checkink" size={18} strokeWidth={3} />
             In the round: tiles{" "}
             {state.sent
               .flatMap((s) => s.tiles)
               .map((t) => t + 1)
               .join(", ")}
           </p>
-          <p className="text-white mb-4">
+          <p className="text-white mb-5 flex items-start gap-2">
+            <Icon name="xink" size={18} strokeWidth={3} />
             Not sent: tiles {state.unsent.map((t) => t + 1).join(", ")}
           </p>
           <button
@@ -274,8 +349,11 @@ export default function DigPocketScreen() {
     case "error":
       return (
         <Modal title="That dig didn’t go through" onClose={close} testId="dig-error">
-          <p className="text-mist mb-4">{state.message}</p>
-          <p className="text-fog text-sm mb-4">Nothing was sent.</p>
+          <div className="flex justify-center mb-3">
+            <Zeb pose="shrug" width={88} label={null} />
+          </div>
+          <p className="text-mist mb-2">{state.message}</p>
+          <p className="text-fog text-sm mb-5">Nothing was sent.</p>
           <button
             type="button"
             className="btn btn-primary w-full"

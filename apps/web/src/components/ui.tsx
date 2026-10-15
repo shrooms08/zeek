@@ -112,6 +112,8 @@ export function Modal(props: {
   testId?: string;
   /** Wider body (QR codes side by side on desktop). */
   wide?: boolean;
+  /** Dim what's behind (false: the field stays visible, e.g. ink flight). */
+  dim?: boolean;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -131,7 +133,7 @@ export function Modal(props: {
   }, []);
   return (
     <motion.div
-      className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-night/80 p-0 sm:p-6"
+      className={`fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-6 ${props.dim === false ? "pointer-events-none sm:items-end" : "bg-night/80"}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.15 }}
@@ -141,7 +143,7 @@ export function Modal(props: {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`panel zk-lift w-full ${props.wide === true ? "sm:max-w-[880px]" : "sm:max-w-[520px]"} max-h-[100dvh] overflow-auto p-6 sm:p-8`}
+        className={`panel zk-lift pointer-events-auto w-full ${props.wide === true ? "sm:max-w-[880px]" : "sm:max-w-[520px]"} max-h-[100dvh] overflow-auto p-6 sm:p-8`}
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2, ease: EASE.out }}
