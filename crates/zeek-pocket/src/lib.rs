@@ -164,6 +164,26 @@ pub fn verify_round(
     to_js(&report)
 }
 
+/// Replay mode (engine off): the parts of the round checks that need no
+/// chain data. `public_beacon` is the bundle's beacon as a public drand
+/// relay served it (`zeek_verify::offline::PublicBeacon` JSON), or "" for a
+/// voided round; chain-dependent parts come back as `needs_chain`.
+#[wasm_bindgen(js_name = verifyOffline)]
+pub fn verify_offline(bundle: &str, config: &str, public_beacon: &str) -> Result<JsValue, JsValue> {
+    let bundle = bundle_from(bundle)?;
+    let config: zeek_verify::checks::PublicConfig = from_json(config, "public config")?;
+    let public: Option<zeek_verify::offline::PublicBeacon> = if public_beacon.is_empty() {
+        None
+    } else {
+        Some(from_json(public_beacon, "public beacon")?)
+    };
+    to_js(&zeek_verify::offline::verify_offline(
+        &bundle,
+        &config,
+        public.as_ref(),
+    ))
+}
+
 /// Heights and hashes (display hex) of relay-encoded compact blocks, for
 /// cross-checking one chain source against another.
 #[wasm_bindgen(js_name = blockHashes)]

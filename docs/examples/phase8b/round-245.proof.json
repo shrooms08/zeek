@@ -1,0 +1,100 @@
+{
+    "version": 4,
+    "params": {
+        "network": "test",
+        "genesis_height": 4499347,
+        "blocks_per_round": 24,
+        "target_spacing_secs": 25,
+        "rake_bps": 500,
+        "cache_odds": 625,
+        "min_dig_zat": 100000,
+        "marginal_fee_zat": 5000,
+        "dig_fee_zat": 5000,
+        "text_memo_activation_height": 4500067,
+        "campfire": {
+            "activation_height": 4501339,
+            "min_shout_zat": 50000
+        },
+        "drand": {
+            "beacon_id": "quicknet",
+            "chain_hash": "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971",
+            "public_key": "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a",
+            "period_secs": 3,
+            "genesis_time": 1692803367,
+            "scheme": "bls-unchained-g1-rfc9380"
+        },
+        "reveal_delay_secs": 900,
+        "mtp_window": 11,
+        "honest_clock_skew_secs": 300
+    },
+    "round": 245,
+    "window": {
+        "start": 4505227,
+        "end": 4505251
+    },
+    "notes": [
+        {
+            "txid": "06751dc5580bfb94ef85cc6da8a752142ab8f62c9b7ea647a2a1ce2fd33f25a8",
+            "output_index": 0,
+            "height": 4505231,
+            "value": 100000,
+            "memo": "7a65656b313a576b564653774541414144314559766c576a5646496f706a422d3853526b4d4471424f786970724e434a6d796f4d61514a50485a6239417a764d3153414238675866577875474c796d4b655f5351725667477238444b63425962344f43546a64484c5f467735743870446c355057395176324271486d3831313448314f62756f5a4e6b6278324a3900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        }
+    ],
+    "start_block_time": 1792077378,
+    "post_close_block_times": [
+        1792078124,
+        1792078144,
+        1792078151,
+        1792078166,
+        1792078200,
+        1792078202,
+        1792078216,
+        1792078264,
+        1792078278,
+        1792078301,
+        1792078323
+    ],
+    "drand_round": 33091838,
+    "beacon_time": 1792078878,
+    "beacon": {
+        "round": 33091838,
+        "signature": "a5578a3121308963ede239a04116cf237d19ef0bb3976e2da4fe298e4e447e79e936e78871f5a3892d7e9c3896ceb9ee"
+    },
+    "randomness": "83ccbefacbe6ad15eb5385ca012e88f244844d3a7526e78e69adba6df986af6c",
+    "timing": {
+        "verdict": "safe",
+        "median_time_past": 1792078202,
+        "beacon_time": 1792078878,
+        "margin_secs": 376
+    },
+    "outcome": {
+        "outcome": "drawn",
+        "treasure_tile": 21,
+        "cache_triggered": false
+    },
+    "previous_cache": 5748500,
+    "settlement": {
+        "round": 245,
+        "outcome": {
+            "outcome": "drawn",
+            "treasure_tile": 21,
+            "cache_triggered": false
+        },
+        "pot": 95000,
+        "rake": 4750,
+        "distributable": 90250,
+        "treasure_tile_total": 0,
+        "winners": 0,
+        "cache_paid": 0,
+        "payouts": [],
+        "previous_cache": 5748500,
+        "new_cache": 5843500,
+        "cache_in": 95000,
+        "total_fees": 5000,
+        "total_paid": 0,
+        "forfeited": 0,
+        "dig_fees": 5000
+    },
+    "rules_version": 4
+}

@@ -13,6 +13,7 @@ import init, {
   initThreadPool,
   PocketCore,
   verifyPlan,
+  verifyOffline as coreVerifyOffline,
   verifyRound as coreVerifyRound,
   verifyScan,
   verifyWinProof as coreVerifyWinProof,
@@ -26,6 +27,7 @@ import {
 } from "./batching.js";
 import { blockchairHash, compareHashes, sourceName, type BlockHash } from "./crosscheck.js";
 import { cryptoRandom, planTransactionFetches, type TxRef } from "./decoys.js";
+import { fetchPublicBeacon } from "./drand.js";
 import { PocketError, toPocketError } from "./errors.js";
 import type { Methods, MethodName, RequestMessage, ResponseMessage } from "./protocol.js";
 import { hexToBytes, MAX_BLOCK_RANGE, RelayClient } from "./relay.js";
@@ -44,6 +46,7 @@ import type {
   SyncProgress,
   VerifyProgress,
   WinVerdict,
+  OfflineReport,
 } from "./types.js";
 
 /** Blocks fetched per relay request while syncing. */
@@ -587,6 +590,19 @@ const handlers: { [M in MethodName]: Handler<M> } = {
     const check = await crossCheck(blocks, secondSource === undefined ? {} : { secondSource });
     verifyProgress(id, "done", "done");
     return { report, crossCheck: check, source: `Zeek relay ${client.baseUrl}` };
+  },
+  async verifyOffline({ bundle, config }) {
+    await wasm();
+    const parsed = JSON.parse(bundle) as {
+      beacon?: { round: number } | null;
+      params?: { drand?: { chain_hash?: string } };
+    };
+    const chain = parsed.params?.drand?.chain_hash ?? "";
+    const publicBeacon =
+      parsed.beacon === undefined || parsed.beacon === null
+        ? ""
+        : JSON.stringify(await fetchPublicBeacon(chain, parsed.beacon.round));
+    return coreVerifyOffline(bundle, config, publicBeacon) as OfflineReport;
   },
   async verifyWinProof({ idOrProof }) {
     await wasm();

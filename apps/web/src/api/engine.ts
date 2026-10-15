@@ -37,11 +37,20 @@ export const SECOND_SOURCE: string =
 /** The vault this build serves; the Pocket refuses any other. */
 export const PINNED_VAULT = __ZEEK_PINNED_VAULT__;
 
-/** Why a request failed, in a form screens can show. */
+/**
+ * Why a request failed, in a form screens can show:
+ * - offline: the engine (or its tunnel) does not answer;
+ * - busy: the public site's free daily allowance of proxied requests is
+ *   used up (Cloudflare then serves the app's own page, or its error page,
+ *   instead of the engine's JSON);
+ * - not-found, server: the engine answered with an error.
+ */
+export type EngineErrorKind = "offline" | "busy" | "not-found" | "server";
+
 export class EngineError extends Error {
-  readonly kind: "offline" | "not-found" | "server";
+  readonly kind: EngineErrorKind;
   readonly status: number;
-  constructor(kind: "offline" | "not-found" | "server", message: string, status = 0) {
+  constructor(kind: EngineErrorKind, message: string, status = 0) {
     super(message);
     this.name = "EngineError";
     this.kind = kind;
@@ -56,16 +65,26 @@ async function get<T>(path: string): Promise<T> {
   } catch {
     throw new EngineError("offline", "Can’t reach the field.");
   }
+  const json = (response.headers.get("content-type") ?? "").includes("application/json");
+  if (!json) {
+    throw new EngineError("busy", "Zeek is very busy, try again shortly.", response.status);
+  }
   if (response.status === 404) throw new EngineError("not-found", "Not found.", 404);
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
+    let offline = false;
     try {
-      const body = (await response.json()) as { error?: unknown };
+      const body = (await response.json()) as { error?: unknown; offline?: unknown };
       if (typeof body.error === "string") message = body.error;
+      offline = body.offline === true;
     } catch {
       // keep the status line
     }
-    throw new EngineError("server", message, response.status);
+    throw new EngineError(
+      offline || response.status === 502 || response.status === 503 ? "offline" : "server",
+      message,
+      response.status,
+    );
   }
   return (await response.json()) as T;
 }
@@ -82,6 +101,7 @@ export const engine = {
   ledger: () => get<Ledger>("/v1/vault/ledger"),
   keyholders: () => get<KeyholdersStatus>("/v1/keyholders/status"),
   status: () => get<ServiceStatus>("/v1/status"),
+  health: () => get<{ ok: boolean }>("/v1/health"),
   campfire: (includeHidden = false) =>
     get<CampfirePage>(`/v1/campfire?limit=50${includeHidden ? "&include_hidden=1" : ""}`),
 };

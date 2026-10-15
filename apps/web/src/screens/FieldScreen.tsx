@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import { Suspense, useCallback, useContext, useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Mine, Zeb } from "../art/Characters";
+import { EngineError } from "../api/engine";
 import { LiveContext } from "../api/LiveProvider";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance } from "../api/pocketQueries";
@@ -21,6 +22,7 @@ import type { PropReaction } from "../components/field/World";
 import { Icon } from "../components/Icon";
 import { hasSeenOnboarding, Onboarding } from "../components/Onboarding";
 import { PictoBubble } from "../components/PictoBubble";
+import { ReplayMode } from "../components/ReplayMode";
 import { RevealLine } from "../components/RevealLine";
 import { TimeLeft } from "../components/TimeLeft";
 import { Loading, Offline } from "../components/ui";
@@ -97,7 +99,19 @@ export function FieldScreen() {
   }, []);
 
   if (board.isPending) return <Loading />;
-  if (board.isError) return <Offline onRetry={() => void board.refetch()} />;
+  if (board.isError) {
+    const e = board.error;
+    // The engine is off or the site is out of free requests: play back
+    // saved rounds until it answers again.
+    if (e instanceof EngineError && (e.kind === "offline" || e.kind === "busy")) {
+      return (
+        <main className="zk-field-replay" data-testid="field-screen-replay">
+          <ReplayMode reason={e.kind} />
+        </main>
+      );
+    }
+    return <Offline onRetry={() => void board.refetch()} />;
+  }
   const b = board.data;
   const open = b.status === "open";
   const left = Math.max(0, b.estimated_close_time - now);

@@ -28,7 +28,9 @@ export default defineConfig({
   ...(target === undefined
     ? {
         webServer: {
-          command: "pnpm build && pnpm preview",
+          // The snapshot of saved rounds for Replay mode (needs the engine).
+          command:
+            "pnpm build && node ../../scripts/snapshot-rounds.mjs --out dist/replay && pnpm preview",
           url: "http://localhost:4174",
           reuseExistingServer: true,
           timeout: 180_000,

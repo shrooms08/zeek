@@ -213,7 +213,7 @@ fn fail(id: CheckId, summary: impl Into<String>) -> CheckResult {
 
 /// The parameters that must agree between the bundle and the public config
 /// (the bundle may legitimately omit later rules' fields for older rounds).
-fn params_agree(bundle: &GameParams, public: &GameParams) -> Result<(), String> {
+pub(crate) fn params_agree(bundle: &GameParams, public: &GameParams) -> Result<(), String> {
     let pairs = [
         (
             "network",
@@ -549,7 +549,7 @@ fn check_timing(input: &RoundInput<'_>) -> CheckResult {
     }
 }
 
-fn check_settlement(bundle: &ProofBundle) -> CheckResult {
+pub(crate) fn check_settlement(bundle: &ProofBundle) -> CheckResult {
     let id = CheckId::Settlement;
     match proof::recompute(bundle) {
         Ok(recomputed) => {
@@ -647,7 +647,9 @@ pub fn verify_ironwood_bundle(tx: &Transaction) -> Result<usize, String> {
 
 /// The payouts a bundle reports as unclaimable, with an explanation line
 /// each; an error when an entry does not match the settlement.
-fn unclaimable_payouts(bundle: &ProofBundle) -> Result<(BTreeSet<u32>, Vec<String>), &'static str> {
+pub(crate) fn unclaimable_payouts(
+    bundle: &ProofBundle,
+) -> Result<(BTreeSet<u32>, Vec<String>), &'static str> {
     let mut indices = BTreeSet::new();
     let mut notes = Vec::new();
     for u in &bundle.unclaimable_payouts {

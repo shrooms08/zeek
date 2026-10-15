@@ -11,11 +11,16 @@
 //!   payout), each with a plain-language verdict and technical detail.
 //! * [`win`]: proofs that a payout was received at an address the prover
 //!   controls ("prove-a-win").
+//! * [`offline`]: the parts of the round checks that need no chain data
+//!   (Replay mode, while the engine is off).
+//! * [`replay`]: a round's depth stages block by block, for playback.
 
 #![forbid(unsafe_code)]
 
 pub mod chain;
 pub mod checks;
+pub mod offline;
+pub mod replay;
 pub mod report;
 pub mod win;
 

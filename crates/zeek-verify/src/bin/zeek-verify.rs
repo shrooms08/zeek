@@ -106,6 +106,22 @@ enum Command {
         #[arg(long)]
         proxy_secret_file: Option<PathBuf>,
     },
+    /// Print a settled round's replay (depth stages block by block, the
+    /// draw and the payout; never amounts per tile) as JSON, from its proof
+    /// bundle file. Used to build the web app's Replay snapshot.
+    Replay {
+        #[arg(long)]
+        bundle: PathBuf,
+    },
+}
+
+fn run_replay(file: &std::path::Path) -> anyhow::Result<bool> {
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let bundle: ProofBundle = serde_json::from_str(&text).context("parsing the proof bundle")?;
+    let replay = zeek_verify::replay::replay(&bundle)?;
+    println!("{}", serde_json::to_string(&replay)?);
+    Ok(true)
 }
 
 type Client = CompactTxStreamerClient<Channel>;
@@ -694,6 +710,7 @@ fn main() -> anyhow::Result<()> {
             } => run_relay(lightwalletd, bind, cors, proxy_secret_file)
                 .await
                 .map(|()| true),
+            Command::Replay { bundle } => run_replay(&bundle),
         }
     })?;
     if !ok {

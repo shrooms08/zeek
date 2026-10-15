@@ -1354,3 +1354,16 @@ body {
   max-height: calc(100vh - 140px);
   overflow-y: auto;
 }
+
+/* Replay mode: clearly not live. */
+.zk-replay-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 2px dashed var(--color-white);
+  color: var(--color-white);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}

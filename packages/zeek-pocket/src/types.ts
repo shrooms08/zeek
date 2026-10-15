@@ -237,6 +237,22 @@ export interface RoundReport {
   checks: CheckResult[];
 }
 
+/** One part of the offline checks (`zeek_verify::offline`). */
+export interface OfflinePart {
+  check: CheckResult["id"];
+  /** Stable name of the part: rules, signature, public, draw, binding, chain, recompute, openings. */
+  part: string;
+  /** `needs_chain`: not performed (needs chain data, i.e. the live engine's relay). */
+  status: "pass" | "fail" | "not_available" | "needs_chain";
+  summary: string;
+  detail: string[];
+}
+
+export interface OfflineReport {
+  round: number;
+  parts: OfflinePart[];
+}
+
 /** Result of comparing block hashes with an independent second source. */
 export interface CrossCheck {
   status: "pass" | "fail" | "unavailable";

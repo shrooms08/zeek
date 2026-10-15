@@ -33,6 +33,7 @@ import type {
   VerifyProgress,
   WinProofResult,
   WinVerdict,
+  OfflineReport,
 } from "./types.js";
 
 /** Progress callbacks of one call. */
@@ -206,6 +207,16 @@ export class Pocket {
     onVerify?: (progress: VerifyProgress) => void,
   ): Promise<RoundVerification> {
     return this.call("verifyRound", options, { onVerify });
+  }
+
+  /**
+   * The parts of the round checks that need no chain data, for when the
+   * engine is off (Replay mode): `bundle` and `config` come from the site's
+   * saved snapshot; the beacon is compared with drand's public relays.
+   * Needs no engine; chain-dependent parts come back `needs_chain`.
+   */
+  verifyOffline(bundle: string, config: string): Promise<OfflineReport> {
+    return this.call("verifyOffline", { bundle, config });
   }
 
   /** Verifies a win proof given its engine id or the base64url proof itself. */

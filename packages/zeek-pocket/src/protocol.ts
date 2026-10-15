@@ -15,6 +15,7 @@ import type {
   VerifyProgress,
   WinProofResult,
   WinVerdict,
+  OfflineReport,
 } from "./types.js";
 
 export interface WalletStatus {
@@ -101,6 +102,7 @@ export interface Methods {
   buildShoutRequest: [ShoutRequestOptions, Omit<AnyWalletShout, "qrSvg">];
   createWinProof: [{ round: number }, WinProofResult];
   verifyRound: [VerifyOptions, RoundVerification];
+  verifyOffline: [{ bundle: string; config: string }, OfflineReport];
   verifyWinProof: [
     { idOrProof: string },
     WinVerdict & { id: string; round: number; payoutIndex: number },

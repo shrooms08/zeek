@@ -32,8 +32,9 @@ export const productionHeaders = {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    // The engine in local runs; the mainnet second source in the verifier.
-    "connect-src 'self' http://127.0.0.1:8787 ws://127.0.0.1:8787 http://127.0.0.1:8790 https://api.blockchair.com",
+    // The engine in local runs; the mainnet second source in the verifier;
+    // drand's public relays (Replay mode's beacon check).
+    "connect-src 'self' http://127.0.0.1:8787 ws://127.0.0.1:8787 http://127.0.0.1:8790 https://api.blockchair.com https://api.drand.sh https://api2.drand.sh https://api3.drand.sh https://drand.cloudflare.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "object-src 'none'",
