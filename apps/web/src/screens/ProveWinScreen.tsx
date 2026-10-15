@@ -6,6 +6,8 @@ import { Link, useParams } from "react-router-dom";
 import { shareUrls } from "../api/engine";
 import { usePocket } from "../api/PocketProvider";
 import { useRound } from "../api/queries";
+import { Chest } from "../art/Characters";
+import { Icon } from "../components/Icon";
 import { CopyButton, Loading, Panel, Screen } from "../components/ui";
 import { formatZec, zat } from "../lib/money";
 
@@ -51,43 +53,67 @@ export default function ProveWinScreen() {
   const payout =
     stage.kind === "done" ? round.data?.settled?.payouts[stage.proof.payoutIndex] : undefined;
   return (
-    <Screen title="Prove a win" back={`/rounds/${n}`} testId="prove-screen">
-      <p className="text-mist">
-        Make a card that proves a wallet won round {n}. It shows the amount and the round. It never
-        says who.
-      </p>
-      {!unlocked ? (
-        <Panel>
-          <p className="text-mist mb-3">Unlock the Pocket that won to make the proof.</p>
-          <Link className="btn btn-primary" to="/wallet">
-            My wallet
-          </Link>
-        </Panel>
-      ) : stage.kind === "idle" || stage.kind === "error" ? (
-        <Panel>
-          {stage.kind === "error" && (
-            <p className="text-white mb-3" role="alert">
-              {stage.message}
-            </p>
+    <Screen
+      title="Prove a win"
+      kicker={`Round ${n}`}
+      back={`/rounds/${n}`}
+      testId="prove-screen"
+      wide
+    >
+      <div className="grid gap-8 lg:grid-cols-[320px_1fr] items-start">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Chest
+            open={stage.kind === "done"}
+            width={200}
+            label="Treasure chest"
+            className={stage.kind === "done" ? "zk-chest-glint" : ""}
+          />
+          <p className="text-mist">
+            Make a card that proves a wallet won round {n}. It shows the amount and the round. It
+            never says who.
+          </p>
+        </div>
+        <div className="flex flex-col gap-4">
+          {!unlocked ? (
+            <Panel>
+              <p className="text-mist mb-3">Unlock the Pocket that won to make the proof.</p>
+              <Link className="btn btn-primary" to="/wallet">
+                My wallet
+              </Link>
+            </Panel>
+          ) : stage.kind === "idle" || stage.kind === "error" ? (
+            <Panel>
+              {stage.kind === "error" && (
+                <p className="text-white mb-3" role="alert">
+                  {stage.message}
+                </p>
+              )}
+              <p className="text-mist mb-4">
+                Your Pocket proves, in this browser, that one of this round’s treasure payouts
+                reached it, without saying which address. The engine checks the proof before storing
+                it.
+              </p>
+              <button
+                type="button"
+                className="zk-dig flex items-center justify-center gap-3 w-full"
+                style={{ fontSize: 22, minHeight: 64, textTransform: "none" }}
+                onClick={make}
+                data-testid="prove-create"
+              >
+                <Icon name="seal" size={22} /> Create proof
+              </button>
+            </Panel>
+          ) : stage.kind === "making" ? (
+            <Loading text="Proving in your browser… about a minute" />
+          ) : (
+            <ProofDone
+              id={stage.proof.id}
+              round={n}
+              amount={payout === undefined ? null : zat(payout.net)}
+            />
           )}
-          <button
-            type="button"
-            className="btn btn-primary w-full"
-            onClick={make}
-            data-testid="prove-create"
-          >
-            Create proof
-          </button>
-        </Panel>
-      ) : stage.kind === "making" ? (
-        <Loading text="Proving in your browser… about a minute" />
-      ) : (
-        <ProofDone
-          id={stage.proof.id}
-          round={n}
-          amount={payout === undefined ? null : zat(payout.net)}
-        />
-      )}
+        </div>
+      </div>
     </Screen>
   );
 }
@@ -103,23 +129,28 @@ function ProofDone({ id, round, amount }: { id: string; round: number; amount: b
         alt={`Share card: I found the treasure in round ${round}`}
         width={1200}
         height={675}
-        className="w-full h-auto border-[3px] border-white"
+        className="w-full h-auto border-[3px] border-white zk-lift"
         data-testid="prove-card"
       />
       <div className="flex flex-wrap gap-2">
-        <a className="btn btn-primary" href={intent} target="_blank" rel="noopener noreferrer">
-          Post to X
+        <a
+          className="btn btn-primary flex items-center gap-2"
+          href={intent}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Icon name="share" size={18} /> Post to X
         </a>
         <button
           type="button"
-          className="btn"
+          className="btn flex items-center gap-2"
           onClick={() => void downloadPng(urls.image, `zeek-win-${round}.png`)}
         >
-          Download PNG
+          <Icon name="down2" size={18} /> Download PNG
         </button>
         <CopyButton text={urls.page} label="Copy link" />
-        <Link className="btn" to={`/win/${id}`} data-testid="prove-open">
-          Open the page
+        <Link className="btn flex items-center gap-2" to={`/win/${id}`} data-testid="prove-open">
+          <Icon name="link" size={18} /> Open the page
         </Link>
       </div>
       <p className="text-fog text-sm font-mono break-all" data-testid="prove-link">

@@ -84,6 +84,8 @@ export interface FieldProps {
   /** Ink flies to these tiles (your dig was sealed); `n` replays it. */
   flight?: { tiles: readonly number[]; n: number } | null;
   onReact?: (reaction: PropReaction) => void;
+  /** An illustration (onboarding, How to play): no tab stop, no picking, hidden from screen readers. */
+  decorative?: boolean;
 }
 
 interface PinPlace {
@@ -149,6 +151,7 @@ export function Field(props: FieldProps) {
     landing = [],
     reveal = {},
     flight = null,
+    decorative = false,
   } = props;
   const p = useInkPrefix();
   const [hover, setHover] = useState<number | null>(null);
@@ -246,11 +249,15 @@ export function Field(props: FieldProps) {
         viewBox={viewBox}
         style={{ ...LAYER_STYLE, pointerEvents: "auto" }}
         overflow="visible"
-        role="application"
-        aria-roledescription="treasure field"
-        aria-label={`${props.label ?? "The field: 25 tiles"}. Arrows move, Space selects, A auto-picks, D digs, Escape clears.`}
-        aria-describedby={liveId}
-        tabIndex={0}
+        {...(decorative
+          ? { "aria-hidden": true }
+          : {
+              role: "application",
+              "aria-roledescription": "treasure field",
+              "aria-label": `${props.label ?? "The field: 25 tiles"}. Arrows move, Space selects, A auto-picks, D digs, Escape clears.`,
+              "aria-describedby": liveId,
+              tabIndex: 0,
+            })}
         onKeyDown={onKeyDown}
         onFocus={() => {
           setHasFocus(true);
@@ -259,7 +266,7 @@ export function Field(props: FieldProps) {
           setHasFocus(false);
         }}
         data-closed={closed}
-        data-testid="field"
+        data-testid={decorative ? undefined : "field"}
       >
         <g data-layer="tiles">
           {sorted.map((i) => (
@@ -372,7 +379,7 @@ export function Field(props: FieldProps) {
           ))}
           {flight !== null && !reduce && <Flight key={flight.n} tiles={flight.tiles} />}
         </g>
-        <g data-layer="hit">
+        <g data-layer="hit" style={decorative ? { display: "none" } : undefined}>
           {Array.from({ length: 25 }, (_, i) => (
             <polygon
               key={i}
@@ -414,14 +421,18 @@ export function Field(props: FieldProps) {
           active={active}
         />
       ) : null}
-      <div id={liveId} className="sr-only" aria-live="polite" data-testid="field-live">
-        {hasFocus ? describe(cursor) : ""}
-      </div>
-      <ul className="sr-only" aria-label="Tiles">
-        {stages.map((_, i) => (
-          <li key={i}>{describe(i)}</li>
-        ))}
-      </ul>
+      {!decorative && (
+        <>
+          <div id={liveId} className="sr-only" aria-live="polite" data-testid="field-live">
+            {hasFocus ? describe(cursor) : ""}
+          </div>
+          <ul className="sr-only" aria-label="Tiles">
+            {stages.map((_, i) => (
+              <li key={i}>{describe(i)}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
