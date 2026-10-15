@@ -4,8 +4,16 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { engine } from "../api/engine";
 import type { RoundListStatus } from "../api/types";
+import { Icon } from "../components/Icon";
 import { Empty, Loading, Offline, Screen } from "../components/ui";
 import { formatZec, zat } from "../lib/money";
+
+const STATUS_CHIP: Record<RoundListStatus, string> = {
+  paid: "zk-chip-fill",
+  paying: "",
+  no_winner: "",
+  voided: "zk-chip-dashed",
+};
 
 export const STATUS_LABEL: Record<RoundListStatus, string> = {
   paid: "Paid",
@@ -23,7 +31,7 @@ export default function PastRoundsScreen() {
   });
   const all = rounds.data?.pages.flatMap((p) => p.rounds) ?? [];
   return (
-    <Screen title="Past rounds" testId="past-rounds">
+    <Screen title="Past rounds" kicker="Amounts only. Never who." testId="past-rounds" wide>
       {rounds.isPending ? (
         <Loading text="Loading rounds…" />
       ) : rounds.isError ? (
@@ -31,20 +39,27 @@ export default function PastRoundsScreen() {
       ) : all.length === 0 ? (
         <Empty title="No rounds yet" text="The first one is being dug now." />
       ) : (
-        <ul className="flex flex-col">
+        <ul className="zk-rows">
           {all.map((r) => (
             <li key={r.round}>
               <Link
                 to={`/rounds/${r.round}`}
-                className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[1fr_120px_160px_120px] items-center gap-3 p-3 border-b hair text-white"
+                className="zk-roundrow grid grid-cols-[1fr_auto_auto] sm:grid-cols-[minmax(170px,1fr)_120px_1fr_auto_auto] items-center gap-4 px-5 py-4 text-white"
                 data-testid="round-row"
               >
-                <span className="font-extrabold">Round {r.round}</span>
-                <span className="text-fog hidden sm:inline">
+                <span className="font-black text-2xl" style={{ fontStretch: "112%" }}>
+                  Round {r.round}
+                </span>
+                <span className="text-mist hidden sm:flex items-center gap-2">
+                  <Icon name="tile" size={16} />
                   {r.treasure_tile === null ? "—" : `Tile ${r.treasure_tile + 1}`}
                 </span>
-                <span className="numeral text-right">{formatZec(zat(r.prize))}</span>
-                <span className="label text-right">{STATUS_LABEL[r.status]}</span>
+                <span className="text-mist flex items-center gap-2 font-mono">
+                  <Icon name="chest" size={16} />
+                  {formatZec(zat(r.prize))}
+                </span>
+                <span className={`zk-chip ${STATUS_CHIP[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                <Icon name="arrow" size={20} />
               </Link>
             </li>
           ))}

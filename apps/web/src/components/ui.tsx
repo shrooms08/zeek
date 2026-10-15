@@ -4,7 +4,7 @@
  * stroke-dashoffset only; reduced motion: fades or instant).
  */
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Zeb } from "../art/Characters";
@@ -334,12 +334,14 @@ const CHECK_ICONS: Record<string, IconName> = {
   digs: "chain",
   timing: "clock",
   settlement: "math",
-  payout: "coin",
+  payout: "split",
 };
 
 /**
- * <CheckRow icon text state />: the icon draws, then a hand-drawn check (or
- * an ink X that shakes). Not applicable: a dash.
+ * <CheckRow icon text state />: the check's icon and plain words; on the
+ * right a mark: a white box with a hand-drawn check (pass), a dashed box
+ * with an ink X that shakes (fail), a spinner (checking), an empty box
+ * (waiting) or a dash (not applicable).
  */
 export function CheckRow(props: {
   id?: string;
@@ -358,20 +360,23 @@ export function CheckRow(props: {
     na: "not applicable",
   }[props.state];
   const icon = CHECK_ICONS[props.id ?? ""] ?? "check";
+  const dim = props.state === "pending";
   return (
     <li
-      className="flex gap-4 py-4 border-b hair"
+      className="zk-checkrow flex items-start gap-4 px-6 py-4"
       data-state={props.state}
       data-testid={props.testId}
     >
-      <span className={`zk-check zk-check-${props.state}`} aria-hidden="true">
-        <Icon name={icon} size={20} />
+      <span className={dim ? "text-ash mt-1" : "text-white mt-1"} aria-hidden="true">
+        <Icon name={icon} size={24} />
       </span>
       <div className="flex-1 min-w-0">
-        <div className="text-white font-extrabold text-lg">
+        <div className={`font-extrabold text-xl ${dim ? "text-fog" : "text-white"}`}>
           {props.title} <span className="sr-only">: {sr}</span>
         </div>
-        <p className={props.state === "fail" ? "text-white" : "text-mist"}>{props.text}</p>
+        <p className={props.state === "fail" ? "text-white text-sm" : "text-mist text-sm"}>
+          {props.text}
+        </p>
         {props.detail.length > 0 && (
           <details className="text-fog text-sm mt-1">
             <summary className="cursor-pointer">Technical detail</summary>
@@ -383,24 +388,19 @@ export function CheckRow(props: {
           </details>
         )}
       </div>
-      <span className="zk-mark" aria-hidden="true">
-        <AnimatePresence initial={false}>
-          {props.state === "pass" && (
-            <Icon key="pass" name="checkink" size={28} draw strokeWidth={3} />
-          )}
-          {props.state === "fail" && (
-            <motion.span
-              key="fail"
-              className="inline-flex"
-              {...(reduce ? {} : { animate: { x: [0, -6, 6, -4, 4, -2, 0] } })}
-              transition={{ duration: 0.3, delay: 0.25 }}
-            >
-              <Icon name="xink" size={28} draw strokeWidth={3} />
-            </motion.span>
-          )}
-          {props.state === "na" && <span className="text-fog font-black text-xl">–</span>}
-          {props.state === "checking" && <span className="zk-ellipsis text-fog font-black">…</span>}
-        </AnimatePresence>
+      <span className={`zk-mark zk-mark-${props.state}`} aria-hidden="true">
+        {props.state === "pass" && <Icon name="checkink" size={24} draw strokeWidth={3} />}
+        {props.state === "fail" && (
+          <motion.span
+            className="inline-flex"
+            {...(reduce ? {} : { animate: { x: [0, -6, 6, -4, 4, -2, 0] } })}
+            transition={{ duration: 0.3, delay: 0.25 }}
+          >
+            <Icon name="xink" size={24} draw strokeWidth={3} />
+          </motion.span>
+        )}
+        {props.state === "na" && <span className="font-black text-xl">–</span>}
+        {props.state === "checking" && <span className="zk-spinner" />}
       </span>
     </li>
   );

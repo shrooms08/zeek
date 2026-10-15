@@ -3,6 +3,7 @@
 import { Link, useParams } from "react-router-dom";
 import { ENGINE_URL } from "../api/engine";
 import { useRound, useRounds } from "../api/queries";
+import { Icon } from "../components/Icon";
 import { CopyButton, Loading, Offline, Screen } from "../components/ui";
 import { formatZec, zat } from "../lib/money";
 import { formatTimeOfDay } from "../lib/time";
@@ -32,10 +33,13 @@ export default function RoundDetailScreen() {
   const digFees = s.dig_fees;
   const digCount = digFees / 5_000;
   return (
-    <Screen title={`Round ${n}`} back="/rounds" testId="round-detail" wide>
+    <Screen title={`Round ${n}`} kicker="Past rounds" back="/rounds" testId="round-detail" wide>
       <div className="flex flex-wrap gap-3 items-center">
         {summary !== undefined && (
-          <span className="label px-2 py-1 border-2 border-white" data-testid="round-status">
+          <span
+            className={`zk-chip ${summary.status === "paid" ? "zk-chip-fill" : summary.status === "voided" ? "zk-chip-dashed" : ""}`}
+            data-testid="round-status"
+          >
             {STATUS_LABEL[summary.status]}
           </span>
         )}
@@ -44,14 +48,19 @@ export default function RoundDetailScreen() {
           revealed {formatTimeOfDay(s.beacon_time)}
         </span>
       </div>
-      <section aria-label="Dug per tile" className="panel p-4">
-        <div className="label mb-3">Dug per tile · ZEC</div>
-        <ol className="grid grid-cols-5 gap-1" data-testid="tile-amounts">
+      <section aria-label="Dug per tile" className="panel p-5">
+        <div className="label mb-3 flex items-center gap-2">
+          <Icon name="tile" size={16} /> Dug per tile · ZEC
+        </div>
+        <ol className="grid grid-cols-5 gap-1.5" data-testid="tile-amounts">
           {s.tile_totals.map((v, i) => (
             <li
               key={i}
               className="p-2 border-2 flex flex-col"
-              style={{ borderColor: treasure === i ? "var(--color-gold)" : "var(--color-slate)" }}
+              style={{
+                borderColor: treasure === i ? "var(--color-gold)" : "var(--color-slate)",
+                borderWidth: treasure === i ? 3 : 2,
+              }}
               aria-label={`Tile ${i + 1}: ${formatZec(zat(v), { decimals: 8 })} ZEC${treasure === i ? ", the treasure" : ""}`}
             >
               <span className="text-fog text-xs">{i + 1}</span>
@@ -67,7 +76,9 @@ export default function RoundDetailScreen() {
       </section>
       <div className="grid gap-4 sm:grid-cols-2">
         <section className="panel p-4">
-          <div className="label">Treasure</div>
+          <div className="label flex items-center gap-2">
+            <Icon name="sparkle" size={16} /> Treasure
+          </div>
           <div
             className="numeral"
             style={{ fontSize: 48, color: treasure === null ? undefined : "var(--color-gold)" }}
@@ -77,7 +88,9 @@ export default function RoundDetailScreen() {
           </div>
         </section>
         <section className="panel p-4">
-          <div className="label">Prize</div>
+          <div className="label flex items-center gap-2">
+            <Icon name="chest" size={16} /> Prize
+          </div>
           <div className="numeral" style={{ fontSize: 48, color: "var(--color-gold)" }}>
             {formatZec(zat(s.distributable))}
           </div>
@@ -140,8 +153,12 @@ export default function RoundDetailScreen() {
         )}
       </section>
       <div className="flex gap-2 flex-wrap">
-        <Link className="btn btn-primary" to={`/check/${n}`} data-testid="check-this-round">
-          Check this round
+        <Link
+          className="btn btn-primary flex items-center gap-2"
+          to={`/check/${n}`}
+          data-testid="check-this-round"
+        >
+          <Icon name="shield" size={18} /> Check this round
         </Link>
         <a
           className="btn"

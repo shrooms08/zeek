@@ -6,7 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance, usePocketHistory } from "../api/pocketQueries";
+import { motion, useReducedMotion } from "framer-motion";
+import { Zeb } from "../art/Characters";
+import { Icon, type IconName } from "../components/Icon";
 import { CopyButton, Loading, Panel, Screen } from "../components/ui";
+import { CountUp } from "../motion/CountUp";
+import { EASE } from "../motion/tokens";
 import { checkPayoutAddress, shortAddress } from "../lib/address";
 import { formatZec, parseZec, toNumber, zat } from "../lib/money";
 import { checkPositions, passphraseStrength } from "../lib/passphrase";
@@ -26,8 +31,25 @@ const STRENGTH_TEXT = {
   strong: "Strong. 4 words or 12+ letters.",
 } as const;
 
+/** Four segments: too short fills one, OK two, strong all four. */
+function StrengthMeter({ strength }: { strength: ReturnType<typeof passphraseStrength> | null }) {
+  const filled = strength === null ? 0 : strength === "too-short" ? 1 : strength === "ok" ? 2 : 4;
+  return (
+    <span className="grid grid-cols-4 gap-1.5" aria-hidden="true">
+      {[0, 1, 2, 3].map((k) => (
+        <span
+          key={k}
+          className="h-1.5"
+          style={{ background: k < filled ? "var(--color-white)" : "var(--color-slate)" }}
+        />
+      ))}
+    </span>
+  );
+}
+
 function CreateCard() {
   const { pocket, dispatch } = usePocket();
+  const [show, setShow] = useState(false);
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,8 +67,9 @@ function CreateCard() {
       />
     );
   return (
-    <Panel label="Make your Pocket" testId="wallet-create">
-      <h2 className="text-heading font-extrabold text-white mb-2">Make your Pocket</h2>
+    <Panel label="Make your Pocket" testId="wallet-create" className="max-w-[560px]">
+      <Zeb pose="idle" width={96} className="mb-2" label={null} />
+      <h2 className="zk-title text-white mb-2">Make your Pocket</h2>
       <p className="text-mist mb-4">
         A small private wallet in this browser, just for Zeek. Pick a passphrase to lock it.
       </p>
@@ -75,16 +98,30 @@ function CreateCard() {
       >
         <label className="flex flex-col gap-1">
           <span className="label">Passphrase</span>
-          <input
-            type="password"
-            className="field-input"
-            value={pass}
-            onChange={(e) => {
-              setPass(e.target.value);
-            }}
-            autoComplete="new-password"
-            data-testid="create-pass"
-          />
+          <span className="relative block">
+            <input
+              type={show ? "text" : "password"}
+              className="field-input pr-14"
+              value={pass}
+              onChange={(e) => {
+                setPass(e.target.value);
+              }}
+              autoComplete="new-password"
+              data-testid="create-pass"
+            />
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white"
+              onClick={() => {
+                setShow((v) => !v);
+              }}
+              aria-label={show ? "Hide passphrase" : "Show passphrase"}
+              aria-pressed={show}
+            >
+              <Icon name="eye" size={20} />
+            </button>
+          </span>
+          <StrengthMeter strength={pass.length === 0 ? null : strength} />
           <span className="text-fog text-sm">
             {pass.length > 0 ? STRENGTH_TEXT[strength] : "Strong: 4 words or 12+ letters."}
           </span>
@@ -130,7 +167,7 @@ function BackupWords({ words, onDone }: { words: string[]; onDone: () => void })
   const [wrong, setWrong] = useState(false);
   if (stage === "show") {
     return (
-      <Panel label="Back up 24 words" testId="wallet-backup">
+      <Panel label="Back up 24 words" testId="wallet-backup" className="max-w-[640px]">
         <h2 className="text-heading font-extrabold text-white mb-2">
           Write these {words.length} words on paper
         </h2>
@@ -141,7 +178,7 @@ function BackupWords({ words, onDone }: { words: string[]; onDone: () => void })
         </ul>
         <ol className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4" data-testid="backup-words">
           {words.map((w, i) => (
-            <li key={i} className="flex gap-2 border-2 border-slate p-2">
+            <li key={i} className="flex gap-2 border-2 border-white px-3 py-2">
               <span className="text-fog w-6 text-right">{i + 1}</span>
               <span className="font-mono text-white">{w}</span>
             </li>
@@ -230,8 +267,11 @@ function UnlockCard() {
   const can = canTryUnlock(wallet, now);
   const error = wallet.kind === "locked" ? wallet.error : null;
   return (
-    <Panel label="Unlock Pocket" testId="wallet-unlock">
-      <h2 className="text-heading font-extrabold text-white mb-4">Unlock Pocket</h2>
+    <Panel label="Unlock Pocket" testId="wallet-unlock" className="max-w-[560px]">
+      <Zeb pose="peek" width={96} className="mb-2" label={null} />
+      <h2 className="zk-title text-white mb-4 flex items-center gap-3">
+        <Icon name="lock" size={28} /> Unlock Pocket
+      </h2>
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => {
@@ -377,14 +417,26 @@ function RestoreCard({ onCancel }: { onCancel: () => void }) {
   );
 }
 
-function historyLabel(e: HistoryEntry): { label: string; amount: bigint; time: string } {
+function historyLabel(e: HistoryEntry): {
+  label: string;
+  amount: bigint;
+  time: string;
+  icon: IconName;
+} {
   if (e.type === "received") {
-    return { label: e.memo ?? "Received", amount: zat(e.value_zat), time: `block ${e.height}` };
+    const treasure = e.memo !== null && /treasure/i.test(e.memo);
+    return {
+      label: e.memo ?? "Received",
+      amount: zat(e.value_zat),
+      time: `block ${e.height}`,
+      icon: treasure ? "chest" : "down2",
+    };
   }
   const k = e.kind;
   if ("dig" in k) {
     const n = k.dig.tiles.length;
     return {
+      icon: "shovel",
       label: `Zeek round ${k.dig.round}: dig · ${n} ${n === 1 ? "tile" : "tiles"}`,
       amount: -(BigInt(k.dig.amount_each_zat) * BigInt(n) + zat(e.fee_zat)),
       time: e.status === "mined" ? `block ${e.mined_height ?? e.target_height}` : e.status,
@@ -392,11 +444,13 @@ function historyLabel(e: HistoryEntry): { label: string; amount: bigint; time: s
   }
   if ("shout" in k)
     return {
+      icon: "shout",
       label: `Zeek campfire: shout`,
       amount: -(zat(k.shout.amount_zat) + zat(e.fee_zat)),
       time: e.status,
     };
   return {
+    icon: "up2",
     label: k.send.memo === null ? "Withdrawn" : `Withdrawn · ${k.send.memo}`,
     amount: -(zat(k.send.amount_zat) + zat(e.fee_zat)),
     time: e.status,
@@ -514,6 +568,7 @@ function Home() {
   const [backupWords, setBackupWords] = useState<string[] | null>(null);
   const [backupPass, setBackupPass] = useState("");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const reduce = useReducedMotion() === true;
   const address = useQuery({
     queryKey: ["pocket", "address"],
     queryFn: async () => (await pocket()).getAddress(),
@@ -555,202 +610,233 @@ function Home() {
   });
 
   const b = balance.data;
+  const actions = (
+    <div className="grid grid-cols-2 gap-3">
+      <button
+        type="button"
+        className={`btn flex items-center justify-center gap-2 ${view === "add" ? "" : "btn-primary"}`}
+        style={{ minHeight: 60, fontSize: 20 }}
+        onClick={() => {
+          setView(view === "add" ? "home" : "add");
+        }}
+        aria-expanded={view === "add"}
+        data-testid="wallet-add"
+      >
+        <Icon name="down2" size={22} /> Add
+      </button>
+      <button
+        type="button"
+        className="btn flex items-center justify-center gap-2"
+        style={{ minHeight: 60, fontSize: 20 }}
+        onClick={() => {
+          setView(view === "withdraw" ? "home" : "withdraw");
+        }}
+        aria-expanded={view === "withdraw"}
+      >
+        <Icon name="up2" size={22} /> Withdraw
+      </button>
+    </div>
+  );
   return (
-    <div className="flex flex-col gap-4" data-testid="wallet-home">
-      <Panel label="Balance">
-        <div className="label">Balance</div>
-        <div
-          className="numeral"
-          style={{ fontSize: "clamp(44px, 8vw, 96px)" }}
-          data-testid="wallet-balance"
-        >
-          {b === undefined ? "…" : formatZec(zat(b.spendable_zat))}{" "}
-          <span className="label">ZEC</span>
-        </div>
-        {b !== undefined && b.pending_zat > 0 && (
-          <p className="text-fog">
-            {formatZec(zat(b.pending_zat), { sign: true })} arriving · confirming
-          </p>
-        )}
-        <p className="text-fog text-sm" role="status" data-testid="wallet-sync">
-          {wallet.kind === "syncing"
-            ? `Syncing… block ${wallet.scanned} of ${wallet.tip}`
-            : (syncError ?? `Synced to block ${b?.scanned_height ?? "…"}`)}
-        </p>
-        <div className="flex gap-2 mt-3 flex-wrap">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              setView(view === "add" ? "home" : "add");
-            }}
-            data-testid="wallet-add"
-          >
-            Add
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              setView(view === "withdraw" ? "home" : "withdraw");
-            }}
-          >
-            Withdraw
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void sync()}
-            disabled={wallet.kind === "syncing"}
-          >
-            Sync
-          </button>
-        </div>
-      </Panel>
-      {view === "add" && address.data !== undefined && (
-        <Panel label="Add ZEC here" testId="wallet-deposit">
-          <div className="label mb-2">Add ZEC here</div>
-          <div
-            className="bg-white p-2 max-w-[220px]"
-            role="img"
-            aria-label="QR code of your deposit address"
-            dangerouslySetInnerHTML={{ __html: qr.data ?? "" }}
-          />
-          <p className="font-mono text-sm break-all text-mist my-2" data-testid="deposit-address">
-            {address.data}
-          </p>
-          <CopyButton text={address.data} />
-          <p className="text-fog text-sm mt-2">
-            Only you see this address. Send testnet ZEC (TAZ) to it from any wallet.
-          </p>
-        </Panel>
-      )}
-      {view === "withdraw" && (
-        <WithdrawCard
-          spendable={b === undefined ? 0n : zat(b.spendable_zat)}
-          onDone={() => void client.invalidateQueries({ queryKey: ["pocket"] })}
-        />
-      )}
-      {view === "backup" && (
-        <Panel label="Back up again">
-          {backupWords === null ? (
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void (async () => {
-                  try {
-                    setBackupWords((await (await pocket()).exportSeed(backupPass)).split(" "));
-                    setBackupPass("");
-                  } catch (err) {
-                    setSyncError(toPocketError(err).message);
-                  }
-                })();
-              }}
+    <div
+      className="grid gap-8 lg:grid-cols-[minmax(0,560px)_minmax(0,480px)]"
+      data-testid="wallet-home"
+    >
+      <div className="flex flex-col gap-5">
+        <section className="zk-stat px-6 py-5" aria-label="Balance">
+          <div className="label flex items-center gap-2">
+            <Icon name="wallet" size={18} /> Balance
+          </div>
+          <div className="zk-amount" data-testid="wallet-balance">
+            <span
+              className="numeral"
+              style={{ fontSize: "clamp(56px, 9vw, 112px)", lineHeight: 0.95 }}
             >
-              <input
-                type="password"
-                className="field-input"
-                value={backupPass}
-                onChange={(e) => {
-                  setBackupPass(e.target.value);
-                }}
-                aria-label="Passphrase"
-                placeholder="Passphrase"
-              />
-              <button type="submit" className="btn btn-primary">
-                Show words
-              </button>
-            </form>
-          ) : (
-            <BackupWords
-              words={backupWords}
-              onDone={() => {
-                setBackupWords(null);
-                setView("home");
-              }}
-            />
+              {b === undefined ? "…" : <CountUp value={zat(b.spendable_zat)} />}
+            </span>
+            <span className="zk-unit" style={{ fontSize: 26 }}>
+              ZEC
+            </span>
+          </div>
+          {b !== undefined && b.pending_zat > 0 && (
+            <p className="text-fog mt-1">
+              {formatZec(zat(b.pending_zat), { sign: true })} arriving · confirming
+            </p>
           )}
-        </Panel>
-      )}
-      <Panel label="History">
-        <div className="label mb-2">History</div>
+          <div className="flex items-center justify-between gap-3 mt-2">
+            <p className="text-fog text-sm" role="status" data-testid="wallet-sync">
+              {wallet.kind === "syncing"
+                ? `Syncing… block ${wallet.scanned} of ${wallet.tip}`
+                : (syncError ?? `Synced to block ${b?.scanned_height ?? "…"}`)}
+            </p>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-white underline text-sm"
+              onClick={() => void sync()}
+              disabled={wallet.kind === "syncing"}
+            >
+              <Icon name="refresh" size={16} /> Sync
+            </button>
+          </div>
+        </section>
+        {actions}
+        {view === "add" && address.data !== undefined && (
+          <section
+            className="zk-stat p-5 flex flex-col sm:flex-row gap-5 items-center"
+            aria-label="Add ZEC here"
+            data-testid="wallet-deposit"
+          >
+            <div
+              className="bg-white p-2 w-[160px] shrink-0"
+              role="img"
+              aria-label="QR code of your deposit address"
+              dangerouslySetInnerHTML={{ __html: qr.data ?? "" }}
+            />
+            <div className="flex flex-col gap-2 min-w-0">
+              <div className="label">Add ZEC here</div>
+              <p className="font-mono text-sm break-all text-mist" data-testid="deposit-address">
+                {address.data}
+              </p>
+              <CopyButton text={address.data} />
+              <p className="text-fog text-xs">
+                Only you see this address. Send testnet ZEC (TAZ) from any wallet.
+              </p>
+            </div>
+          </section>
+        )}
+        {view === "withdraw" && (
+          <WithdrawCard
+            spendable={b === undefined ? 0n : zat(b.spendable_zat)}
+            onDone={() => void client.invalidateQueries({ queryKey: ["pocket"] })}
+          />
+        )}
+        {view === "backup" && (
+          <Panel label="Back up again">
+            {backupWords === null ? (
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void (async () => {
+                    try {
+                      setBackupWords((await (await pocket()).exportSeed(backupPass)).split(" "));
+                      setBackupPass("");
+                    } catch (err) {
+                      setSyncError(toPocketError(err).message);
+                    }
+                  })();
+                }}
+              >
+                <input
+                  type="password"
+                  className="field-input"
+                  value={backupPass}
+                  onChange={(e) => {
+                    setBackupPass(e.target.value);
+                  }}
+                  aria-label="Passphrase"
+                  placeholder="Passphrase"
+                />
+                <button type="submit" className="btn btn-primary">
+                  Show words
+                </button>
+              </form>
+            ) : (
+              <BackupWords
+                words={backupWords}
+                onDone={() => {
+                  setBackupWords(null);
+                  setView("home");
+                }}
+              />
+            )}
+          </Panel>
+        )}
+      </div>
+      <div className="flex flex-col gap-3">
+        <div className="label text-fog">History</div>
         {history.data === undefined ? (
           <p className="text-fog">Loading…</p>
         ) : history.data.length === 0 ? (
           <p className="text-fog">Nothing yet. Add ZEC to start.</p>
         ) : (
-          <ul data-testid="wallet-history">
+          <ul className="zk-rows" data-testid="wallet-history">
             {history.data.map((e, i) => {
               const h = historyLabel(e);
               return (
-                <li
+                <motion.li
                   key={i}
-                  className="flex justify-between gap-3 border-b hair py-2"
+                  className="flex items-center gap-3 px-4 py-3"
                   data-testid="history-row"
+                  initial={i === 0 && !reduce ? { opacity: 0, x: 24 } : false}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.22, ease: EASE.out }}
                 >
-                  <div>
-                    <div className="text-white">{h.label}</div>
-                    <div className="text-fog text-sm">{h.time}</div>
+                  <Icon name={h.icon} size={22} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white font-bold truncate">{h.label}</div>
+                    <div className="text-fog text-xs">{h.time}</div>
                   </div>
-                  <span
-                    className="numeral"
-                    style={{ color: h.amount > 0n ? "var(--color-gold)" : undefined }}
-                  >
+                  <span className="font-mono text-white">
                     {formatZec(h.amount, { decimals: 8, sign: true })}
                   </span>
-                </li>
+                </motion.li>
               );
             })}
           </ul>
         )}
-      </Panel>
-      <div className="flex gap-4 flex-wrap text-sm">
-        <button
-          type="button"
-          className="underline text-white"
-          onClick={() => {
-            setView("backup");
-          }}
-        >
-          Back up again
-        </button>
-        <button
-          type="button"
-          className="underline text-white"
-          onClick={() =>
-            void (async () => {
-              await (await pocket()).lock();
-              dispatch({ type: "lock" });
-            })()
-          }
-          data-testid="wallet-lock"
-        >
-          Lock now
-        </button>
-        <button
-          type="button"
-          className="underline text-white"
-          onClick={() => {
-            if (
-              window.confirm(
-                "Remove this Pocket from this browser? Without your 24 words its ZEC is lost.",
-              )
-            ) {
+        <div className="flex gap-2 flex-wrap items-center text-sm text-mist">
+          <Icon name="pen" size={16} />
+          <button
+            type="button"
+            className="hover:text-white underline"
+            onClick={() => {
+              setView("backup");
+            }}
+          >
+            Back up again
+          </button>
+          ·
+          <button
+            type="button"
+            className="hover:text-white underline"
+            onClick={() =>
               void (async () => {
-                await (await pocket()).forget();
-                dispatch({ type: "forgotten" });
-              })();
+                await (await pocket()).lock();
+                dispatch({ type: "lock" });
+              })()
             }
-          }}
-        >
-          Remove from this browser
-        </button>
+            data-testid="wallet-lock"
+          >
+            Lock now
+          </button>
+          ·
+          <button
+            type="button"
+            className="hover:text-white underline"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Remove this Pocket from this browser? Without your 24 words its ZEC is lost.",
+                )
+              ) {
+                void (async () => {
+                  await (await pocket()).forget();
+                  dispatch({ type: "forgotten" });
+                })();
+              }
+            }}
+          >
+            Remove from this browser
+          </button>
+        </div>
+        {address.data !== undefined && (
+          <p className="text-fog text-xs">Pocket address {shortAddress(address.data)}</p>
+        )}
+        <p className="text-fog text-xs">
+          Synced at {formatTimeOfDay(Math.floor(Date.now() / 1000))}
+        </p>
       </div>
-      {address.data !== undefined && (
-        <p className="text-fog text-xs">Pocket address {shortAddress(address.data)}</p>
-      )}
-      <p className="text-fog text-xs">Synced at {formatTimeOfDay(Math.floor(Date.now() / 1000))}</p>
     </div>
   );
 }
@@ -766,7 +852,7 @@ export default function WalletScreen() {
     if (params.get("then") === "dig" && wallet.kind === "unlocked") void navigate("/dig/pocket");
   }, [params, wallet.kind, navigate]);
   return (
-    <Screen title="My wallet" testId="wallet-screen">
+    <Screen title="My wallet" testId="wallet-screen" wide>
       {wallet.kind === "unknown" ? (
         <Loading text="Opening your Pocket…" />
       ) : wallet.kind === "none" || wallet.kind === "creating" || wallet.kind === "backup" ? (

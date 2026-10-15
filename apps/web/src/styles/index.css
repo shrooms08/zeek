@@ -1031,28 +1031,6 @@ body {
   border: var(--border-panel) solid var(--color-white);
   padding: 16px;
 }
-.zk-check {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: var(--border-panel) solid var(--color-white);
-  color: var(--color-white);
-}
-.zk-check-pending {
-  border-style: dashed;
-  border-color: var(--color-ash);
-  color: var(--color-ash);
-}
-.zk-check-fail {
-  border-style: dashed;
-}
-.zk-check-na {
-  border-color: var(--color-ash);
-  color: var(--color-fog);
-}
 .zk-mark {
   width: 36px;
   flex: none;
@@ -1213,4 +1191,57 @@ body {
     animation: none !important;
     border-style: dashed;
   }
+}
+
+.zk-checklist {
+  border: var(--border-panel) solid var(--color-white);
+}
+.zk-checkrow + .zk-checkrow {
+  border-top: var(--border-hair) solid var(--color-slate);
+}
+.zk-mark-pass {
+  background: var(--color-white);
+  color: var(--color-ink);
+  width: 40px;
+  height: 40px;
+}
+.zk-mark-pending {
+  border: 2px solid var(--color-ash);
+  width: 36px;
+  height: 36px;
+}
+.zk-mark-fail {
+  border: 3px dashed var(--color-white);
+  width: 40px;
+  height: 40px;
+}
+.zk-mark-na {
+  border: 2px solid var(--color-ash);
+  color: var(--color-fog);
+  width: 36px;
+  height: 36px;
+}
+.zk-warn {
+  border: var(--border-panel) dashed var(--color-white);
+  padding: 16px 20px;
+}
+.zk-chip {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border: 2px solid var(--color-white);
+  white-space: nowrap;
+}
+.zk-chip-fill {
+  background: var(--color-white);
+  color: var(--color-ink);
+}
+.zk-chip-dashed {
+  border-style: dashed;
+}
+
+.zk-roundrow:hover {
+  background: var(--color-coal);
 }
