@@ -20,5 +20,5 @@
 node_modules/
 dist/
 /packages/zeek-pocket/wasm/
-test-results/
+test-results*/
 playwright-report/

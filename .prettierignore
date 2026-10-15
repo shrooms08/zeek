@@ -10,4 +10,4 @@ packages/zeek-pocket/wasm
 pnpm-lock.yaml
 *.md
 design
-test-results
+test-results*
