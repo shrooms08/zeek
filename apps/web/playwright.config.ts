@@ -11,19 +11,30 @@ import { defineConfig, devices } from "@playwright/test";
  *   one browser profile and a state file in data/web-e2e/ so each step can
  *   be rerun on its own (rounds take ~25 minutes).
  */
+/** A deployed site to test instead of the local preview (live suite). */
+const target = process.env.ZEEK_E2E_APP;
+
 export default defineConfig({
   testDir: "e2e",
   fullyParallel: false,
   workers: 1,
   retries: 0,
   reporter: [["list"]],
-  use: { baseURL: "http://localhost:4174", trace: "retain-on-failure", actionTimeout: 60_000 },
-  webServer: {
-    command: "pnpm build && pnpm preview",
-    url: "http://localhost:4174",
-    reuseExistingServer: true,
-    timeout: 180_000,
+  use: {
+    baseURL: target ?? "http://localhost:4174",
+    trace: "retain-on-failure",
+    actionTimeout: 60_000,
   },
+  ...(target === undefined
+    ? {
+        webServer: {
+          command: "pnpm build && pnpm preview",
+          url: "http://localhost:4174",
+          reuseExistingServer: true,
+          timeout: 180_000,
+        },
+      }
+    : {}),
   projects: [
     { name: "smoke", testMatch: "smoke.spec.ts", use: { ...devices["Desktop Chrome"] } },
     // Safari's engine: cross-origin isolation and wasm threads must work there too.

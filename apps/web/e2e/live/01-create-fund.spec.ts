@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import {
   balanceZat,
   expect,
+  IS_PUBLIC,
   loadState,
   REPO,
   saveState,
@@ -88,21 +89,40 @@ test("create a Pocket and fund it from alice", async ({ page }) => {
   ];
   // Faucet TAZ (Valar) reached alice after the first 25-tile dig stopped
   // part-way; this top-up pays for a fresh 25-tile round.
-  sources.push({
-    name: "alice-faucet-topup",
-    amount: "0.04",
-    send: () =>
-      zeekDig(
-        "send",
-        "alice",
-        "--to",
-        address,
-        "--amount",
-        "0.04",
-        "--memo",
-        "Zeek Pocket top-up from alice",
-      ),
-  });
+  if (IS_PUBLIC) {
+    // A Pocket on the deployed site (its own browser storage): one payment
+    // from alice covers a dig and a 25-tile round.
+    sources.splice(0, sources.length, {
+      name: "alice-public",
+      amount: "0.06",
+      send: () =>
+        zeekDig(
+          "send",
+          "alice",
+          "--to",
+          address,
+          "--amount",
+          "0.06",
+          "--memo",
+          "Zeek Pocket funding on playzeek.pages.dev",
+        ),
+    });
+  } else
+    sources.push({
+      name: "alice-faucet-topup",
+      amount: "0.04",
+      send: () =>
+        zeekDig(
+          "send",
+          "alice",
+          "--to",
+          address,
+          "--amount",
+          "0.04",
+          "--memo",
+          "Zeek Pocket top-up from alice",
+        ),
+    });
   for (const source of sources) {
     const funded = loadState().funded ?? [];
     if (funded.some((f) => f.name === source.name)) continue;

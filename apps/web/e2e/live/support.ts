@@ -16,11 +16,28 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const DIR = path.join(REPO, "data", "web-e2e");
+/**
+ * ZEEK_E2E_APP runs the suite against a deployed site (for example
+ * https://playzeek.pages.dev), whose engine is its own /api and whose share
+ * pages are its own /share. A deployed origin has its own browser storage,
+ * so it gets its own profile, state file and screenshots.
+ */
+const PUBLIC = process.env.ZEEK_E2E_APP;
+/** Whether the suite runs against a deployed site. */
+export const IS_PUBLIC = PUBLIC !== undefined;
+export const APP = PUBLIC ?? "http://localhost:4174";
+const DIR = path.join(REPO, "data", PUBLIC === undefined ? "web-e2e" : "web-e2e-public");
 const STATE = path.join(DIR, "state.json");
-export const SHOTS = path.join(REPO, "docs", "examples", "phase7b", "live");
-export const ENGINE = process.env.VITE_ZEEK_ENGINE_URL ?? "http://127.0.0.1:8787";
-export const APP = "http://localhost:4174";
+export const SHOTS =
+  PUBLIC === undefined
+    ? path.join(REPO, "docs", "examples", "phase7b", "live")
+    : path.join(REPO, "docs", "examples", "phase8", "live");
+export const ENGINE =
+  PUBLIC === undefined
+    ? (process.env.VITE_ZEEK_ENGINE_URL ?? "http://127.0.0.1:8787")
+    : `${PUBLIC}/api`;
+/** Where share pages are served: the engine locally, the site when public. */
+export const SHARE = PUBLIC ?? ENGINE;
 
 export interface LiveState {
   passphrase?: string;

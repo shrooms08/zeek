@@ -6,7 +6,7 @@
  * all check out.
  */
 import {
-  ENGINE,
+  SHARE,
   engine,
   go,
   expect,
@@ -163,18 +163,18 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
   }
 
   // The share URL: humans are sent on to the Verified win page.
-  await page.goto(`${ENGINE}/share/win/${id}`);
+  await page.goto(`${SHARE}/share/win/${id}`);
   await expect(page).toHaveURL(new RegExp(`/win/${id}$`), { timeout: 30_000 });
   await expect(page.getByTestId("win-verdict")).toHaveText("Verified", { timeout: 10 * 60_000 });
   await expect(page.getByTestId("win-amount")).toBeVisible();
   await shot(page, "verified-win-1440");
 
   // What X sees: OG/Twitter meta pointing at a 1200x675 PNG.
-  const html = await (await request.get(`${ENGINE}/share/win/${id}`)).text();
+  const html = await (await request.get(`${SHARE}/share/win/${id}`)).text();
   expect(html).toContain('<meta name="twitter:card" content="summary_large_image"');
-  expect(html).toContain(`<meta property="og:image" content="${ENGINE}/share/win/${id}.png"`);
+  expect(html).toContain(`<meta property="og:image" content="${SHARE}/share/win/${id}.png"`);
   expect(html).toContain(`I found the treasure in round ${round}`);
-  const png = await request.get(`${ENGINE}/share/win/${id}.png`);
+  const png = await request.get(`${SHARE}/share/win/${id}.png`);
   expect(png.headers()["content-type"]).toBe("image/png");
   const bytes = await png.body();
   expect(bytes.readUInt32BE(16)).toBe(1200);
