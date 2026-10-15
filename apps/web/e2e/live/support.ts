@@ -59,7 +59,7 @@ export async function zeekDig(...args: string[]): Promise<string> {
 }
 
 export async function engine<T>(route: string): Promise<T> {
-  const response = await fetch(`${ENGINE}${route}`);
+  const response = await fetch(`${ENGINE}${route}`, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`${route}: ${response.status}`);
   return (await response.json()) as T;
 }
@@ -73,7 +73,12 @@ export async function until<T>(
 ): Promise<T> {
   const start = Date.now();
   for (;;) {
-    const value = await check();
+    // The engine answers slowly or not at all while a pass holds its
+    // database lock (e.g. proving a payout); a failed poll is "not yet".
+    const value = await check().catch((error: unknown) => {
+      console.log(`[until] ${what}: ${String(error)}`);
+      return undefined;
+    });
     if (value !== undefined) return value;
     if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, everyMs));

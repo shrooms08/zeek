@@ -115,6 +115,9 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Longest a chain follower pass may run.
+const FOLLOWER_PASS_TIMEOUT: Duration = Duration::from_secs(300);
+
 async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
     let identity = Identity::load(&config.identity_path())
         .context("loading the identity key (run `identity-keygen` first)")?;
@@ -198,9 +201,16 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
         if server.is_finished() {
             break;
         }
+        // The pass holds the chain database lock (health and signing read
+        // it), so a call that never returns must not stall the node.
         let pass = {
             let mut db = state.chain_db.lock().await;
-            follower.pass(&mut db).await
+            match tokio::time::timeout(FOLLOWER_PASS_TIMEOUT, follower.pass(&mut db)).await {
+                Ok(result) => result.map_err(|e| e.to_string()),
+                Err(_) => Err(format!(
+                    "follower pass timed out after {FOLLOWER_PASS_TIMEOUT:?}"
+                )),
+            }
         };
         *state.endpoint.lock().await = follower.endpoint().map(str::to_owned);
         if let Err(e) = pass {
