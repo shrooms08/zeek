@@ -142,9 +142,14 @@ fn keygen(secrets: &SecretsDir, args: KeygenArgs) -> anyhow::Result<()> {
     let group_key = frost::group_key_bytes(&out.public_key_package)?;
     let fvk = keys::derive_full_viewing_key(&group_key, OsRng)?;
     let ufvk = keys::unified_full_viewing_key(&fvk)?;
-    let address = keys::encode_address(&keys::orchard_only_address(&ufvk)?);
+    // The trusted-dealer spike is a testnet tool.
+    let address = keys::encode_address(
+        &keys::orchard_only_address(&ufvk)?,
+        &zeek_vault::Params::TestNetwork,
+    );
 
     let vault = VaultFile::new(
+        zeek_core::params::Network::Test,
         args.threshold,
         args.signers,
         &out.public_key_package,
@@ -177,7 +182,8 @@ fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
     // Re-derive from the stored viewing key so a tampered file is noticed.
     let fvk = vault.orchard_fvk()?;
     let ufvk = keys::unified_full_viewing_key(&fvk)?;
-    let derived = keys::encode_address(&keys::orchard_only_address(&ufvk)?);
+    let params = vault.params()?;
+    let derived = keys::encode_address(&keys::orchard_only_address(&ufvk)?, &params);
     if derived != vault.address {
         bail!(
             "vault.json address {} does not match the address derived from its viewing key {}",
@@ -185,11 +191,11 @@ fn address(secrets: &SecretsDir) -> anyhow::Result<()> {
             derived
         );
     }
-    println!("Network: testnet");
+    println!("Network: {}", vault.network);
     println!("Unified address (Orchard receiver; payments land in the Ironwood pool):");
     println!("  {}", vault.address);
     println!("Unified full viewing key:");
-    println!("  {}", keys::encode_ufvk(&ufvk));
+    println!("  {}", keys::encode_ufvk(&ufvk, &params));
     println!("Unified incoming viewing key (external scope; detects digs, never change):");
     println!("  {}", vault.uivk()?);
     Ok(())
@@ -200,16 +206,16 @@ async fn sync(config: &Config, secrets: &SecretsDir, args: SyncArgs) -> anyhow::
     let ufvk = vault.ufvk()?;
     println!(
         "Connecting to {} ...",
-        config.lightwalletd_servers().join(", ")
+        config.lightwalletd_servers(vault.network()?).join(", ")
     );
-    let mut client = config.connect().await?;
+    let mut client = config.connect(vault.network()?).await?;
     let info = lightwalletd::lightd_info(&mut client).await?;
     println!(
         "Connected: chain={} lightwalletd={} zcashd/zebra={} height={}",
         info.chain_name, info.version, info.zcashd_build, info.block_height
     );
 
-    let mut db = wallet::open(config.data_dir())?;
+    let mut db = wallet::open(config.data_dir(), vault.params()?)?;
     let birthday = args.birthday.map(BlockHeight::from_u32);
     let had_account = wallet::find_account(&db, &ufvk)?.is_some();
     let (account, birthday_height) =
@@ -237,7 +243,7 @@ async fn sync(config: &Config, secrets: &SecretsDir, args: SyncArgs) -> anyhow::
 fn balance(config: &Config, secrets: &SecretsDir) -> anyhow::Result<()> {
     let vault = secrets.load_vault()?;
     let ufvk = vault.ufvk()?;
-    let db = wallet::open(config.data_dir())?;
+    let db = wallet::open(config.data_dir(), vault.params()?)?;
     let account = wallet::find_account(&db, &ufvk)?.ok_or(VaultError::AccountMissing)?;
     let report = wallet::balance(&db, account)?;
 
@@ -317,8 +323,8 @@ async fn send_cmd(config: &Config, secrets: &SecretsDir, args: SendArgs) -> anyh
     let signers: Vec<&frost::KeyPackage> = key_packages.iter().collect();
 
     let ufvk = vault.ufvk()?;
-    let mut client = config.connect().await?;
-    let mut db = wallet::open(config.data_dir())?;
+    let mut client = config.connect(vault.network()?).await?;
+    let mut db = wallet::open(config.data_dir(), vault.params()?)?;
     let account = wallet::find_account(&db, &ufvk)?.ok_or(VaultError::AccountMissing)?;
 
     println!("Refreshing wallet state before spending ...");

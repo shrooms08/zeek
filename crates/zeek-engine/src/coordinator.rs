@@ -153,6 +153,8 @@ pub struct Coordinator {
     http: reqwest::Client,
     pool: Arc<Pool>,
     retry: RetryBackoff,
+    /// The vault's consensus parameters (from its vault file).
+    params: zeek_vault::Params,
 }
 
 /// The address a settled payout is paid to, or why it cannot be paid.
@@ -188,13 +190,14 @@ const LEDGER_CACHE: Duration = Duration::from_secs(15);
 #[derive(Clone)]
 pub struct LedgerView {
     data_dir: PathBuf,
+    params: zeek_vault::Params,
     ufvk: UnifiedFullViewingKey,
     cached: Arc<std::sync::Mutex<Option<(std::time::Instant, Ledger)>>>,
 }
 
 impl LedgerView {
     fn open(&self) -> Result<(wallet::Db, zcash_client_sqlite::AccountUuid), EngineError> {
-        let db = wallet::open(&self.data_dir)?;
+        let db = wallet::open(&self.data_dir, self.params)?;
         let account = wallet::find_account(&db, &self.ufvk)?
             .ok_or_else(|| EngineError::Config("the vault wallet has no account for this vault; run `zeek-vault sync` with the vault's secrets first".into()))?;
         Ok((db, account))
@@ -243,6 +246,7 @@ impl Coordinator {
         let identity = Identity::load(&settings.identity_path)?;
         let secrets = SecretsDir::new(&settings.vault_secrets_dir);
         let vault = secrets.load_vault()?;
+        let params = vault.params()?;
         let public_key_package = vault.public_key_package()?;
         let ufvk = vault.ufvk()?;
         let fvk = vault.orchard_fvk()?;
@@ -262,6 +266,7 @@ impl Coordinator {
             http,
             pool,
             retry: RetryBackoff::default(),
+            params,
         })
     }
 
@@ -447,6 +452,7 @@ impl Coordinator {
     pub fn ledger_view(&self) -> LedgerView {
         LedgerView {
             data_dir: self.settings.vault_data_dir.clone(),
+            params: self.params,
             ufvk: self.ufvk.clone(),
             cached: Arc::new(std::sync::Mutex::new(None)),
         }
@@ -673,7 +679,7 @@ impl Coordinator {
         // Build at the wallet's next height, anchored at its newest checkpoint
         // that gives every input the confirmations the policy requires.
         let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
-        let circuit = send::circuit_version_for(expected_target)?;
+        let circuit = send::circuit_version_for(&self.params, expected_target)?;
         let verifying_key = VerifyingKey::build(circuit);
         let min_confirmations = NonZeroU32::new(report.min_confirmations).ok_or_else(|| {
             EngineError::Config("confirmations policy requires at least 1".into())
@@ -689,10 +695,13 @@ impl Coordinator {
             &outputs,
             min_confirmations,
         )?;
-        if send::circuit_version_for(target_height)? != circuit {
+        if send::circuit_version_for(&self.params, target_height)? != circuit {
             return Err(zeek_vault::VaultError::CircuitMismatch {
                 built: format!("{circuit:?}"),
-                required: format!("{:?}", send::circuit_version_for(target_height)?),
+                required: format!(
+                    "{:?}",
+                    send::circuit_version_for(&self.params, target_height)?
+                ),
             }
             .into());
         }
@@ -755,18 +764,23 @@ impl Coordinator {
         // the network (the wallet learns about it from the chain anyway).
         store.write(|db| db.set_payout_signers(round, &signers))?;
         let (index, mut client) = self.pool.client().await?;
-        let transaction =
-            match send::extract_and_broadcast(&mut client, pczt, &verifying_key, target_height)
-                .await
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    if !matches!(e, zeek_vault::VaultError::BroadcastRejected { .. }) {
-                        self.pool.failed(index, &e);
-                    }
-                    return Err(e.into());
+        let transaction = match send::extract_and_broadcast(
+            &self.params,
+            &mut client,
+            pczt,
+            &verifying_key,
+            target_height,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                if !matches!(e, zeek_vault::VaultError::BroadcastRejected { .. }) {
+                    self.pool.failed(index, &e);
                 }
-            };
+                return Err(e.into());
+            }
+        };
         let txid = transaction.txid().to_string();
         store.write(|db| {
             db.transaction(|tx| {

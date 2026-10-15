@@ -79,7 +79,7 @@ use crate::error::VaultError;
 use crate::frost::{self, KeyPackage, PublicKeyPackage};
 use crate::lightwalletd::{self, Client};
 use crate::wallet::{self, pool_name, wallet_err, Db};
-use crate::NETWORK;
+use crate::Params;
 
 /// What the operator asked for.
 #[derive(Clone, Debug)]
@@ -166,16 +166,16 @@ pub fn format_zec(value: Zatoshis) -> String {
 /// The Ironwood pool is addressed through the Orchard receiver of a unified
 /// address (`zcash_keys` treats the two pools as sharing that receiver), so
 /// the check is for an Orchard receiver.
-pub fn parse_destination(address: &str) -> Result<ZcashAddress, VaultError> {
+pub fn parse_destination(address: &str, params: &Params) -> Result<ZcashAddress, VaultError> {
     let parsed = ZcashAddress::try_from_encoded(address.trim())
         .map_err(|e| VaultError::InvalidAddress(format!("{address}: {e}")))?;
     // `try_from_zcash_address` rejects addresses for any other network.
-    let checked = Address::try_from_zcash_address(&NETWORK, parsed)
+    let checked = Address::try_from_zcash_address(params, parsed)
         .map_err(|e| VaultError::InvalidAddress(format!("{address}: {e}")))?;
     if !checked.can_receive_as(PoolType::IRONWOOD) {
         return Err(VaultError::NoOrchardReceiver);
     }
-    Ok(checked.to_zcash_address(&NETWORK))
+    Ok(checked.to_zcash_address(params))
 }
 
 /// Encodes an optional text memo.
@@ -190,8 +190,11 @@ pub fn parse_memo(memo: Option<&str>) -> Result<Option<MemoBytes>, VaultError> {
 ///
 /// Both the Orchard and the Ironwood bundle of a post-NU6.3 transaction are
 /// proven with the same circuit.
-pub fn circuit_version_for(height: BlockHeight) -> Result<OrchardCircuitVersion, VaultError> {
-    match BranchId::for_height(&NETWORK, height).orchard_protocol_revision() {
+pub fn circuit_version_for(
+    params: &Params,
+    height: BlockHeight,
+) -> Result<OrchardCircuitVersion, VaultError> {
+    match BranchId::for_height(params, height).orchard_protocol_revision() {
         Some(OrchardProtocolRevision::V2) => Ok(OrchardCircuitVersion::FixedPostNu6_2),
         Some(OrchardProtocolRevision::V3) => Ok(OrchardCircuitVersion::PostNu6_3),
         Some(OrchardProtocolRevision::InsecureV1) | None => Err(VaultError::UnsupportedBranch),
@@ -422,9 +425,10 @@ pub fn prepare_pczt(
     tx_request: TransactionRequest,
     report: &wallet::BalanceReport,
 ) -> Result<PreparedPczt, VaultError> {
+    let params = *db.params();
     let proposal = propose_transfer::<_, _, _, _, <Db as WalletCommitmentTrees>::Error>(
         db,
-        &NETWORK,
+        &params,
         account,
         &GreedyInputSelector::<Db>::new(),
         &change_strategy(),
@@ -470,7 +474,7 @@ pub fn prepare_pczt(
 
     let pczt = create_pczt_from_proposal::<_, _, GreedyInputSelectorError, _, zip317::FeeError, _>(
         db,
-        &NETWORK,
+        &params,
         account,
         OvkPolicy::Sender,
         &proposal,
@@ -530,6 +534,7 @@ pub fn build_pczt_from_notes(
     if spends.is_empty() {
         return Err(VaultError::NothingToSign);
     }
+    let params = *db.params();
     let (target, anchor_height) = db
         .get_target_and_anchor_heights(min_confirmations)
         .map_err(wallet_err)?
@@ -616,7 +621,7 @@ pub fn build_pczt_from_notes(
     let actions = spends.len().max(outputs.len()).max(zip317::GRACE_ACTIONS);
     let fee = zip317::FeeRule::standard()
         .fee_required(
-            &NETWORK,
+            &params,
             target_height,
             core::iter::empty::<zcash_primitives::transaction::fees::transparent::InputSize>(),
             core::iter::empty::<usize>(),
@@ -637,7 +642,7 @@ pub fn build_pczt_from_notes(
     }
 
     let mut builder = Builder::new(
-        NETWORK,
+        params,
         target_height,
         BuildConfig::Standard {
             sapling_anchor: None,
@@ -692,6 +697,7 @@ pub fn build_pczt_from_notes(
 /// that need the wallet to know about it store it afterwards with
 /// [`store_transaction`]; the wallet also learns about it from the chain.
 pub async fn extract_and_broadcast(
+    params: &Params,
     client: &mut Client,
     pczt: Pczt,
     verifying_key: &VerifyingKey,
@@ -701,7 +707,7 @@ pub async fn extract_and_broadcast(
         .with_orchard(verifying_key)
         .extract()
         .map_err(|e| VaultError::Pczt(format!("extract: {e:?}")))?;
-    check_version(&transaction, target_height)?;
+    check_version(params, &transaction, target_height)?;
     let raw = serialize(&transaction)?;
     lightwalletd::broadcast(client, raw).await?;
     tracing::info!("broadcast accepted: {}", transaction.txid());
@@ -712,8 +718,9 @@ pub async fn extract_and_broadcast(
 /// payments it sent) as pending, so balances reflect it before it is mined.
 /// Works for any transaction, not only ones built from a wallet proposal.
 pub fn store_transaction(db: &mut Db, transaction: &Transaction) -> Result<(), VaultError> {
+    let params = *db.params();
     zcash_client_backend::data_api::wallet::decrypt_and_store_transaction(
-        &NETWORK,
+        &params,
         db,
         transaction,
         None,
@@ -736,7 +743,7 @@ pub async fn extract_broadcast_store(
         .with_orchard(verifying_key)
         .extract()
         .map_err(|e| VaultError::Pczt(format!("extract: {e:?}")))?;
-    check_version(&transaction, target_height)?;
+    check_version(db.params(), &transaction, target_height)?;
     let txid = transaction.txid();
     let raw = serialize(&transaction)?;
 
@@ -767,7 +774,8 @@ pub async fn send(
     signers: &[&KeyPackage],
     request: &SendRequest,
 ) -> Result<SendOutcome, VaultError> {
-    let destination = parse_destination(&request.to)?;
+    let params = *db.params();
+    let destination = parse_destination(&request.to, &params)?;
     let amount = parse_zec(&request.amount_zec)?;
     let memo = parse_memo(request.memo.as_deref())?;
 
@@ -785,7 +793,7 @@ pub async fn send(
     // that height. The circuit depends only on the consensus branch, which is
     // re-checked against the proposal's actual target height below.
     let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
-    let circuit = circuit_version_for(expected_target)?;
+    let circuit = circuit_version_for(&params, expected_target)?;
     tracing::info!("building Orchard proving key for {circuit:?} (this takes a while)");
     let proving_key = ProvingKey::build(circuit);
     let verifying_key = VerifyingKey::build(circuit);
@@ -804,7 +812,7 @@ pub async fn send(
         target_height,
         fee,
     } = prepare_pczt(db, account, tx_request, &report)?;
-    let required_circuit = circuit_version_for(target_height)?;
+    let required_circuit = circuit_version_for(&params, target_height)?;
     if required_circuit != circuit {
         return Err(VaultError::CircuitMismatch {
             built: format!("{circuit:?}"),
@@ -848,10 +856,11 @@ pub async fn send(
 /// Checks that the extracted transaction has the version and consensus branch
 /// the target height requires (V6 on the NU6.3 or NU7 branch on testnet).
 pub fn check_version(
+    params: &Params,
     transaction: &Transaction,
     target_height: BlockHeight,
 ) -> Result<(), VaultError> {
-    let expected_branch = BranchId::for_height(&NETWORK, target_height);
+    let expected_branch = BranchId::for_height(params, target_height);
     let expected_version = TxVersion::suggested_for_branch(expected_branch);
     if transaction.version() != expected_version
         || transaction.consensus_branch_id() != expected_branch
@@ -901,16 +910,22 @@ mod tests {
     fn rejects_non_orchard_and_mainnet_destinations() {
         // Mainnet transparent address.
         assert!(matches!(
-            parse_destination("t1KZ6HVupHe9ygeEGSS5V4EQ4tJZbWDYkCg"),
+            parse_destination(
+                "t1KZ6HVupHe9ygeEGSS5V4EQ4tJZbWDYkCg",
+                &crate::Params::TestNetwork
+            ),
             Err(VaultError::InvalidAddress(_))
         ));
         // Testnet transparent address: right network, no Orchard receiver.
         assert!(matches!(
-            parse_destination("tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU"),
+            parse_destination(
+                "tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU",
+                &crate::Params::TestNetwork
+            ),
             Err(VaultError::NoOrchardReceiver)
         ));
         assert!(matches!(
-            parse_destination("not-an-address"),
+            parse_destination("not-an-address", &crate::Params::TestNetwork),
             Err(VaultError::InvalidAddress(_))
         ));
     }
@@ -930,19 +945,34 @@ mod tests {
     fn circuit_version_follows_testnet_branches() {
         // Testnet activations: NU6.2 at 4_052_000, NU6.3 at 4_134_000, NU7 at 4_465_026.
         assert!(matches!(
-            circuit_version_for(BlockHeight::from_u32(4_000_000)),
+            circuit_version_for(
+                &crate::Params::TestNetwork,
+                BlockHeight::from_u32(4_000_000)
+            ),
             Err(VaultError::UnsupportedBranch)
         ));
         assert_eq!(
-            circuit_version_for(BlockHeight::from_u32(4_100_000)).expect("v2"),
+            circuit_version_for(
+                &crate::Params::TestNetwork,
+                BlockHeight::from_u32(4_100_000)
+            )
+            .expect("v2"),
             OrchardCircuitVersion::FixedPostNu6_2
         );
         assert_eq!(
-            circuit_version_for(BlockHeight::from_u32(4_400_000)).expect("v3"),
+            circuit_version_for(
+                &crate::Params::TestNetwork,
+                BlockHeight::from_u32(4_400_000)
+            )
+            .expect("v3"),
             OrchardCircuitVersion::PostNu6_3
         );
         assert_eq!(
-            circuit_version_for(BlockHeight::from_u32(4_500_000)).expect("v3 under NU7"),
+            circuit_version_for(
+                &crate::Params::TestNetwork,
+                BlockHeight::from_u32(4_500_000)
+            )
+            .expect("v3 under NU7"),
             OrchardCircuitVersion::PostNu6_3
         );
     }
@@ -951,12 +981,15 @@ mod tests {
     fn testnet_is_on_nu7_with_the_real_branch_id() {
         // Guards the vendored zcash_protocol patch: without it NU7 is the
         // placeholder 0xffffffff and never activates on testnet.
-        let branch = BranchId::for_height(&NETWORK, BlockHeight::from_u32(4_498_706));
+        let branch = BranchId::for_height(
+            &crate::Params::TestNetwork,
+            BlockHeight::from_u32(4_498_706),
+        );
         assert_eq!(u32::from(branch), 0x7719_0ad9);
         assert_eq!(BranchId::try_from(0x7719_0ad9u32).expect("known"), branch);
         assert_eq!(
             u32::from(BranchId::for_height(
-                &NETWORK,
+                &crate::Params::TestNetwork,
                 BlockHeight::from_u32(4_465_025)
             )),
             0x37a5_165b

@@ -174,6 +174,7 @@ const RETRY: Duration = Duration::from_secs(2);
 /// peers can deliver their packages into `state`.
 pub async fn run_ceremony(
     config: &KeyholderConfig,
+    network: zeek_core::params::Network,
     identity: &Identity,
     state: &DkgState,
     session: SessionId,
@@ -256,7 +257,10 @@ pub async fn run_ceremony(
     let seed = transcript_seed(&group_key, &transcript);
     let fvk = keys::derive_full_viewing_key_from_seed(&group_key, seed)?;
     let ufvk = keys::unified_full_viewing_key(&fvk)?;
-    let address = keys::encode_address(&keys::orchard_only_address(&ufvk)?);
+    let address = keys::encode_address(
+        &keys::orchard_only_address(&ufvk)?,
+        &zeek_vault::params(network),
+    );
 
     // Cross-check with every peer before writing anything.
     let mine = DkgConfirm {
@@ -295,6 +299,7 @@ pub async fn run_ceremony(
         &KeyholderFile::new(config.identifier, &key_package)?,
     )?;
     let vault = VaultFile::new(
+        network,
         config.threshold,
         config.signers,
         &public_key_package,
@@ -515,6 +520,7 @@ mod tests {
                         &keys::unified_full_viewing_key(&fvk).expect("ufvk"),
                     )
                     .expect("addr"),
+                    &zeek_vault::Params::TestNetwork,
                 )
             })
             .collect();

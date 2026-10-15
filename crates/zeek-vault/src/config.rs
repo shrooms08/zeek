@@ -38,26 +38,28 @@ impl Config {
         })
     }
 
-    /// The testnet `lightwalletd` servers to use.
-    pub fn lightwalletd_servers(&self) -> Vec<String> {
+    /// The `lightwalletd` servers to use on `network`.
+    pub fn lightwalletd_servers(&self, network: zeek_core::params::Network) -> Vec<String> {
         match &self.lightwalletd_url {
             Some(list) => crate::pool::parse_servers(list),
-            None => crate::pool::default_servers(zeek_core::params::Network::Test),
+            None => crate::pool::default_servers(network),
         }
     }
 
     /// A pool over [`Config::lightwalletd_servers`].
-    pub fn pool(&self) -> Result<crate::pool::Pool, VaultError> {
-        crate::pool::Pool::new(
-            zeek_core::params::Network::Test,
-            self.lightwalletd_servers(),
-            0,
-        )
+    pub fn pool(
+        &self,
+        network: zeek_core::params::Network,
+    ) -> Result<crate::pool::Pool, VaultError> {
+        crate::pool::Pool::new(network, self.lightwalletd_servers(network), 0)
     }
 
-    /// Connects to the first server of the pool that answers.
-    pub async fn connect(&self) -> Result<crate::lightwalletd::Client, VaultError> {
-        Ok(self.pool()?.client().await?.1)
+    /// Connects to the first server on `network` that answers.
+    pub async fn connect(
+        &self,
+        network: zeek_core::params::Network,
+    ) -> Result<crate::lightwalletd::Client, VaultError> {
+        Ok(self.pool(network)?.client().await?.1)
     }
 
     /// Directory holding keyholder files and the public vault file.

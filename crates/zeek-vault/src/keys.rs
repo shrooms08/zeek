@@ -38,7 +38,7 @@ use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedInco
 use zeroize::Zeroize;
 
 use crate::error::VaultError;
-use crate::NETWORK;
+use crate::Params;
 
 /// Size of the raw Orchard full viewing key encoding (`ak || nk || rivk`).
 pub const FVK_LEN: usize = 96;
@@ -144,19 +144,19 @@ pub fn unified_incoming_viewing_key(ufvk: &UnifiedFullViewingKey) -> UnifiedInco
     ufvk.to_unified_incoming_viewing_key()
 }
 
-/// Encodes a unified incoming viewing key for testnet.
-pub fn encode_uivk(uivk: &UnifiedIncomingViewingKey) -> String {
-    uivk.encode(&NETWORK)
+/// Encodes a unified incoming viewing key for `params`' network.
+pub fn encode_uivk(uivk: &UnifiedIncomingViewingKey, params: &Params) -> String {
+    uivk.encode(params)
 }
 
-/// Encodes a unified address for testnet.
-pub fn encode_address(address: &UnifiedAddress) -> String {
-    address.encode(&NETWORK)
+/// Encodes a unified address for `params`' network.
+pub fn encode_address(address: &UnifiedAddress, params: &Params) -> String {
+    address.encode(params)
 }
 
-/// Encodes a unified full viewing key for testnet.
-pub fn encode_ufvk(ufvk: &UnifiedFullViewingKey) -> String {
-    ufvk.encode(&NETWORK)
+/// Encodes a unified full viewing key for `params`' network.
+pub fn encode_ufvk(ufvk: &UnifiedFullViewingKey, params: &Params) -> String {
+    ufvk.encode(params)
 }
 
 #[cfg(test)]
@@ -226,9 +226,10 @@ mod tests {
         let fvk = derive_full_viewing_key(&group_key(), OsRng).expect("fvk");
         let ufvk = unified_full_viewing_key(&fvk).expect("ufvk");
 
-        let encoded_ufvk = encode_ufvk(&ufvk);
+        let encoded_ufvk = encode_ufvk(&ufvk, &crate::Params::TestNetwork);
         assert!(encoded_ufvk.starts_with("uviewtest"), "{encoded_ufvk}");
-        let decoded = UnifiedFullViewingKey::decode(&NETWORK, &encoded_ufvk).expect("decode ufvk");
+        let decoded = UnifiedFullViewingKey::decode(&crate::Params::TestNetwork, &encoded_ufvk)
+            .expect("decode ufvk");
         assert_eq!(
             decoded.orchard().map(|o| o.to_bytes()),
             Some(fvk.to_bytes()),
@@ -237,7 +238,7 @@ mod tests {
         assert!(decoded.sapling().is_none());
 
         let address = orchard_only_address(&ufvk).expect("address");
-        let encoded = encode_address(&address);
+        let encoded = encode_address(&address, &crate::Params::TestNetwork);
         assert!(encoded.starts_with("utest"), "{encoded}");
 
         ZcashAddress::try_from_encoded(&encoded).expect("parse with zcash_address");
@@ -250,10 +251,11 @@ mod tests {
         // The UIVK carries only the external-scope Orchard IVK, which derives
         // the same default address and nothing for the internal scope.
         let uivk = unified_incoming_viewing_key(&ufvk);
-        let encoded_uivk = encode_uivk(&uivk);
+        let encoded_uivk = encode_uivk(&uivk, &crate::Params::TestNetwork);
         assert!(encoded_uivk.starts_with("uivktest"), "{encoded_uivk}");
         let decoded_uivk =
-            UnifiedIncomingViewingKey::decode(&NETWORK, &encoded_uivk).expect("uivk");
+            UnifiedIncomingViewingKey::decode(&crate::Params::TestNetwork, &encoded_uivk)
+                .expect("uivk");
         let ivk = decoded_uivk.orchard().as_ref().expect("orchard ivk");
         assert_eq!(
             ivk.to_bytes(),
@@ -264,7 +266,7 @@ mod tests {
             fvk.to_ivk(orchard::keys::Scope::Internal).to_bytes()
         );
 
-        let reparsed = match Address::decode(&NETWORK, &encoded) {
+        let reparsed = match Address::decode(&crate::Params::TestNetwork, &encoded) {
             Some(Address::Unified(ua)) => ua,
             other => panic!("expected a unified address, got {other:?}"),
         };

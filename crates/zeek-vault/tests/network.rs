@@ -64,7 +64,7 @@ async fn vault_sync_from_tip_reports_zero_balance() {
     let ufvk = keys::unified_full_viewing_key(&fvk).expect("ufvk");
 
     let mut client = lightwalletd::connect(&url).await.expect("connect");
-    let mut db = wallet::open(tmp.path()).expect("open wallet");
+    let mut db = wallet::open(tmp.path(), zeek_vault::Params::TestNetwork).expect("open wallet");
     let (account, birthday) = wallet::ensure_account(&mut db, &mut client, &ufvk, None)
         .await
         .expect("import account");
@@ -96,8 +96,12 @@ async fn funded_vault_send() {
     let k1 = secrets.load_keyholder(1, &vault).expect("keyholder 1");
     let k3 = secrets.load_keyholder(3, &vault).expect("keyholder 3");
 
-    let mut client = config.connect().await.expect("connect");
-    let mut db = wallet::open(config.data_dir()).expect("open wallet");
+    let mut client = config
+        .connect(vault.network().expect("network"))
+        .await
+        .expect("connect");
+    let mut db =
+        wallet::open(config.data_dir(), vault.params().expect("params")).expect("open wallet");
     let account = wallet::find_account(&db, &vault.ufvk().expect("ufvk"))
         .expect("find")
         .expect("vault account must exist; run `zeek-vault sync` first");

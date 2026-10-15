@@ -355,7 +355,10 @@ fn processor(v: &Vault) -> Processor {
         params: GameParams::testnet(GENESIS),
         vault_address: receiver.to_unified_address().expect("address"),
         sealing_public_key: v.sealing_pk.clone(),
-        uivk: keys::encode_uivk(&keys::unified_incoming_viewing_key(&ufvk)),
+        uivk: keys::encode_uivk(
+            &keys::unified_incoming_viewing_key(&ufvk),
+            &zeek_vault::Params::TestNetwork,
+        ),
         genesis_height: GENESIS,
         initial_cache_zat: 0,
     })

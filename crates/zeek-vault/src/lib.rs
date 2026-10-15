@@ -48,5 +48,31 @@ pub mod wallet;
 
 pub use error::VaultError;
 
-/// The only network this spike supports.
-pub const NETWORK: zcash_protocol::consensus::TestNetwork = zcash_protocol::consensus::TEST_NETWORK;
+/// Consensus parameters (`MainNetwork` or `TestNetwork`), chosen at run
+/// time from the vault file or the game config.
+pub type Params = zcash_protocol::consensus::Network;
+
+/// The consensus parameters of `network`.
+pub fn params(network: zeek_core::params::Network) -> Params {
+    match network {
+        zeek_core::params::Network::Main => Params::MainNetwork,
+        zeek_core::params::Network::Test => Params::TestNetwork,
+    }
+}
+
+/// Parses a network name as stored in vault files (`main` or `test`).
+pub fn parse_network(name: &str) -> Result<zeek_core::params::Network, VaultError> {
+    match name {
+        "main" => Ok(zeek_core::params::Network::Main),
+        "test" => Ok(zeek_core::params::Network::Test),
+        other => Err(VaultError::Config(format!("unknown network `{other}`"))),
+    }
+}
+
+/// The name stored in vault files for `network`.
+pub fn network_name(network: zeek_core::params::Network) -> &'static str {
+    match network {
+        zeek_core::params::Network::Main => "main",
+        zeek_core::params::Network::Test => "test",
+    }
+}

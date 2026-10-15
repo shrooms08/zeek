@@ -5,6 +5,7 @@
 //! the action with the player's own incoming viewing keys (external for
 //! payments, internal for change), printing the memo text. Nothing is written.
 
+use crate::NETWORK;
 use orchard::keys::{PreparedIncomingViewingKey, Scope};
 use orchard::note_encryption::{IronwoodDomain, OrchardDomain};
 use orchard::ValuePool;
@@ -15,7 +16,6 @@ use zcash_primitives::transaction::{Transaction, TxId};
 use zcash_protocol::consensus::{BlockHeight, BranchId};
 use zeek_vault::lightwalletd::Client;
 use zeek_vault::wallet::NoteReport;
-use zeek_vault::NETWORK;
 
 use crate::wallet::DigError;
 

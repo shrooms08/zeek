@@ -36,29 +36,35 @@ use zcash_client_sqlite::util::SystemClock;
 use zcash_client_sqlite::wallet::init::init_wallet_db;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId, WalletDb};
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_protocol::consensus::{BlockHeight, TestNetwork};
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::ShieldedPool;
 
 use crate::error::VaultError;
 use crate::lightwalletd::{self, Client};
-use crate::NETWORK;
+use crate::Params;
 
 /// Concrete wallet database type.
-pub type Db = WalletDb<rusqlite::Connection, TestNetwork, SystemClock, OsRng>;
+pub type Db = WalletDb<rusqlite::Connection, Params, SystemClock, OsRng>;
 
 /// File name of the wallet database inside the data directory.
-pub const WALLET_DB_FILE: &str = "zeek-vault-testnet.sqlite";
+pub fn wallet_db_file(params: &Params) -> &'static str {
+    match params {
+        Params::MainNetwork => "zeek-vault-mainnet.sqlite",
+        Params::TestNetwork => "zeek-vault-testnet.sqlite",
+    }
+}
 /// Human-readable account name used on import.
 pub const ACCOUNT_NAME: &str = "zeek-vault";
 /// Blocks per download/scan batch.
 pub const SYNC_BATCH_SIZE: u32 = 1_000;
 
-/// Opens (or creates) the wallet database and applies migrations.
-pub fn open(data_dir: &Path) -> Result<Db, VaultError> {
+/// Opens (or creates) the wallet database for `params`' network and applies
+/// migrations.
+pub fn open(data_dir: &Path, params: Params) -> Result<Db, VaultError> {
     fs::create_dir_all(data_dir).map_err(|e| VaultError::io(data_dir, e))?;
-    let path = data_dir.join(WALLET_DB_FILE);
-    let mut db = WalletDb::for_path(&path, NETWORK, SystemClock, OsRng)
+    let path = data_dir.join(wallet_db_file(&params));
+    let mut db = WalletDb::for_path(&path, params, SystemClock, OsRng)
         .map_err(|e| VaultError::Wallet(format!("open {}: {e}", path.display())))?;
     init_wallet_db(&mut db, None)
         .map_err(|e| VaultError::Wallet(format!("migrate {}: {e}", path.display())))?;
@@ -121,7 +127,8 @@ pub async fn ensure_account(
 /// Downloads and scans blocks until the wallet is at the chain tip.
 pub async fn sync(db: &mut Db, client: &mut Client) -> Result<(), VaultError> {
     let cache = MemoryBlockCache::default();
-    zcash_client_backend::sync::run(client, &NETWORK, &cache, db, SYNC_BATCH_SIZE)
+    let params = *db.params();
+    zcash_client_backend::sync::run(client, &params, &cache, db, SYNC_BATCH_SIZE)
         .await
         .map_err(|e| VaultError::Sync(e.to_string()))
 }

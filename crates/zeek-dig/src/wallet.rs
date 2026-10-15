@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::NETWORK;
 use secrecy::{ExposeSecret, SecretVec};
 use serde::{Deserialize, Serialize};
 use zcash_client_backend::data_api::{AccountBirthday, WalletWrite};
@@ -19,7 +20,6 @@ use zcash_protocol::consensus::BlockHeight;
 use zeek_vault::lightwalletd::{self, Client};
 use zeek_vault::wallet::{self, Db};
 use zeek_vault::VaultError;
-use zeek_vault::NETWORK;
 
 /// Errors of the player tool.
 #[derive(Debug, thiserror::Error)]
@@ -182,7 +182,7 @@ impl Player {
         if !self.exists() {
             return Err(DigError::PlayerMissing(self.name.clone()));
         }
-        Ok(wallet::open(&self.dir)?)
+        Ok(wallet::open(&self.dir, NETWORK)?)
     }
 
     /// Ensures the wallet has the player's account, creating it with a

@@ -816,7 +816,8 @@ fn reconcile_wallet(
     chain_balance: u64,
     data_dir: &Path,
 ) -> Result<usize, EngineError> {
-    let db = wallet::open(data_dir)?;
+    // Audited vaults are testnet vaults (see `VaultSpec`).
+    let db = wallet::open(data_dir, zeek_vault::Params::TestNetwork)?;
     let ufvk = zeek_vault::keys::unified_full_viewing_key(&history.fvk)?;
     let Some(account) = wallet::find_account(&db, &ufvk)? else {
         let _ = writeln!(

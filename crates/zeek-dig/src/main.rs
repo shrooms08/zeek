@@ -1,5 +1,8 @@
 //! `zeek-dig`: test players for Zeek on testnet.
 
+/// `zeek-dig` plays on testnet.
+const NETWORK: zeek_vault::Params = zeek_vault::Params::TestNetwork;
+
 mod dig;
 mod notes;
 mod wallet;
@@ -139,12 +142,12 @@ fn main() -> anyhow::Result<()> {
                 )
                 .map_err(|e| anyhow::anyhow!("next address: {e}"))?
                 .context("the wallet has no account for this player")?;
-            println!("{}", address.encode(&zeek_vault::NETWORK));
+            println!("{}", address.encode(&NETWORK));
             Ok(())
         }
         Command::Sync { name } => runtime.block_on(async {
             let player = Player::new(secrets.path(), &name)?;
-            let mut client = config.connect().await?;
+            let mut client = config.connect(zeek_core::params::Network::Test).await?;
             let mut db = player.open_db()?;
             let account = player.ensure_account(&mut db, &mut client).await?;
             vault_wallet::sync(&mut db, &mut client).await?;
@@ -166,7 +169,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Notes { name, txid } => runtime.block_on(async {
             let player = Player::new(secrets.path(), &name)?;
-            let mut client = config.connect().await?;
+            let mut client = config.connect(zeek_core::params::Network::Test).await?;
             let usk = player.spending_key()?;
             let listed = match txid {
                 Some(txid) => notes::notes_in_transaction(&mut client, &usk, &txid).await?,
@@ -200,14 +203,14 @@ fn main() -> anyhow::Result<()> {
             memo,
         } => runtime.block_on(async {
             let player = Player::new(secrets.path(), &name)?;
-            let destination = zeek_vault::send::parse_destination(&to)?;
+            let destination = zeek_vault::send::parse_destination(&to, &NETWORK)?;
             let amount = zeek_vault::send::parse_zec(&amount)?;
             let memo = zeek_vault::send::parse_memo(memo.as_deref())?;
             let payment = zip321::Payment::new(destination, Some(amount), memo, None, None, vec![])
                 .map_err(|e| anyhow::anyhow!("payment: {e}"))?;
             let request = zip321::TransactionRequest::new(vec![payment])
                 .map_err(|e| anyhow::anyhow!("payment request: {e}"))?;
-            let mut client = config.connect().await?;
+            let mut client = config.connect(zeek_core::params::Network::Test).await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
@@ -276,7 +279,7 @@ fn main() -> anyhow::Result<()> {
             let player = Player::new(secrets.path(), &name)?;
             let request = zip321::TransactionRequest::from_uri(uri.trim())
                 .map_err(|e| anyhow::anyhow!("not a valid ZIP 321 request: {e:?}"))?;
-            let mut client = config.connect().await?;
+            let mut client = config.connect(zeek_core::params::Network::Test).await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::pay_request(&player, &mut db, &mut client, request).await?;
@@ -317,7 +320,7 @@ fn main() -> anyhow::Result<()> {
                 "Board: round {} ({}) tip {} blocks remaining {}",
                 board.round, board.status, board.tip_height, board.blocks_remaining
             );
-            let mut client = config.connect().await?;
+            let mut client = config.connect(zeek_core::params::Network::Test).await?;
             let mut db = player.open_db()?;
             player.ensure_account(&mut db, &mut client).await?;
             let outcome = dig::dig(

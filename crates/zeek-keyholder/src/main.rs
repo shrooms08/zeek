@@ -176,8 +176,15 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()?;
-            let output =
-                dkg::run_ceremony(&config, &state.identity, &state.dkg, session, &client).await?;
+            let output = dkg::run_ceremony(
+                &config,
+                game.params.network,
+                &state.identity,
+                &state.dkg,
+                session,
+                &client,
+            )
+            .await?;
             println!("DKG complete. Vault address: {}", output.address);
             if let Some(pk) = &output.sealing_public_key {
                 println!("Payout sealing public key: {}", hex::encode(pk.to_bytes()));

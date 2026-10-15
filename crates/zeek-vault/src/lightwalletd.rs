@@ -160,7 +160,6 @@ pub async fn broadcast(client: &mut Client, tx_bytes: Vec<u8>) -> Result<(), Vau
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NETWORK;
     use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
     #[test]
@@ -170,7 +169,7 @@ mod tests {
             "build without --cfg zcash_unstable=\"nu7\""
         );
         assert_eq!(
-            NETWORK.activation_height(NetworkUpgrade::Nu7),
+            crate::Params::TestNetwork.activation_height(NetworkUpgrade::Nu7),
             Some(BlockHeight::from_u32(NU7_TESTNET_ACTIVATION))
         );
         check_consensus_support(true, 4_500_000, "77190ad9").expect("supported");

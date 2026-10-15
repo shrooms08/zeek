@@ -17,6 +17,7 @@
 //! output with its incoming viewing key, which covers all diversifiers, and
 //! recovers the index from the recipient when a note arrives.
 
+use crate::NETWORK;
 use orchard::circuit::{ProvingKey, VerifyingKey};
 use orchard::keys::SpendAuthorizingKey;
 use orchard::ValuePool;
@@ -35,7 +36,6 @@ use zeek_vault::lightwalletd::Client;
 use zeek_vault::send::{self, PreparedPczt};
 use zeek_vault::wallet::{self, Db};
 use zeek_vault::VaultError;
-use zeek_vault::NETWORK;
 
 use crate::wallet::{DigError, Player};
 
@@ -234,7 +234,7 @@ pub async fn dig(
         .map_err(|e| DigError::Game(format!("payment request: {e}")))?;
 
     let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
-    let circuit = send::circuit_version_for(expected_target)?;
+    let circuit = send::circuit_version_for(&NETWORK, expected_target)?;
     tracing::info!("building Orchard proving key for {circuit:?}");
     let proving_key = ProvingKey::build(circuit);
     let verifying_key = VerifyingKey::build(circuit);
@@ -244,10 +244,10 @@ pub async fn dig(
         target_height,
         fee,
     } = send::prepare_pczt(db, account, request_tx, &report)?;
-    if send::circuit_version_for(target_height)? != circuit {
+    if send::circuit_version_for(&NETWORK, target_height)? != circuit {
         return Err(VaultError::CircuitMismatch {
             built: format!("{circuit:?}"),
-            required: format!("{:?}", send::circuit_version_for(target_height)?),
+            required: format!("{:?}", send::circuit_version_for(&NETWORK, target_height)?),
         }
         .into());
     }
@@ -295,7 +295,7 @@ pub async fn pay_request(
     wallet::sync(db, client).await?;
     let report = wallet::balance(db, account)?;
     let expected_target = BlockHeight::from_u32(report.chain_tip) + 1;
-    let circuit = send::circuit_version_for(expected_target)?;
+    let circuit = send::circuit_version_for(&NETWORK, expected_target)?;
     tracing::info!("building Orchard proving key for {circuit:?}");
     let proving_key = ProvingKey::build(circuit);
     let verifying_key = VerifyingKey::build(circuit);
@@ -304,10 +304,10 @@ pub async fn pay_request(
         target_height,
         fee,
     } = send::prepare_pczt(db, account, request, &report)?;
-    if send::circuit_version_for(target_height)? != circuit {
+    if send::circuit_version_for(&NETWORK, target_height)? != circuit {
         return Err(VaultError::CircuitMismatch {
             built: format!("{circuit:?}"),
-            required: format!("{:?}", send::circuit_version_for(target_height)?),
+            required: format!("{:?}", send::circuit_version_for(&NETWORK, target_height)?),
         }
         .into());
     }

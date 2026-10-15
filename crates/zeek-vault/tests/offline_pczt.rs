@@ -41,7 +41,7 @@ use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::builder::{BuildConfig, Builder, BundlePadding, PcztResult};
 use zcash_primitives::transaction::fees::zip317;
 use zcash_primitives::transaction::{Transaction, TxVersion};
-use zcash_protocol::consensus::{BlockHeight, BranchId};
+use zcash_protocol::consensus::{BlockHeight, BranchId, Parameters};
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::memo::{Memo, MemoBytes};
 use zcash_protocol::value::Zatoshis;
@@ -145,14 +145,18 @@ fn witness(note: &Note) -> (Anchor, MerklePath) {
 /// Builds, finalizes and proves a V6 PCZT that spends one Ironwood vault note.
 ///
 /// Returns the PCZT and the index of the real spend action.
-fn proven_ironwood_pczt(fvk: &FullViewingKey) -> (Pczt, usize) {
+fn proven_ironwood_pczt<P: Parameters>(
+    params: P,
+    height: u32,
+    fvk: &FullViewingKey,
+) -> (Pczt, usize) {
     let recipient = fvk.address_at(0u32, Scope::External);
     let note = note_to_vault(fvk, ValuePool::Ironwood);
     let (anchor, merkle_path) = witness(&note);
 
     let mut builder = Builder::new(
-        post_nu6_3_network(),
-        TARGET_HEIGHT.into(),
+        params,
+        height.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: None,
@@ -290,7 +294,11 @@ fn assert_rks_are_ours(group_key: [u8; 32], pending: &[PendingSpend]) {
 
 /// Signer-set checks that must fail before anything is applied to the PCZT,
 /// then the real 2-of-3 signing and extraction.
-fn sign_and_extract(vault: &KeygenOutput, pczt: Pczt) -> (Transaction, Vec<send::SignedSpend>) {
+fn sign_and_extract(
+    vault: &KeygenOutput,
+    pczt: Pczt,
+    height: u32,
+) -> (Transaction, Vec<send::SignedSpend>) {
     let err = send::sign_pczt(
         pczt.clone(),
         &keyholders(vault, &[2]),
@@ -337,14 +345,14 @@ fn sign_and_extract(vault: &KeygenOutput, pczt: Pczt) -> (Transaction, Vec<send:
         .expect("extract fully authorized transaction");
     assert_eq!(tx.version(), TxVersion::V6);
     assert_eq!(tx.consensus_branch_id(), BranchId::Nu6_3);
-    assert_eq!(u32::from(tx.expiry_height()), TARGET_HEIGHT + 40);
+    assert_eq!(u32::from(tx.expiry_height()), height + 40);
     (tx, spends)
 }
 
 #[test]
 fn ironwood_spend() {
     let (vault, group_key, fvk) = vault();
-    let (pczt, spend_index) = proven_ironwood_pczt(&fvk);
+    let (pczt, spend_index) = proven_ironwood_pczt(post_nu6_3_network(), TARGET_HEIGHT, &fvk);
 
     // Exactly one spend is waiting for a signature: the real Ironwood spend.
     // The padding dummy was signed by the IO finalizer with its own key.
@@ -355,7 +363,7 @@ fn ironwood_spend() {
     assert_eq!(pending[0].value, Some(NOTE_VALUE));
     assert_rks_are_ours(group_key, &pending);
 
-    let (tx, spends) = sign_and_extract(&vault, pczt);
+    let (tx, spends) = sign_and_extract(&vault, pczt, TARGET_HEIGHT);
     assert_eq!(
         spends,
         vec![send::SignedSpend {
@@ -393,7 +401,7 @@ fn orchard_pool_spend_crossing_into_ironwood() {
     assert_eq!(paired.value, Some(0));
     assert_rks_are_ours(group_key, &pending);
 
-    let (tx, spends) = sign_and_extract(&vault, pczt);
+    let (tx, spends) = sign_and_extract(&vault, pczt, TARGET_HEIGHT);
     assert_eq!(spends.len(), 2);
     assert!(spends.iter().any(|s| s.value == Some(0)));
     assert_eq!(
@@ -406,5 +414,35 @@ fn orchard_pool_spend_crossing_into_ironwood() {
             .actions()
             .len(),
         2
+    );
+}
+
+/// Mainnet as it is today (NU6.3 since height 3,428,143; NU7 has no mainnet
+/// height yet, ZIP 259): the vault's pipeline, with the vendored
+/// `zcash_protocol`, builds, proves and FROST-signs a version 6 transaction
+/// on branch `0x37a5165b` that the mainnet version check accepts. Nothing is
+/// broadcast.
+#[test]
+fn mainnet_ironwood_spend_is_v6_on_the_nu6_3_branch() {
+    const MAINNET_TIP: u32 = 3_518_600;
+    let mainnet = zeek_vault::Params::MainNetwork;
+    assert_eq!(
+        send::circuit_version_for(&mainnet, MAINNET_TIP.into()).expect("circuit"),
+        OrchardCircuitVersion::PostNu6_3
+    );
+    let (vault, group_key, fvk) = vault();
+    let (pczt, _) = proven_ironwood_pczt(mainnet, MAINNET_TIP, &fvk);
+    assert_rks_are_ours(group_key, &send::pending_spends(&pczt).expect("pending"));
+    let (tx, _) = sign_and_extract(&vault, pczt, MAINNET_TIP);
+    assert_eq!(u32::from(tx.consensus_branch_id()), 0x37a5_165b);
+    send::check_version(&mainnet, &tx, MAINNET_TIP.into()).expect("mainnet branch and version");
+    assert!(
+        send::check_version(&zeek_vault::Params::TestNetwork, &tx, 4_500_000.into()).is_err(),
+        "the testnet NU7 branch differs"
+    );
+    // Before NU6.3 mainnet was on NU6.2, whose transactions are not V6 Ironwood.
+    assert_eq!(
+        BranchId::for_height(&mainnet, BlockHeight::from_u32(3_428_142)),
+        BranchId::Nu6_2
     );
 }

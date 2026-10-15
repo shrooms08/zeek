@@ -39,7 +39,7 @@ pub const SEALING_FILE: &str = "payout-sealing.json";
 pub struct VaultFile {
     /// Schema version.
     pub version: u32,
-    /// Network name; always `test` for this spike.
+    /// Network name: `test` or `main`.
     pub network: String,
     /// Signing threshold.
     pub threshold: u16,
@@ -67,6 +67,7 @@ pub struct VaultFile {
 impl VaultFile {
     /// Builds the vault file from freshly derived material.
     pub fn new(
+        network: zeek_core::params::Network,
         threshold: u16,
         signers: u16,
         public_key_package: &PublicKeyPackage,
@@ -76,27 +77,40 @@ impl VaultFile {
     ) -> Result<Self, VaultError> {
         let group_verifying_key = frost::group_key_bytes(public_key_package)?;
         let public_key_package = public_key_package.serialize()?;
+        let params = crate::params(network);
         Ok(VaultFile {
             version: FILE_VERSION,
-            network: "test".to_owned(),
+            network: crate::network_name(network).to_owned(),
             threshold,
             signers,
             group_verifying_key: hex::encode(group_verifying_key),
             public_key_package: hex::encode(public_key_package),
             orchard_full_viewing_key: hex::encode(fvk.to_bytes()),
-            unified_full_viewing_key: crate::keys::encode_ufvk(ufvk),
+            unified_full_viewing_key: crate::keys::encode_ufvk(ufvk, &params),
             address: address.to_owned(),
             birthday_height: None,
             unified_incoming_viewing_key: Some(crate::keys::encode_uivk(
                 &crate::keys::unified_incoming_viewing_key(ufvk),
+                &params,
             )),
         })
+    }
+
+    /// The vault's network.
+    pub fn network(&self) -> Result<zeek_core::params::Network, VaultError> {
+        crate::parse_network(&self.network)
+    }
+
+    /// The vault's consensus parameters.
+    pub fn params(&self) -> Result<crate::Params, VaultError> {
+        Ok(crate::params(self.network()?))
     }
 
     /// The encoded unified incoming viewing key, derived from the UFVK.
     pub fn uivk(&self) -> Result<String, VaultError> {
         Ok(crate::keys::encode_uivk(
             &crate::keys::unified_incoming_viewing_key(&self.ufvk()?),
+            &self.params()?,
         ))
     }
 
@@ -128,7 +142,7 @@ impl VaultFile {
 
     /// Decodes the unified full viewing key.
     pub fn ufvk(&self) -> Result<UnifiedFullViewingKey, VaultError> {
-        UnifiedFullViewingKey::decode(&crate::NETWORK, &self.unified_full_viewing_key)
+        UnifiedFullViewingKey::decode(&self.params()?, &self.unified_full_viewing_key)
             .map_err(VaultError::KeyDerivation)
     }
 }
@@ -390,9 +404,20 @@ mod tests {
         let group = frost::group_key_bytes(&out.public_key_package).expect("group");
         let fvk = keys::derive_full_viewing_key(&group, OsRng).expect("fvk");
         let ufvk = keys::unified_full_viewing_key(&fvk).expect("ufvk");
-        let address = keys::encode_address(&keys::orchard_only_address(&ufvk).expect("address"));
-        let vault =
-            VaultFile::new(2, 3, &out.public_key_package, &fvk, &ufvk, &address).expect("vault");
+        let address = keys::encode_address(
+            &keys::orchard_only_address(&ufvk).expect("address"),
+            &crate::Params::TestNetwork,
+        );
+        let vault = VaultFile::new(
+            zeek_core::params::Network::Test,
+            2,
+            3,
+            &out.public_key_package,
+            &fvk,
+            &ufvk,
+            &address,
+        )
+        .expect("vault");
         dir.write_vault(&vault).expect("write vault");
         for (id, kp) in &out.key_packages {
             let n = frost::identifier_number(id).expect("n");
