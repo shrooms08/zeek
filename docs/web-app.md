@@ -157,7 +157,7 @@ all six design files). It is ported to typed modules under `src/art/`:
 React wrappers live in `InkSvg.tsx`, `Characters.tsx` and `Logo.tsx`.
 
 The generators return markup built only from numbers and constants (no
-user text). `npm run`-free scripts reuse them:
+user text). Two scripts reuse them:
 
 - `scripts/share-art.mjs` writes the engine's share-card art.
 - `scripts/brand-assets.mjs` writes the logo comparison, favicons, app
