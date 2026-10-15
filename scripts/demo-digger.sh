@@ -19,12 +19,12 @@ case ${1:-} in
     player=${2:-bob}
     mkdir -p "$RUN_DIR"
     printf '%s\n' "$player" >"$MARKER"
-    say "Demo digger on ($player). Start it, and the app's notice, with: scripts/zeek-up.sh"
+    say "Demo digger on ($player). Start it with scripts/zeek-up.sh; if the engine runs as a daemon, also run sudo scripts/isolate-services.sh so the app shows the notice."
     ;;
   off)
     launchctl bootout "$DOMAIN/dev.zeek.demo-digger" 2>/dev/null || true
     rm -f "$AGENTS_DIR/dev.zeek.demo-digger.plist" "$MARKER"
-    say "Demo digger off. Restart Zeek so the app stops saying so: scripts/zeek-up.sh"
+    say "Demo digger off. Run scripts/zeek-up.sh (and sudo scripts/isolate-services.sh if the engine runs as a daemon) so the app stops saying so."
     ;;
   run)
     player=${2:-bob}

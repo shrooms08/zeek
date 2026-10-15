@@ -2,8 +2,9 @@
 # zeek-publish.sh. Sourced, not run.
 #
 # Everything runs as macOS launchd agents of the logged-in user (labels
-# dev.zeek.*), except the keyholders once scripts/keyholder-users.sh has made
-# them system daemons running as their own users.
+# dev.zeek.*), except the engine and the keyholders once
+# scripts/isolate-services.sh has made them system daemons running as their
+# own users.
 
 ZEEK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export PATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -49,9 +50,10 @@ public_origin() {
   printf 'https://%s.pages.dev' "$name"
 }
 
-# Whether keyholder N runs as a system daemon (after keyholder-users.sh).
-keyholder_is_daemon() {
-  [ -f "/Library/LaunchDaemons/dev.zeek.keyholder-$1.plist" ]
+# Whether service $1 (engine, keyholder-N) runs as a system daemon under its
+# own user (after isolate-services.sh).
+is_daemon() {
+  [ -f "/Library/LaunchDaemons/dev.zeek.$1.plist" ]
 }
 
 agent_loaded() {

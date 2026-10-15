@@ -27,6 +27,20 @@ This repository contains:
   engine's coordinator (also Phase 4) builds payout transactions, collects two
   signatures, and broadcasts.
 
+Phase 8 runs Zeek publicly at no cost and prepares mainnet:
+
+* [docs/deployment.md](docs/deployment.md): the public site on Cloudflare
+  Pages, the proxy to the engine through a quick tunnel, the launchd
+  services, `scripts/zeek-up.sh` / `zeek-down.sh` / `zeek-status.sh`, and
+  what to do after a power cut.
+* [docs/lightwalletd-servers.md](docs/lightwalletd-servers.md): the
+  lightwalletd pool (failover, health, majority block-hash check) and the
+  verified servers.
+* [docs/mainnet-runbook.md](docs/mainnet-runbook.md): the verified mainnet
+  facts, the mainnet vault and readiness run, and how to open mainnet.
+* [docs/security-review.md](docs/security-review.md): the independent
+  review's findings and what was done about each.
+
 Since NU6.3 ("Ironwood") payments to the vault land in the **Ironwood** pool:
 Orchard-shaped notes (same keys, same spend authorization) with version 3 note
 plaintexts, carried in the Ironwood bundle of a version 6 transaction. The

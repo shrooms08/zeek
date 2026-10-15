@@ -16,10 +16,10 @@ browser ── https://<project>.pages.dev ────────────�
 https://<random>.trycloudflare.com  (cloudflared quick tunnels, this Mac)   │
                    ▼                                                        │
 engine public listener 127.0.0.1:8788 (refuses requests without the proxy   │
-secret; rate limits per client)                                             │
+secret; rate limits per client); the engine runs as its own macOS user      │
 relay 127.0.0.1:8790 (read-only chain routes)                               │
 keyholders 127.0.0.1:9101-9103: localhost only, never tunneled; each runs   │
-as its own macOS user (scripts/keyholder-users.sh)                          │
+as its own macOS user (scripts/isolate-services.sh)                        │
 ──────────────────────────────────────────────────────────────────────────── ┘
 ```
 
@@ -55,11 +55,12 @@ Verified on 2026-10-15 in Cloudflare's documentation.
 | What | Command |
 | --- | --- |
 | One-time Cloudflare setup (after `wrangler login`) | `scripts/cloudflare-setup.sh` |
-| One-time: keyholders as their own users | `sudo scripts/keyholder-users.sh` |
+| One-time: engine and keyholders as their own users | `sudo scripts/isolate-services.sh` |
+| Install a rebuilt engine or keyholder binary | `sudo scripts/isolate-services.sh --update-binary NAME=SHA256` (zeek-up prints the command) |
 | Deploy the web app | `scripts/deploy-web.sh` |
 | Start everything and check it end to end | `scripts/zeek-up.sh` |
-| Stop everything (keyholder daemons keep running) | `scripts/zeek-down.sh` |
-| Stop the keyholder daemons too | `scripts/zeek-down.sh --keyholders` |
+| Stop everything except the daemons | `scripts/zeek-down.sh` |
+| Stop the engine and keyholder daemons too | `scripts/zeek-down.sh --daemons` |
 | What is running | `scripts/zeek-status.sh` |
 | Optional demo digger | `scripts/demo-digger.sh on`, then `scripts/zeek-up.sh` |
 
@@ -67,27 +68,29 @@ Verified on 2026-10-15 in Cloudflare's documentation.
 
 1. It rebuilds what changed.
 2. It (re)installs the launchd agents and restarts them: caffeinate, the
-   engine, the relay, two tunnels, the publisher and, before
-   `keyholder-users.sh`, the keyholders.
+   relay, two tunnels, the publisher and, before `isolate-services.sh`, the
+   engine and the keyholders. After it, those two run as system daemons
+   under their own users; zeek-up only checks them and tells you when a
+   rebuilt binary is waiting to be installed.
 3. It waits for every local health check, for both tunnel hostnames to be
    published, and for the public site to reach the engine, the relay and the
    live stream.
 
 ## Logs
 
-- Engine: `data/logs/engine/engine.<date>.log`, rotated daily and kept 14
-  days.
-- Keyholders before `keyholder-users.sh`:
-  `data/logs/keyholder-N/keyholder.<date>.log`.
-- Keyholders after it: `/Library/Logs/Zeek/testnet-keyholder-N/`.
+- Engine and keyholders: `/Library/Logs/Zeek/testnet-engine/` and
+  `/Library/Logs/Zeek/testnet-keyholder-N/`, rotated daily and kept 14 days
+  (before `isolate-services.sh`: `data/logs/engine/` and
+  `data/logs/keyholder-N/`).
 - Tunnels, relay, publisher, caffeinate: `data/logs/*.log`. The publisher
   truncates these when they pass 10 MB.
 
 ## After a power cut or reboot
 
-- **Keyholders** run as system daemons and start at boot.
-- **Everything else** consists of agents of your user, and starts when you
-  log in.
+- **The engine and the keyholders** run as system daemons and start at
+  boot.
+- **Everything else** (the tunnels, the publisher, the relay, caffeinate)
+  consists of agents of your user, and starts when you log in.
   1. Turn the Mac on and log in. FileVault prevents automatic login.
   2. Run `scripts/zeek-status.sh`. Every service should be `running`, and
      the public checks `ok` within about two minutes.
@@ -109,3 +112,22 @@ Verified on 2026-10-15 in Cloudflare's documentation.
 
 When the engine or the tunnel is down, the proxy answers 503 or 502 with
 "offline", and the page says the engine does not answer.
+
+## Who can read what
+
+`scripts/isolate-services.sh` (run once with sudo) gives the engine and each
+keyholder its own macOS user.
+
+- **Each keyholder's directory** holds its key share, chain database and
+  config. Only that keyholder's user can read it.
+- **The engine's directory** holds the coordinator identity, the vault's
+  public file, the payout sealing key, the vault wallet and the proxy
+  secret. Only the engine's user can read it.
+- **The engine's user cannot:**
+  - read any key share;
+  - write this repository;
+  - use your sudo rights or your Cloudflare login.
+
+The script refuses to run with uncommitted changes. It refuses symbolic
+links in anything it moves, and it never replaces an installed binary or
+config without the binary's SHA-256 or `--replace-config`.

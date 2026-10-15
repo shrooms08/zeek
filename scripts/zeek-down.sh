@@ -3,13 +3,16 @@
 # at login until scripts/zeek-up.sh runs again. The public site stays up and
 # reports the services as offline (the tunnel hostnames are removed from KV).
 #
-#   scripts/zeek-down.sh               stop everything except system-daemon keyholders
-#   scripts/zeek-down.sh --keyholders  also stop keyholder daemons (asks for your password)
+#   scripts/zeek-down.sh            stop everything except the system daemons
+#                                   (engine and keyholders under their own users)
+#   scripts/zeek-down.sh --daemons  also stop those daemons (asks for your password)
 set -eu
 . "$(dirname "$0")/zeek-env.sh"
 
 STOP_DAEMONS=no
-[ "${1:-}" = "--keyholders" ] && STOP_DAEMONS=yes
+if [ "${1:-}" = "--daemons" ]; then
+  STOP_DAEMONS=yes
+fi
 
 # Reverse start order: the publisher first, so it does not republish.
 for agent in demo-digger publish tunnel-relay tunnel-engine relay engine keyholder-3 keyholder-2 keyholder-1 caffeinate; do
@@ -30,10 +33,10 @@ if [ -n "${NAMESPACE:-}" ] && [ -x "$WRANGLER" ]; then
 fi
 
 if [ "$STOP_DAEMONS" = yes ]; then
-  for n in 1 2 3; do
-    if keyholder_is_daemon "$n"; then
-      sudo launchctl bootout "system/dev.zeek.keyholder-$n" 2>/dev/null || true
-      say "stopped keyholder-$n (daemon; it starts again at boot or with: sudo launchctl bootstrap system /Library/LaunchDaemons/dev.zeek.keyholder-$n.plist)"
+  for service in engine keyholder-1 keyholder-2 keyholder-3; do
+    if is_daemon "$service"; then
+      sudo launchctl bootout "system/dev.zeek.$service" 2>/dev/null || true
+      say "stopped $service (daemon; it starts again at boot, or with: sudo launchctl bootstrap system /Library/LaunchDaemons/dev.zeek.$service.plist)"
     fi
   done
 fi

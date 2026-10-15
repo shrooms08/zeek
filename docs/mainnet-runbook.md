@@ -53,8 +53,11 @@ Nothing is broadcast.
   - The three keyholders derived the same address.
   - The address is in the gitignored `config/game.mainnet.json` and
     `.secrets/mainnet/vault.json` only. Do not post it anywhere until step 6.
-- **Key shares.** After `sudo scripts/keyholder-users.sh`, each mainnet share
-  belongs to its own system user (`_zeekmkh1–3`) under
+- **Key shares.** `sudo scripts/isolate-services.sh --mainnet-dkg` replaced
+  the first mainnet vault with a new one. That first vault was made under
+  the operator account, never funded, and its address never published. The
+  new ceremony ran inside three separate system users (`_zeekmkh1–3`); each
+  share was created directly in its own user's directory under
   `/Library/Application Support/Zeek/mainnet/`.
 - **The readiness run.** It runs on 127.0.0.1:8797 with
   `data/mainnet/zeek-engine.sqlite`; see "Readiness run" below.
@@ -106,7 +109,7 @@ Nothing is broadcast.
    - Delete `data/mainnet/zeek-engine.sqlite`; it belongs to the readiness
      run.
 3. **Start the mainnet keyholders** as daemons. Create plists like the
-   testnet ones that `scripts/keyholder-users.sh` writes:
+   testnet ones that `scripts/isolate-services.sh` writes:
    - label `dev.zeek.mainnet-keyholder-N`;
    - user `_zeekmkhN`;
    - config `/Library/Application Support/Zeek/mainnet/keyholder-N/config.json`.

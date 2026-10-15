@@ -14,16 +14,11 @@ check() {
 
 say "Services (launchd):"
 for agent in $AGENTS; do
-  case $agent in
-    keyholder-*)
-      n=${agent#keyholder-}
-      if keyholder_is_daemon "$n"; then
-        state=$(launchctl print "system/dev.zeek.$agent" 2>/dev/null | sed -n 's/^[[:space:]]*state = //p' | head -n 1)
-        say "  $agent (system daemon): ${state:-not loaded}"
-        continue
-      fi
-      ;;
-  esac
+  if is_daemon "$agent"; then
+    state=$(launchctl print "system/dev.zeek.$agent" 2>/dev/null | sed -n 's/^[[:space:]]*state = //p' | head -n 1)
+    say "  $agent (system daemon, own user): ${state:-not loaded}"
+    continue
+  fi
   state=$(launchctl print "$DOMAIN/dev.zeek.$agent" 2>/dev/null | sed -n 's/^[[:space:]]*state = //p' | head -n 1)
   say "  $agent: ${state:-not loaded}"
 done
