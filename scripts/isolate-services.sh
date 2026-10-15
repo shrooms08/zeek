@@ -265,7 +265,8 @@ for n in 1 2 3; do
         move_in "$f" "$dir/old-dealer/$(basename "$f")"
       fi
     done
-    rmdir "$REPO/.secrets/old-dealer/node-$n"
+    # Hidden files (for example .DS_Store) stay behind; that is harmless.
+    rmdir "$REPO/.secrets/old-dealer/node-$n" 2>/dev/null || true
   fi
   move_in "$REPO/.secrets/old-dealer/keyholder-$n.json" "$dir/old-dealer/dealer-keyholder-$n.json"
   [ -d "$dir/data" ] || make_dir "$dir/data" "$user:$user" 700
@@ -343,7 +344,7 @@ if [ "$MAINNET_DKG" = yes ]; then
     make_dir "$dir" "$user:$user" 700
     make_dir "$dir/secrets" "$user:$user" 700
     make_dir "$dir/data" "$user:$user" 700
-    id=$(sudo -u "$user" "$LIBEXEC/zeek-keyholder" identity-keygen --secrets-dir "$dir/secrets")
+    id=$(cd "$dir" && sudo -u "$user" "$LIBEXEC/zeek-keyholder" identity-keygen --secrets-dir "$dir/secrets")
     ids="$ids $n=$id"
   done
   servers='"https://zec.rocks:443", "https://eu.zec.rocks:443", "https://na.zec.rocks:443", "https://zec.0xrpc.io:443", "https://zec-node.cakewallet.com:443", "https://zcash.mysideoftheweb.com:9067", "https://lwd.zcashexplorer.app:9067"'
@@ -382,8 +383,8 @@ EOF
   pids=""
   for n in 1 2 3; do
     dir="$BASE/mainnet/keyholder-$n"
-    sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" dkg --config "$dir/config.json" \
-      --session "$session" --network main >"$LOGS/mainnet-dkg-$n.log" 2>&1 &
+    (cd "$dir" && sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" dkg --config "$dir/config.json" \
+      --session "$session" --network main >"$LOGS/mainnet-dkg-$n.log" 2>&1) &
     pids="$pids $!"
   done
   for pid in $pids; do
@@ -395,7 +396,7 @@ EOF
   done
   first=""
   for n in 1 2 3; do
-    out=$(sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" address --config "$BASE/mainnet/keyholder-$n/config.json")
+    out=$(cd "$BASE/mainnet/keyholder-$n" && sudo -u "_zeekmkh$n" "$LIBEXEC/zeek-keyholder" address --config "$BASE/mainnet/keyholder-$n/config.json")
     if [ -z "$first" ]; then
       first=$out
     fi
