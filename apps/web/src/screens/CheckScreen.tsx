@@ -4,22 +4,15 @@ import type { SecondSource } from "@zeek/pocket";
 import { toPocketError } from "@zeek/pocket";
 import { useEffect, useReducer, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ENGINE_URL } from "../api/engine";
+import { ENGINE_URL, SECOND_SOURCE } from "../api/engine";
 import { usePocket } from "../api/PocketProvider";
 import { useConfig, useRounds } from "../api/queries";
 import { Icon } from "../components/Icon";
 import { CheckRow, CopyButton } from "../components/ui";
 import { checkReducer, visibleRows } from "../machines/check";
 
-/**
- * A second source from the build (VITE_ZEEK_SECOND_SOURCE: an absolute URL or
- * a path on this site, such as `/relay`), if configured.
- */
-const SECOND_SETTING = (import.meta.env.VITE_ZEEK_SECOND_SOURCE as string | undefined) ?? "";
-const CONFIGURED_SECOND: string =
-  SECOND_SETTING === ""
-    ? ""
-    : new URL(SECOND_SETTING, window.location.origin).href.replace(/\/+$/, "");
+/** A second source from the build, if configured. */
+const CONFIGURED_SECOND = SECOND_SOURCE;
 
 export default function CheckScreen() {
   const param = useParams().round;

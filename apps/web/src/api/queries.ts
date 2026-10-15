@@ -18,6 +18,7 @@ export const keys = {
   rounds: ["rounds"] as const,
   ledger: ["ledger"] as const,
   keyholders: ["keyholders"] as const,
+  status: ["status"] as const,
   campfire: (hidden: boolean) => ["campfire", hidden] as const,
 };
 

@@ -109,8 +109,10 @@ export function FieldScreen() {
   const pocketLabel = unlocked
     ? `Zeek Pocket · ${balance.data === undefined ? "…" : formatZec(zat(balance.data.spendable_zat))}`
     : wallet.kind === "none"
-      ? "Zeek Pocket · not set up"
+      ? "Watching · no wallet needed to watch"
       : "Zeek Pocket · locked";
+  // Mainnet readiness: the engine withholds the vault and accepts no digs.
+  const diggingOff = config.data?.digging_enabled === false;
   const cache = zat(b.cache);
   const stage = cacheStage(cache);
   const landing = (b.landing ?? []).filter((d) => d.round === b.round);
@@ -126,7 +128,7 @@ export function FieldScreen() {
     draft.toggle(i);
   };
   const dig = () => {
-    if (draft.tiles.length === 0 || !open) return;
+    if (draft.tiles.length === 0 || !open || diggingOff) return;
     void navigate(
       unlocked
         ? "/dig/pocket"
@@ -226,7 +228,8 @@ export function FieldScreen() {
       separate={draft.separate}
       message={draft.message}
       campfire={campfire}
-      closed={!open}
+      closed={!open || diggingOff}
+      closedText={diggingOff ? "Digs are not open yet" : undefined}
       pocketLabel={pocketLabel}
       compact={!desktop}
       onAmount={draft.setAmountEach}

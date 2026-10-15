@@ -1,6 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const SCREENS = ["/", "/rounds", "/check", "/keys", "/campfire", "/how", "/wallet", "/nope"];
+const SCREENS = [
+  "/",
+  "/rounds",
+  "/check",
+  "/keys",
+  "/campfire",
+  "/status",
+  "/how",
+  "/wallet",
+  "/nope",
+];
 
 function watch(page: Page): string[] {
   const problems: string[] = [];
@@ -76,7 +86,17 @@ test("the Pocket starts its wasm worker with threads", async ({ page }) => {
 
 test.describe("at 390 wide", () => {
   test.use({ viewport: { width: 390, height: 844 } });
-  for (const path of ["/", "/rounds", "/check", "/keys", "/campfire", "/wallet", "/how", "/nope"]) {
+  for (const path of [
+    "/",
+    "/rounds",
+    "/check",
+    "/keys",
+    "/campfire",
+    "/status",
+    "/wallet",
+    "/how",
+    "/nope",
+  ]) {
     test(`${path} never scrolls sideways`, async ({ page }) => {
       await page.addInitScript(() => {
         localStorage.setItem("zeek.seenOnboarding", "1");

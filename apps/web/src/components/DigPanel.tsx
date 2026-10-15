@@ -124,6 +124,8 @@ export interface DigPanelProps {
   message: string;
   campfire: boolean;
   closed: boolean;
+  /** Why digs are closed, when it is not the round (digging off). */
+  closedText?: string | undefined;
   pocketLabel: string;
   /** The mobile bottom sheet. */
   compact?: boolean;
@@ -243,6 +245,7 @@ export function DigPanel(p: DigPanelProps) {
           onClick={p.onDig}
           total={n > 0 ? formatZec(total.total, { decimals: 8 }) : undefined}
           compact
+          closedText={p.closedText}
         />
         <div className="flex justify-between text-xs">
           <span className="text-fog flex items-center gap-1.5">
@@ -272,7 +275,7 @@ export function DigPanel(p: DigPanelProps) {
   if (n === 0) {
     return (
       <section className="flex flex-col gap-4" aria-label="Dig" data-testid="dig-panel">
-        <DigButton state={state} count={0} onClick={p.onDig} />
+        <DigButton state={state} count={0} onClick={p.onDig} closedText={p.closedText} />
         <button
           type="button"
           className="btn flex items-center justify-center gap-2"
@@ -348,7 +351,7 @@ export function DigPanel(p: DigPanelProps) {
           {formatZec(total.total, { decimals: 8 })}
         </div>
       </div>
-      <DigButton state={state} count={n} onClick={p.onDig} />
+      <DigButton state={state} count={n} onClick={p.onDig} closedText={p.closedText} />
       <div className="flex justify-between text-sm">
         <span className="text-fog flex items-center gap-2">
           <Icon name="wallet" size={16} /> {p.pocketLabel}

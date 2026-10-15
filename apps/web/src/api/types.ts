@@ -215,3 +215,31 @@ export type LiveEvent =
   | { event: "paid"; round: number; txid: string }
   | ({ event: "campfire" } & CampfireMessage)
   | { event: "landing"; digs: LandingDig[] };
+
+/** One lightwalletd server's health (`GET /v1/status`). */
+export interface ChainServerStatus {
+  url: string;
+  healthy: boolean;
+  tip: number | null;
+  last_ok: number | null;
+  last_error: string | null;
+  latency_ms: number | null;
+  outvoted: number;
+}
+
+/** `GET /v1/status`. */
+export interface ServiceStatus {
+  now: number;
+  network: "test" | "main";
+  digging_enabled: boolean;
+  engine: {
+    uptime_secs: number;
+    stored_tip: number | null;
+    chain_tip: number | null;
+    last_block_time: number | null;
+    last_settled_round: number | null;
+  };
+  threshold: number;
+  keyholders: KeyholderStatus[];
+  chain_servers: ChainServerStatus[];
+}

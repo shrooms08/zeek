@@ -25,6 +25,7 @@ const MENU: { to: string; icon: IconName; label: string }[] = [
   { to: "/check", icon: "shield", label: "Check a round" },
   { to: "/keys", icon: "key", label: "Who holds the keys" },
   { to: "/campfire", icon: "fire", label: "Campfire" },
+  { to: "/status", icon: "layers", label: "Status" },
   { to: "/how", icon: "book", label: "How to play" },
 ];
 

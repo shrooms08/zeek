@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance, usePocketHistory } from "../api/pocketQueries";
+import { useConfig } from "../api/queries";
+import { FaucetCard } from "../components/FaucetCard";
 import { motion, useReducedMotion } from "framer-motion";
 import { Zeb } from "../art/Characters";
 import { Icon, type IconName } from "../components/Icon";
@@ -564,6 +566,7 @@ function Home() {
   const client = useQueryClient();
   const balance = usePocketBalance();
   const history = usePocketHistory();
+  const config = useConfig();
   const [view, setView] = useState<"home" | "add" | "withdraw" | "backup">("home");
   const [backupWords, setBackupWords] = useState<string[] | null>(null);
   const [backupPass, setBackupPass] = useState("");
@@ -680,6 +683,13 @@ function Home() {
           </div>
         </section>
         {actions}
+        {config.data?.params.network === "test" && address.data !== undefined && (
+          <FaucetCard
+            address={address.data}
+            total={b === undefined ? undefined : zat(b.spendable_zat) + zat(b.pending_zat)}
+            sync={sync}
+          />
+        )}
         {view === "add" && address.data !== undefined && (
           <section
             className="zk-stat p-5 flex flex-col sm:flex-row gap-5 items-center"

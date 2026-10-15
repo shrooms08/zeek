@@ -34,6 +34,8 @@ export function DigButton(props: {
   /** Compact sheet: the total sits on the button's right. */
   total?: string | undefined;
   compact?: boolean;
+  /** What a closed button says (default "Round closed"). */
+  closedText?: string | undefined;
 }) {
   const reduce = useReducedMotion() === true;
   if (props.state === "empty") {
@@ -53,7 +55,7 @@ export function DigButton(props: {
     props.state === "loading"
       ? "Sealing…"
       : props.state === "closed"
-        ? "Round closed"
+        ? (props.closedText ?? "Round closed")
         : props.compact === true
           ? "Dig"
           : `Dig ${props.count} ${props.count === 1 ? "tile" : "tiles"}`;

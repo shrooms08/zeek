@@ -10,6 +10,7 @@ import type {
   PendingRound,
   RoundsPage,
   RoundView,
+  ServiceStatus,
 } from "./types";
 
 /**
@@ -22,6 +23,16 @@ export const ENGINE_URL: string = new URL(
   (import.meta.env.VITE_ZEEK_ENGINE_URL as string | undefined) ?? "http://127.0.0.1:8787",
   window.location.origin,
 ).href.replace(/\/+$/, "");
+
+/**
+ * The second-source relay from the build (VITE_ZEEK_SECOND_SOURCE: an
+ * absolute URL or a path on this site, such as `/relay`), or "".
+ */
+const SECOND_SETTING = (import.meta.env.VITE_ZEEK_SECOND_SOURCE as string | undefined) ?? "";
+export const SECOND_SOURCE: string =
+  SECOND_SETTING === ""
+    ? ""
+    : new URL(SECOND_SETTING, window.location.origin).href.replace(/\/+$/, "");
 
 /** The vault this build serves; the Pocket refuses any other. */
 export const PINNED_VAULT = __ZEEK_PINNED_VAULT__;
@@ -70,6 +81,7 @@ export const engine = {
     get<{ round: number; notes: NoteDigest[] }>(`/v1/rounds/${n}/digests`).then((r) => r.notes),
   ledger: () => get<Ledger>("/v1/vault/ledger"),
   keyholders: () => get<KeyholdersStatus>("/v1/keyholders/status"),
+  status: () => get<ServiceStatus>("/v1/status"),
   campfire: (includeHidden = false) =>
     get<CampfirePage>(`/v1/campfire?limit=50${includeHidden ? "&include_hidden=1" : ""}`),
 };

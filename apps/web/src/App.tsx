@@ -13,6 +13,7 @@ import { FieldFxProvider } from "./state/fieldFx";
 const DigPocketScreen = lazy(() => import("./screens/DigPocketScreen"));
 const DigWalletScreen = lazy(() => import("./screens/DigWalletScreen"));
 const RevealScreen = lazy(() => import("./screens/RevealScreen"));
+const StatusScreen = lazy(() => import("./screens/StatusScreen"));
 const PastRoundsScreen = lazy(() => import("./screens/PastRoundsScreen"));
 const RoundDetailScreen = lazy(() => import("./screens/RoundDetailScreen"));
 const CheckScreen = lazy(() => import("./screens/CheckScreen"));
@@ -51,6 +52,7 @@ export function App() {
                     <Route path="/win/:id" element={<VerifiedWinScreen />} />
                     <Route path="/keys" element={<KeysScreen />} />
                     <Route path="/campfire" element={<CampfireScreen />} />
+                    <Route path="/status" element={<StatusScreen />} />
                     <Route path="*" element={<NotFoundScreen />} />
                   </Routes>
                 </Suspense>
