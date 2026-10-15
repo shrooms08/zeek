@@ -635,15 +635,14 @@ impl Coordinator {
                 });
             }
         }
+        // Float is never a note the game knows (another round's dig, a
+        // shout, a forfeit): the keyholders refuse those (review N8).
+        let known = store.read(|db| db.known_note_ids())?;
         let float_candidates: Vec<PlannedNote> = report
             .notes
             .iter()
             .filter(|n| spendable(n))
-            .filter(|n| {
-                !charged
-                    .iter()
-                    .any(|c| c.id.txid == n.txid && c.id.output_index == n.output_index)
-            })
+            .filter(|n| !known.contains(&(n.txid.clone(), n.output_index)))
             .map(|n| PlannedNote {
                 id: NoteId {
                     txid: n.txid.clone(),

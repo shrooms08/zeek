@@ -33,9 +33,46 @@ pub const CLIENT_HEADER: &str = "x-zeek-client";
 /// Shortest accepted proxy secret.
 pub const MIN_SECRET_LEN: usize = 32;
 
-/// The client a request is counted against.
+/// The client a request is counted against. IPv6 clients are counted per
+/// /64, the block one subscriber usually holds (review N5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClientIp(pub IpAddr);
+
+impl ClientIp {
+    /// The client for address `ip`.
+    pub fn new(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(_) => ClientIp(ip),
+            IpAddr::V6(v6) => {
+                let mut octets = v6.octets();
+                for o in &mut octets[8..] {
+                    *o = 0;
+                }
+                ClientIp(IpAddr::from(octets))
+            }
+        }
+    }
+}
+
+/// Requests per minute one client may make to the public listener, and all
+/// clients together.
+pub const PUBLIC_PER_CLIENT_PER_MIN: u32 = 600;
+pub const PUBLIC_GLOBAL_PER_MIN: u32 = 6_000;
+
+/// The public listener's limits.
+pub struct PublicLimits {
+    per_client: crate::relay::RateLimiter,
+    global: crate::relay::RateLimiter,
+}
+
+impl Default for PublicLimits {
+    fn default() -> Self {
+        PublicLimits {
+            per_client: crate::relay::RateLimiter::new(PUBLIC_PER_CLIENT_PER_MIN),
+            global: crate::relay::RateLimiter::new(PUBLIC_GLOBAL_PER_MIN),
+        }
+    }
+}
 
 impl ClientIp {
     /// The client of `request`, or the unspecified address when no listener
@@ -93,11 +130,15 @@ async fn peer(mut request: Request, next: Next) -> Response {
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map_or(IpAddr::from([0, 0, 0, 0]), |c| c.0.ip());
-    request.extensions_mut().insert(ClientIp(ip));
+    request.extensions_mut().insert(ClientIp::new(ip));
     next.run(request).await
 }
 
-async fn proxied(State(secret): State<ProxySecret>, mut request: Request, next: Next) -> Response {
+async fn proxied(
+    State((secret, limits)): State<(ProxySecret, Arc<PublicLimits>)>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let authentic = request
         .headers()
         .get(PROXY_HEADER)
@@ -118,7 +159,17 @@ async fn proxied(State(secret): State<ProxySecret>, mut request: Request, next: 
     };
     // Nothing downstream needs the secret or the forwarded address header.
     request.headers_mut().remove(PROXY_HEADER);
-    request.extensions_mut().insert(ClientIp(ip));
+    let client = ClientIp::new(ip);
+    let now = std::time::Instant::now();
+    if !(limits.global.allow(IpAddr::from([0, 0, 0, 0]), now).await
+        && limits.per_client.allow(client.0, now).await)
+    {
+        return refused(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many requests; try again in a minute",
+        );
+    }
+    request.extensions_mut().insert(client);
     next.run(request).await
 }
 
@@ -127,9 +178,13 @@ pub fn local(router: Router) -> Router {
     router.layer(middleware::from_fn(peer))
 }
 
-/// The router for the public listener: only the proxy may call it.
+/// The router for the public listener: only the proxy may call it, and
+/// every route is rate limited per client and in total.
 pub fn public(router: Router, secret: ProxySecret) -> Router {
-    router.layer(middleware::from_fn_with_state(secret, proxied))
+    router.layer(middleware::from_fn_with_state(
+        (secret, Arc::new(PublicLimits::default())),
+        proxied,
+    ))
 }
 
 #[cfg(test)]
@@ -194,6 +249,17 @@ mod tests {
                 .0,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    #[test]
+    fn ipv6_clients_count_per_64() {
+        let a: IpAddr = "2001:db8:1:2:aaaa::1".parse().expect("ip");
+        let b: IpAddr = "2001:db8:1:2:bbbb::9".parse().expect("ip");
+        let c: IpAddr = "2001:db8:1:3::1".parse().expect("ip");
+        assert_eq!(ClientIp::new(a), ClientIp::new(b));
+        assert_ne!(ClientIp::new(a), ClientIp::new(c));
+        let v4: IpAddr = "203.0.113.7".parse().expect("ip");
+        assert_eq!(ClientIp::new(v4).0, v4);
     }
 
     #[test]

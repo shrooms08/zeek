@@ -5,9 +5,9 @@
 #
 # 1. Builds the release binaries if needed.
 # 2. Installs and starts the launchd agents (they restart on crash and at
-#    login): caffeinate, the three keyholders (unless they already run as
-#    system daemons, see scripts/keyholder-users.sh), the engine, the
-#    second-source relay, one Cloudflare quick tunnel each for the engine's
+#    login): caffeinate, the engine and the three keyholders (unless they
+#    already run as system daemons under their own users, see
+#    scripts/isolate-services.sh), the second-source relay, one Cloudflare quick tunnel each for the engine's
 #    public listener and the relay, and the publisher that stores the tunnel
 #    hostnames in Workers KV.
 # 3. Waits for every local service, for the tunnel hostnames to reach KV, and
@@ -37,7 +37,7 @@ BIN="$ZEEK_ROOT/target/release"
 write_agent caffeinate Background "$LOG_DIR/caffeinate.log" "" -- \
   /usr/bin/caffeinate -i -s
 for n in 1 2 3; do
-  if ! keyholder_is_daemon "$n"; then
+  if ! is_daemon "keyholder-$n"; then
     write_agent "keyholder-$n" Standard "$LOG_DIR/keyholder-$n.out.log" \
       "ZEEK_LOG_DIR=$LOG_DIR/keyholder-$n RUST_LOG=info" -- \
       "$BIN/zeek-keyholder" serve --config "config/keyholder-$n.json"
@@ -46,12 +46,14 @@ done
 # The app says when Zeek's own test wallets dig (scripts/demo-digger.sh).
 DEMO=off
 [ -f "$RUN_DIR/demo-digger" ] && DEMO=on
+if ! is_daemon engine; then
 write_agent engine Interactive "$LOG_DIR/engine.out.log" \
   "ZEEK_DEMO_DIGS=$DEMO ZEEK_LOG_DIR=$LOG_DIR/engine RUST_LOG=info ZEEK_PUBLIC_BIND=$ENGINE_PUBLIC ZEEK_PROXY_SECRET_FILE=.secrets/proxy-secret ZEEK_PUBLIC_URL=$ORIGIN ZEEK_APP_URL=$ORIGIN ZEEK_LIGHTWALLETD_URL=$TESTNET_LIGHTWALLETD" -- \
   "$BIN/zeek-engine"
+fi
 write_agent relay Standard "$LOG_DIR/relay.log" "" -- \
   "$BIN/zeek-verify" relay --lightwalletd "$TESTNET_LIGHTWALLETD" --bind "$RELAY_BIND" \
-  --cors http://localhost:4174
+  --cors http://localhost:4174 --proxy-secret-file "$ZEEK_ROOT/.secrets/proxy-secret"
 write_agent tunnel-engine Standard "$LOG_DIR/tunnel-engine.log" "" -- \
   "$CLOUDFLARED" tunnel --no-autoupdate --metrics "$ENGINE_METRICS" --url "http://$ENGINE_PUBLIC"
 write_agent tunnel-relay Standard "$LOG_DIR/tunnel-relay.log" "" -- \
@@ -65,6 +67,15 @@ else
   launchctl bootout "$DOMAIN/dev.zeek.demo-digger" 2>/dev/null || true
   rm -f "$AGENTS_DIR/dev.zeek.demo-digger.plist"
 fi
+
+# Daemons run root-owned copies of the binaries; a rebuilt binary only
+# reaches them through isolate-services.sh (which checks its hash).
+for name in zeek-engine zeek-keyholder; do
+  if [ -e "/usr/local/libexec/zeek/$name" ] && ! cmp -s "$BIN/$name" "/usr/local/libexec/zeek/$name"; then
+    say "note: $name changed; to run it, after checking the build is yours:"
+    say "  sudo scripts/isolate-services.sh --update-binary $name=$(shasum -a 256 "$BIN/$name" | cut -d' ' -f1)"
+  fi
+done
 
 say "Starting services…"
 for agent in $AGENTS; do

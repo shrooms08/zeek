@@ -6,7 +6,7 @@
 
 import type { RoundVerification, VerifyProgress } from "@zeek/pocket";
 
-export type RowState = "pending" | "checking" | "pass" | "fail" | "na";
+export type RowState = "pending" | "checking" | "pass" | "warn" | "fail" | "na";
 
 export interface CheckRowModel {
   id: "beacon" | "digs" | "timing" | "settlement" | "payout";
@@ -92,9 +92,11 @@ export function checkReducer(state: CheckState, event: CheckEvent): CheckState {
             ? "na"
             : c.status === "pass"
               ? "pass"
-              : c.status === "fail"
-                ? "fail"
-                : "na";
+              : c.status === "warn"
+                ? "warn"
+                : c.status === "fail"
+                  ? "fail"
+                  : "na";
         return {
           id,
           title: TITLES[id],

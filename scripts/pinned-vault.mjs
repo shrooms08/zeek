@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** @returns {{ network: string, vault_address: string, sealing_public_key: string, uivk: string }} */
+/** @returns {{ network: string, vault_address: string, sealing_public_key: string, uivk: string, params: Record<string, unknown> }} */
 export function pinnedVault() {
   const path =
     process.env.ZEEK_GAME_CONFIG ??
@@ -15,5 +15,6 @@ export function pinnedVault() {
     vault_address: game.vault_address,
     sealing_public_key: game.sealing_public_key,
     uivk: game.uivk,
+    params: game.params,
   };
 }

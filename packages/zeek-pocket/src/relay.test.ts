@@ -81,6 +81,7 @@ describe("RelayClient", () => {
       vault_address: "utest1vault",
       sealing_public_key: "aa".repeat(32),
       uivk: "uivktest1key",
+      params: { network: "test", min_dig_zat: 1, blocks_per_round: 24, genesis_height: 1 },
     };
     const config = (overrides: Record<string, unknown>) => () =>
       Response.json({
@@ -122,5 +123,18 @@ describe("RelayClient", () => {
       pinned,
     );
     await expect(mainnet.config()).rejects.toMatchObject({ code: "config_mismatch" });
+    const cheaper = new RelayClient(
+      "http://engine",
+      fakeFetch(
+        {
+          "/v1/config": config({
+            params: { network: "test", min_dig_zat: 2, blocks_per_round: 24, genesis_height: 1 },
+          }),
+        },
+        [],
+      ),
+      pinned,
+    );
+    await expect(cheaper.config()).rejects.toMatchObject({ code: "config_mismatch" });
   });
 });

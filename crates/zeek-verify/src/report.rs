@@ -31,6 +31,9 @@ impl CheckId {
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Pass,
+    /// Passed, but part of the result rests on a claim the verifier cannot
+    /// check itself (for example a payout left unpaid as unclaimable).
+    Warn,
     Fail,
     /// The check cannot run for this bundle (for example check 5 for a
     /// bundle format without payout openings, or a payout not mined yet).

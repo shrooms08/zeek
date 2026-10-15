@@ -3,4 +3,5 @@ export function pinnedVault(): {
   vault_address: string;
   sealing_public_key: string;
   uivk: string;
+  params: Record<string, unknown>;
 };

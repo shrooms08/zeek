@@ -190,6 +190,23 @@ async fn ceremony_only(
     Ok(())
 }
 
+/// Loads this node's key material and checks its sealing key is the game's:
+/// with another key no receiver would open, every payout would look
+/// unclaimable, and the node would approve leaving winners unpaid (review N7).
+fn load_keys(
+    config: &KeyholderConfig,
+    game: &GameConfig,
+) -> Result<KeyMaterial, zeek_keyholder::KeyholderError> {
+    let keys = KeyMaterial::load(config)?;
+    if keys.sealing.public_key().to_bytes() != game.sealing_public_key.to_bytes() {
+        return Err(zeek_keyholder::KeyholderError::Config(
+            "this node's payout sealing key does not match the game config's sealing_public_key"
+                .into(),
+        ));
+    }
+    Ok(keys)
+}
+
 /// Longest a chain follower pass may run.
 const FOLLOWER_PASS_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -199,7 +216,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
     let game = GameConfig::load(&config.game_config)?;
     let chain = Arc::new(Store::open(&config.engine_db_path())?);
     let node_db = NodeDb::open(&config.node_db_path())?;
-    let keys = match KeyMaterial::load(&config) {
+    let keys = match load_keys(&config, &game) {
         Ok(k) => Some(Arc::new(k)),
         Err(zeek_keyholder::KeyholderError::NoKeyShare) => None,
         Err(e) => return Err(e.into()),
@@ -261,7 +278,7 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
             )
             .await?;
             report(&output, &config);
-            match KeyMaterial::load(&config) {
+            match load_keys(&config, &game) {
                 Ok(k) => *state.keys.write().await = Some(Arc::new(k)),
                 Err(e) => {
                     tracing::warn!(error = %e, "key material not loadable yet (sealing key missing?); restart after copying it")
@@ -286,9 +303,13 @@ async fn serve(config: KeyholderConfig, args: ServeArgs) -> anyhow::Result<()> {
             tracing::error!(error = %e, "follower pass failed; retrying after the poll interval");
         }
         if state.keys.read().await.is_none() {
-            if let Ok(k) = KeyMaterial::load(&config) {
-                tracing::info!("key material loaded");
-                *state.keys.write().await = Some(Arc::new(k));
+            match load_keys(&config, &game) {
+                Ok(k) => {
+                    tracing::info!("key material loaded");
+                    *state.keys.write().await = Some(Arc::new(k));
+                }
+                Err(zeek_keyholder::KeyholderError::NoKeyShare) => {}
+                Err(e) => tracing::error!(error = %e, "key material refused"),
             }
         }
         tokio::select! {

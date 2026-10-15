@@ -175,8 +175,10 @@ export default function CheckScreen() {
         <summary className="cursor-pointer text-white">Second source</summary>
         <label className="flex flex-col gap-1 mt-2">
           <span className="text-fog text-sm">
-            A relay that reads another lightwalletd (anyone can run `zeek-verify relay`). Testnet
-            has no public one, so without it the cross-check says “unavailable”.
+            A relay that reads another lightwalletd (anyone can run `zeek-verify relay`).
+            {CONFIGURED_SECOND !== ""
+              ? " This site's own relay runs on Zeek's computer and, on testnet, reads the only public testnet lightwalletd, the same server the engine reads. It catches a wrong engine, proxy or tunnel, but not a wrong lightwalletd; use a relay of your own for that."
+              : " Testnet has no public one, so without it the cross-check says “unavailable”."}
           </span>
           <input
             className="field-input font-mono text-sm"

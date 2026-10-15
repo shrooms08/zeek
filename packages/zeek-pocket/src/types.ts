@@ -146,6 +146,8 @@ export interface PinnedVault {
   vault_address: string;
   sealing_public_key: string;
   uivk: string;
+  /** The game parameters (memo format, activation heights, minimums). */
+  params: Record<string, unknown>;
 }
 
 export interface EngineConfig {
@@ -223,7 +225,7 @@ export interface AnyWalletShout {
 export interface CheckResult {
   id: "beacon" | "digs" | "timing" | "settlement" | "payout";
   title: string;
-  status: "pass" | "fail" | "not_available";
+  status: "pass" | "warn" | "fail" | "not_available";
   summary: string;
   detail: string[];
 }

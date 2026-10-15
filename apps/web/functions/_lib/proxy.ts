@@ -33,37 +33,66 @@ interface Upstream {
 /** Which service a route belongs to. */
 export type Service = "engine" | "relay";
 
+/** What a route may answer with (anything else is refused, review N3). */
+type Kind = "json" | "binary" | "share";
+
 interface Rule {
   method: "GET" | "POST";
   pattern: RegExp;
+  kind: Kind;
   /** Largest request body accepted (POST only). */
   maxBody?: number;
   websocket?: boolean;
 }
+
+/** Media types each kind of route may return. */
+const TYPES: Record<Kind, string[]> = {
+  json: ["application/json"],
+  binary: ["application/octet-stream", "application/json"],
+  share: ["text/html", "image/png", "text/plain"],
+};
+
+/**
+ * Content security policy of proxied responses: nothing from the engine may
+ * run script on this origin. Share pages need their inline styles, images
+ * and meta refresh; everything else is data.
+ */
+const PROXY_CSP: Record<Kind, string> = {
+  json: "default-src 'none'; frame-ancestors 'none'; sandbox",
+  binary: "default-src 'none'; frame-ancestors 'none'; sandbox",
+  share:
+    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+};
 
 const TXID = "[0-9a-f]{64}";
 const ROUND = "[0-9]{1,10}";
 
 /** The engine routes the public site may use. */
 const ENGINE_RULES: Rule[] = [
-  { method: "GET", pattern: /^\/v1\/(config|board|health|status|campfire|vault\/ledger)$/ },
-  { method: "GET", pattern: /^\/v1\/keyholders\/status$/ },
-  { method: "GET", pattern: /^\/v1\/rounds(\/pending)?$/ },
-  { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}(/proof|/digests)?$`) },
-  { method: "GET", pattern: /^\/v1\/proofs\/[0-9a-f]{32}$/ },
-  { method: "POST", pattern: /^\/v1\/proofs$/, maxBody: 32 * 1024 },
-  { method: "GET", pattern: /^\/v1\/chain\/(tip|blocks|tree-state)$/ },
-  { method: "GET", pattern: new RegExp(`^/v1/tx/${TXID}$`) },
-  { method: "POST", pattern: /^\/v1\/tx\/broadcast$/, maxBody: 256 * 1024 },
-  { method: "GET", pattern: /^\/v1\/relay\/stats$/ },
-  { method: "GET", pattern: /^\/v1\/stream$/, websocket: true },
-  { method: "GET", pattern: /^\/share\/(round|win)\/[0-9a-z.]{1,48}$/ },
+  {
+    method: "GET",
+    pattern: /^\/v1\/(config|board|health|status|campfire|vault\/ledger)$/,
+    kind: "json",
+  },
+  { method: "GET", pattern: /^\/v1\/keyholders\/status$/, kind: "json" },
+  { method: "GET", pattern: /^\/v1\/rounds(\/pending)?$/, kind: "json" },
+  { method: "GET", pattern: new RegExp(`^/v1/rounds/${ROUND}(/proof|/digests)?$`), kind: "json" },
+  { method: "GET", pattern: /^\/v1\/proofs\/[0-9a-f]{32}$/, kind: "json" },
+  { method: "POST", pattern: /^\/v1\/proofs$/, kind: "json", maxBody: 32 * 1024 },
+  { method: "GET", pattern: /^\/v1\/chain\/(tip|tree-state)$/, kind: "json" },
+  { method: "GET", pattern: /^\/v1\/chain\/blocks$/, kind: "binary" },
+  { method: "GET", pattern: new RegExp(`^/v1/tx/${TXID}$`), kind: "binary" },
+  { method: "POST", pattern: /^\/v1\/tx\/broadcast$/, kind: "json", maxBody: 256 * 1024 },
+  { method: "GET", pattern: /^\/v1\/relay\/stats$/, kind: "json" },
+  { method: "GET", pattern: /^\/v1\/stream$/, kind: "json", websocket: true },
+  { method: "GET", pattern: /^\/share\/(round|win)\/[0-9a-z.]{1,48}$/, kind: "share" },
 ];
 
 /** The second-source relay's routes (`zeek-verify relay`). */
 const RELAY_RULES: Rule[] = [
-  { method: "GET", pattern: /^\/v1\/chain\/(tip|blocks)$/ },
-  { method: "GET", pattern: new RegExp(`^/v1/tx/${TXID}$`) },
+  { method: "GET", pattern: /^\/v1\/chain\/tip$/, kind: "json" },
+  { method: "GET", pattern: /^\/v1\/chain\/blocks$/, kind: "binary" },
+  { method: "GET", pattern: new RegExp(`^/v1/tx/${TXID}$`), kind: "binary" },
 ];
 
 /** Headers every Function response carries. */
@@ -77,14 +106,8 @@ const ISOLATION: Record<string, string> = {
 
 /** Response headers copied from the upstream. */
 // The engine marks share images `cross-origin` so other sites can show them.
-const PASS_RESPONSE = [
-  "content-type",
-  "cache-control",
-  "location",
-  "last-modified",
-  "etag",
-  "cross-origin-resource-policy",
-];
+// No `location`: no engine route redirects, so none is passed on.
+const PASS_RESPONSE = ["cache-control", "last-modified", "etag", "cross-origin-resource-policy"];
 
 /** Request headers copied to the upstream. */
 const PASS_REQUEST = [
@@ -107,6 +130,7 @@ export function json(status: number, body: unknown, extra: Record<string, string
     headers: {
       ...ISOLATION,
       "Content-Type": "application/json",
+      "Content-Security-Policy": PROXY_CSP.json,
       "Cache-Control": "no-store",
       ...extra,
     },
@@ -208,11 +232,17 @@ export async function forward(
   } catch {
     return json(502, { error: `The Zeek ${service} did not answer.`, offline: true });
   }
+  const type = (response.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  if (type === undefined || !TYPES[rule.kind].includes(type)) {
+    return json(502, { error: `The Zeek ${service} sent an unexpected kind of response.` });
+  }
   const out = new Headers(ISOLATION);
   for (const name of PASS_RESPONSE) {
     const value = response.headers.get(name);
     if (value !== null) out.set(name, value);
   }
+  out.set("Content-Type", response.headers.get("content-type") ?? type);
+  out.set("Content-Security-Policy", PROXY_CSP[rule.kind]);
   if (!out.has("cache-control")) out.set("Cache-Control", "no-store");
   return new Response(response.body, { status: response.status, headers: out });
 }

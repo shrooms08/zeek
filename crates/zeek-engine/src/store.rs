@@ -12,14 +12,17 @@
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::db::Db;
 use crate::error::EngineError;
 
 /// Read connections opened up front; when all are busy an extra one is
-/// opened for the call.
+/// opened for the call, up to [`MAX_EXTRA_READERS`] at once.
 const READERS: usize = 8;
+/// Extra read connections allowed at once (review N9).
+const MAX_EXTRA_READERS: usize = 32;
 
 /// Shared database handle.
 pub struct Store {
@@ -30,6 +33,7 @@ pub struct Store {
 struct Readers {
     path: PathBuf,
     slots: Vec<Mutex<Db>>,
+    extra: AtomicUsize,
 }
 
 fn guard<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -51,6 +55,7 @@ impl Store {
             readers: Some(Readers {
                 path: path.to_owned(),
                 slots,
+                extra: AtomicUsize::new(0),
             }),
         })
     }
@@ -80,7 +85,18 @@ impl Store {
                 return Ok(Reader::Slot(db));
             }
         }
-        Ok(Reader::Extra(Db::open_reader(&readers.path)?))
+        if readers.extra.fetch_add(1, Ordering::SeqCst) >= MAX_EXTRA_READERS {
+            readers.extra.fetch_sub(1, Ordering::SeqCst);
+            return Err(EngineError::Busy("every database reader is in use"));
+        }
+        let counter = &readers.extra;
+        match Db::open_reader(&readers.path) {
+            Ok(db) => Ok(Reader::Extra(ExtraReader { db, counter })),
+            Err(e) => {
+                counter.fetch_sub(1, Ordering::SeqCst);
+                Err(e)
+            }
+        }
     }
 
     /// Runs `f` on a read-only connection.
@@ -105,10 +121,22 @@ impl Store {
     }
 }
 
+/// A connection opened beyond the pool; it is closed on drop.
+pub struct ExtraReader<'a> {
+    db: Db,
+    counter: &'a AtomicUsize,
+}
+
+impl Drop for ExtraReader<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// A checked-out read connection.
 pub enum Reader<'a> {
     Slot(MutexGuard<'a, Db>),
-    Extra(Db),
+    Extra(ExtraReader<'a>),
     /// In-memory stores read through the writer connection.
     Shared(MutexGuard<'a, Db>),
 }
@@ -119,7 +147,7 @@ impl Deref for Reader<'_> {
     fn deref(&self) -> &Db {
         match self {
             Reader::Slot(db) | Reader::Shared(db) => db,
-            Reader::Extra(db) => db,
+            Reader::Extra(extra) => &extra.db,
         }
     }
 }

@@ -464,6 +464,18 @@ impl Db {
         Ok(rows)
     }
 
+    /// Every note the game knows (digs, shouts, forfeits) as display txid
+    /// and action index. None of them may be spent as operator float.
+    pub fn known_note_ids(&self) -> Result<std::collections::HashSet<(String, u16)>, EngineError> {
+        let mut stmt = self.conn.prepare("SELECT txid, action_index FROM notes")?;
+        let rows = stmt.query_map([], |r| {
+            let mut txid: Vec<u8> = r.get(0)?;
+            txid.reverse();
+            Ok((hex::encode(txid), r.get::<_, u16>(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Records the payouts of `round` that have no payable receiver.
     pub fn set_unclaimable(
         &self,

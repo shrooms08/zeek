@@ -29,9 +29,28 @@ export const MAX_BLOCK_RANGE = 500;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
+/** Deep equality of JSON values, ignoring object key order. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return (
+    ka.length === kb.length &&
+    ka.every((k) => sameJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+  );
+}
+
 /** The fields of `config` that differ from `pinned`. */
 export function pinMismatches(config: EngineConfig & { uivk?: string }, pinned: PinnedVault) {
   const differ: string[] = [];
+  // Every parameter the build knows must match (review N11); parameters the
+  // engine adds with default values are not in the game file.
+  const served = config.params as unknown as Record<string, unknown>;
+  if (Object.entries(pinned.params).some(([k, v]) => !sameJson(served[k], v))) {
+    differ.push("game parameters");
+  }
   if (config.params.network !== pinned.network) differ.push("network");
   if (config.vault_address !== pinned.vault_address) differ.push("vault address");
   if (config.sealing_public_key !== pinned.sealing_public_key) differ.push("sealing key");

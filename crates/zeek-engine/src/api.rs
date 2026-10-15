@@ -240,6 +240,13 @@ pub struct ApiError(StatusCode, String);
 impl From<EngineError> for ApiError {
     /// Internal details (database, paths, configuration) stay in the log.
     fn from(e: EngineError) -> Self {
+        if let EngineError::Busy(why) = e {
+            tracing::warn!(why, "request refused: busy");
+            return ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "busy; try again in a moment".into(),
+            );
+        }
         tracing::error!(error = %e, "request failed");
         internal()
     }
@@ -842,6 +849,18 @@ async fn submit_proof(
     let proof = zeek_verify::win::WinProof::decode(&bytes)
         .map_err(|e| bad(StatusCode::BAD_REQUEST, e.to_string()))?;
     let id = zeek_verify::win::WinProof::id(&bytes);
+    // A proof already verified is answered from the store (review N6).
+    if let Some(stored) = stored_proof(&state, &id)? {
+        return Ok((StatusCode::OK, Json(stored)));
+    }
+    // At most two verifications at once: they share the blocking pool with
+    // payout proving (review N6).
+    let Ok(_slot) = PROOF_VERIFICATIONS.try_acquire() else {
+        return Err(bad(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "busy verifying other proofs; try again in a few seconds",
+        ));
+    };
     let bundle = {
         let db = reader(&state)?;
         let row = db.settlement(proof.round)?.ok_or_else(|| {
@@ -909,29 +928,20 @@ fn verdict_round(bytes: &[u8]) -> u32 {
     zeek_verify::win::WinProof::decode(bytes).map_or(0, |p| p.round)
 }
 
-async fn get_proof(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<StoredProof>, ApiError> {
+/// A stored (verified) win proof, restated.
+fn stored_proof(state: &AppState, id: &str) -> Result<Option<StoredProof>, ApiError> {
     use base64::Engine;
-    if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(bad(
-            StatusCode::BAD_REQUEST,
-            "a proof id is 32 hex characters",
-        ));
-    }
-    let (round, created_at, bytes) = state
-        .store
-        .read(|db| db.win_proof(&id))?
-        .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))?;
+    let Some((round, created_at, bytes)) = state.store.read(|db| db.win_proof(id))? else {
+        return Ok(None);
+    };
     // Stored proofs were fully verified on submission; the stored verdict
     // is restated here (the claim depends only on public data).
     let proof = zeek_verify::win::WinProof::decode(&bytes).map_err(|e| {
         tracing::error!(error = %e, "a stored proof does not decode");
         internal()
     })?;
-    Ok(Json(StoredProof {
-        id,
+    Ok(Some(StoredProof {
+        id: id.to_owned(),
         round,
         created_at,
         proof: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes),
@@ -947,13 +957,83 @@ async fn get_proof(
     }))
 }
 
+async fn get_proof(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<StoredProof>, ApiError> {
+    if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(bad(
+            StatusCode::BAD_REQUEST,
+            "a proof id is 32 hex characters",
+        ));
+    }
+    stored_proof(&state, &id)?
+        .map(Json)
+        .ok_or_else(|| bad(StatusCode::NOT_FOUND, "no such proof"))
+}
+
+/// Proof verifications allowed at once.
+static PROOF_VERIFICATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 /// Most simultaneous `/v1/stream` connections.
 pub const MAX_STREAMS: usize = 2_000;
+/// Most simultaneous `/v1/stream` connections of one client (review N10).
+pub const MAX_STREAMS_PER_CLIENT: usize = 8;
+
+/// Open streams per client.
+static STREAMS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, usize>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// One client's open stream; released on drop.
+struct StreamSlot(std::net::IpAddr);
+
+impl StreamSlot {
+    fn take(client: std::net::IpAddr) -> Option<StreamSlot> {
+        let mut open = STREAMS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = open.entry(client).or_insert(0);
+        if *count >= MAX_STREAMS_PER_CLIENT {
+            return None;
+        }
+        *count += 1;
+        Some(StreamSlot(client))
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        let mut open = STREAMS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(count) = open.get_mut(&self.0) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                open.remove(&self.0);
+            }
+        }
+    }
+}
 
 /// Largest client message accepted on `/v1/stream` (clients only listen).
 const MAX_CLIENT_MESSAGE: usize = 1_024;
 
-async fn stream(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
+async fn stream(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    client: Option<axum::Extension<crate::edge::ClientIp>>,
+) -> Response {
+    let address = client.map_or(std::net::IpAddr::from([0, 0, 0, 0]), |c| c.0 .0);
+    let Some(own) = StreamSlot::take(address) else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorBody {
+                error: "too many live connections from this address".into(),
+            }),
+        )
+            .into_response();
+    };
     let Ok(slot) = state.stream_slots.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -968,6 +1048,7 @@ async fn stream(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Res
         .on_upgrade(move |socket| async move {
             handle_socket(socket, state).await;
             drop(slot);
+            drop(own);
         })
 }
 

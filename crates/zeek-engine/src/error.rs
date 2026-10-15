@@ -5,6 +5,9 @@ use std::path::PathBuf;
 /// Every failure the engine can report.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    #[error("busy: {0}")]
+    Busy(&'static str),
+
     #[error("configuration error: {0}")]
     Config(String),
 

@@ -16,6 +16,10 @@ describe("proxy", () => {
     expect(allowed("engine", "DELETE", "/v1/proofs")).toBeUndefined();
     expect(allowed("relay", "POST", "/v1/tx/broadcast")).toBeUndefined();
     expect(allowed("relay", "GET", "/v1/chain/tip")).toBeDefined();
+    // Each route may only answer with its own kind of content (review N3).
+    expect(allowed("engine", "GET", "/v1/board")?.kind).toBe("json");
+    expect(allowed("engine", "GET", "/v1/chain/blocks")?.kind).toBe("binary");
+    expect(allowed("engine", "GET", "/share/round/205")?.kind).toBe("share");
   });
 
   it("contacts only https quick-tunnel hosts", () => {

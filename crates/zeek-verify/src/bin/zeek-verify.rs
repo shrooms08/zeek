@@ -100,6 +100,11 @@ enum Command {
         /// Allowed browser origins (comma-separated); `*` for any.
         #[arg(long, default_value = "*")]
         cors: String,
+        /// Behind the public site's proxy: a file holding the secret the
+        /// proxy sends (X-Zeek-Proxy). Requests without it are refused, and
+        /// clients are counted by the address the proxy names.
+        #[arg(long)]
+        proxy_secret_file: Option<PathBuf>,
     },
 }
 
@@ -239,6 +244,7 @@ async fn run_round(round: u32, file: Option<PathBuf>, sources: Sources) -> anyho
         for (i, check) in report.checks.iter().enumerate() {
             let mark = match check.status {
                 CheckStatus::Pass => "PASS",
+                CheckStatus::Warn => "WARN",
                 CheckStatus::Fail => "FAIL",
                 CheckStatus::NotAvailable => "N/A ",
             };
@@ -359,6 +365,15 @@ fn upstream_fault(status: &tonic::Status) -> bool {
     )
 }
 
+/// Logs an upstream failure and answers without its details.
+fn upstream_error(detail: &str) -> Response {
+    eprintln!("relay upstream error: {detail}");
+    relay_error(
+        StatusCode::BAD_GATEWAY,
+        "the chain server did not answer; try again shortly".to_owned(),
+    )
+}
+
 fn relay_error(status: StatusCode, message: String) -> Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
 }
@@ -366,7 +381,7 @@ fn relay_error(status: StatusCode, message: String) -> Response {
 async fn relay_tip(State(state): State<Arc<RelayState>>) -> Response {
     let (index, mut client) = match state.client().await {
         Ok(c) => c,
-        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+        Err(e) => return upstream_error(&e),
     };
     match client.get_latest_block(ChainSpec {}).await {
         Ok(block) => {
@@ -378,7 +393,7 @@ async fn relay_tip(State(state): State<Arc<RelayState>>) -> Response {
         }
         Err(e) => {
             state.failed(index).await;
-            relay_error(StatusCode::BAD_GATEWAY, e.message().to_owned())
+            upstream_error(e.message())
         }
     }
 }
@@ -401,7 +416,7 @@ async fn relay_blocks(
     }
     let (index, mut client) = match state.client().await {
         Ok(c) => c,
-        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+        Err(e) => return upstream_error(&e),
     };
     match blocks(&mut client, q.start, q.end).await {
         Ok(list) => {
@@ -421,7 +436,7 @@ async fn relay_blocks(
         }
         Err(e) => {
             state.failed(index).await;
-            relay_error(StatusCode::BAD_GATEWAY, e.to_string())
+            upstream_error(&e.to_string())
         }
     }
 }
@@ -435,7 +450,7 @@ async fn relay_tx(State(state): State<Arc<RelayState>>, Path(txid): Path<String>
     };
     let (index, mut client) = match state.client().await {
         Ok(c) => c,
-        Err(e) => return relay_error(StatusCode::BAD_GATEWAY, e),
+        Err(e) => return upstream_error(&e),
     };
     match client
         .get_transaction(TxFilter {
@@ -453,14 +468,148 @@ async fn relay_tx(State(state): State<Arc<RelayState>>, Path(txid): Path<String>
         Err(e) => {
             if upstream_fault(&e) {
                 state.failed(index).await;
-                return relay_error(StatusCode::BAD_GATEWAY, e.message().to_owned());
+                return upstream_error(e.message());
             }
-            relay_error(StatusCode::NOT_FOUND, e.message().to_owned())
+            relay_error(StatusCode::NOT_FOUND, "transaction not found".to_owned())
         }
     }
 }
 
-async fn run_relay(lightwalletd: String, bind: SocketAddr, cors: String) -> anyhow::Result<()> {
+/// Requests per minute per client, and for all clients together.
+const RELAY_PER_CLIENT_PER_MIN: f64 = 300.0;
+const RELAY_GLOBAL_PER_MIN: f64 = 3_000.0;
+/// Most clients tracked at once.
+const RELAY_MAX_CLIENTS: usize = 100_000;
+
+/// Token buckets per client (IPv6 per /64) and one for everyone.
+#[derive(Default)]
+struct Limits {
+    buckets:
+        std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, (f64, std::time::Instant)>>,
+}
+
+impl Limits {
+    fn take(
+        buckets: &mut std::collections::HashMap<std::net::IpAddr, (f64, std::time::Instant)>,
+        key: std::net::IpAddr,
+        per_min: f64,
+        now: std::time::Instant,
+    ) -> bool {
+        let (tokens, at) = buckets.entry(key).or_insert((per_min, now));
+        *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * per_min / 60.0).min(per_min);
+        *at = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn allow(&self, client: std::net::IpAddr) -> bool {
+        let now = std::time::Instant::now();
+        let mut buckets = self
+            .buckets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if buckets.len() > RELAY_MAX_CLIENTS {
+            buckets.retain(|_, (_, at)| now.duration_since(*at).as_secs() < 60);
+        }
+        let everyone = std::net::IpAddr::from([0, 0, 0, 0]);
+        if !Self::take(&mut buckets, everyone, RELAY_GLOBAL_PER_MIN, now) {
+            return false;
+        }
+        if buckets.len() > RELAY_MAX_CLIENTS && !buckets.contains_key(&client) {
+            return false;
+        }
+        Self::take(&mut buckets, client, RELAY_PER_CLIENT_PER_MIN, now)
+    }
+}
+
+/// Counts IPv6 clients per /64.
+fn client_key(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
+        std::net::IpAddr::V4(_) => ip,
+        std::net::IpAddr::V6(v6) => {
+            let mut o = v6.octets();
+            o[8..].fill(0);
+            std::net::IpAddr::from(o)
+        }
+    }
+}
+
+/// Checks the proxy secret (when configured) and the rate limits.
+async fn guard(
+    State((secret, limits)): State<(Option<Arc<str>>, Arc<Limits>)>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let client = match &secret {
+        None => peer.ip(),
+        Some(secret) => {
+            let given = request
+                .headers()
+                .get("x-zeek-proxy")
+                .map(|v| v.as_bytes())
+                .unwrap_or_default();
+            let expected = secret.as_bytes();
+            let same = given.len() == expected.len()
+                && given
+                    .iter()
+                    .zip(expected)
+                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                    == 0;
+            if !same {
+                return relay_error(
+                    StatusCode::FORBIDDEN,
+                    "use the public site; this address only serves its proxy".to_owned(),
+                );
+            }
+            match request
+                .headers()
+                .get("x-zeek-client")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<std::net::IpAddr>().ok())
+            {
+                Some(ip) => ip,
+                None => {
+                    return relay_error(
+                        StatusCode::BAD_REQUEST,
+                        "the proxy did not name the client".to_owned(),
+                    )
+                }
+            }
+        }
+    };
+    if !limits.allow(client_key(client)) {
+        return relay_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many requests; try again in a minute".to_owned(),
+        );
+    }
+    next.run(request).await
+}
+
+async fn run_relay(
+    lightwalletd: String,
+    bind: SocketAddr,
+    cors: String,
+    proxy_secret_file: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let secret: Option<Arc<str>> = match &proxy_secret_file {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let text = text.trim();
+            anyhow::ensure!(
+                text.len() >= 32,
+                "the proxy secret must be at least 32 characters"
+            );
+            Some(text.into())
+        }
+        None => None,
+    };
     let urls: Vec<String> = lightwalletd
         .split(',')
         .map(str::trim)
@@ -492,10 +641,18 @@ async fn run_relay(lightwalletd: String, bind: SocketAddr, cors: String) -> anyh
                 .allow_origin(origins)
                 .allow_methods([Method::GET]),
         )
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            (secret, Arc::new(Limits::default())),
+            guard,
+        ));
     eprintln!("read-only relay for {lightwalletd} on http://{bind}");
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -516,7 +673,10 @@ fn main() -> anyhow::Result<()> {
                 lightwalletd,
                 bind,
                 cors,
-            } => run_relay(lightwalletd, bind, cors).await.map(|()| true),
+                proxy_secret_file,
+            } => run_relay(lightwalletd, bind, cors, proxy_secret_file)
+                .await
+                .map(|()| true),
         }
     })?;
     if !ok {

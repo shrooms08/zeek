@@ -249,6 +249,9 @@ struct Bucket {
     updated: Instant,
 }
 
+/// Most clients a limiter tracks at once.
+const MAX_TRACKED_CLIENTS: usize = 100_000;
+
 /// Per-address rate limiter. Addresses live only in this map, in memory.
 pub struct RateLimiter {
     per_minute: u32,
@@ -272,6 +275,11 @@ impl RateLimiter {
         // Forget addresses idle for over a minute (their buckets are full).
         if buckets.len() > 1_024 {
             buckets.retain(|_, b| now.duration_since(b.updated) < Duration::from_secs(60));
+        }
+        // Bounded memory (review N5): with this many clients active in the
+        // last minute, a new one waits.
+        if buckets.len() >= MAX_TRACKED_CLIENTS && !buckets.contains_key(&address) {
+            return false;
         }
         let bucket = buckets.entry(address).or_insert(Bucket {
             tokens: capacity,

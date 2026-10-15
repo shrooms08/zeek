@@ -486,6 +486,8 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].height, 1_002);
         assert_eq!(notes[0].value, 200_000);
+        let known = store.read(|db| db.known_note_ids()).expect("known");
+        assert!(known.contains(&(notes[0].txid_hex(), notes[0].action_index)));
         let cmx = notes[0].cmx.expect("commitment recorded");
         assert_eq!(
             store

@@ -349,7 +349,7 @@ export function CheckRow(props: {
   id?: string;
   title: string;
   text: string;
-  state: "pending" | "checking" | "pass" | "fail" | "na";
+  state: "pending" | "checking" | "pass" | "warn" | "fail" | "na";
   detail: string[];
   testId?: string;
 }) {
@@ -358,6 +358,7 @@ export function CheckRow(props: {
     pending: "waiting",
     checking: "checking",
     pass: "passed",
+    warn: "passed with a note",
     fail: "failed",
     na: "not applicable",
   }[props.state];
@@ -392,6 +393,7 @@ export function CheckRow(props: {
       </div>
       <span className={`zk-mark zk-mark-${props.state}`} aria-hidden="true">
         {props.state === "pass" && <Icon name="checkink" size={24} draw strokeWidth={3} />}
+        {props.state === "warn" && <Icon name="warning" size={24} />}
         {props.state === "fail" && (
           <motion.span
             className="inline-flex"

@@ -659,7 +659,9 @@ fn unclaimable_payouts(bundle: &ProofBundle) -> Result<(BTreeSet<u32>, Vec<Strin
         }
         notes.push(format!(
             "payout {} ({} zatoshis) was not paid: {}. Its value stayed in the vault. This needs the vault's sealing key to confirm; the coordinator and every keyholder apply the same rule with it before signing.",
-            u.payout_index, u.net, u.reason
+            u.payout_index,
+            u.net,
+            u.reason.chars().filter(|c| !c.is_control()).take(200).collect::<String>()
         ));
     }
     Ok((indices, notes))
@@ -678,7 +680,7 @@ fn check_payout(input: &RoundInput<'_>) -> CheckResult {
         if !settlement.payouts.is_empty() && unclaimable.len() == settlement.payouts.len() {
             let mut result = CheckResult::new(
                 id,
-                CheckStatus::Pass,
+                CheckStatus::Warn,
                 "No settled payout has a payable receiver, so there is no payout transaction.",
             );
             for note in notes {
@@ -797,9 +799,14 @@ fn check_payout(input: &RoundInput<'_>) -> CheckResult {
             covered.len()
         ));
     }
+    let status = if unclaimable.is_empty() {
+        CheckStatus::Pass
+    } else {
+        CheckStatus::Warn
+    };
     let mut result = CheckResult::new(
         id,
-        CheckStatus::Pass,
+        status,
         format!(
             "The payout transaction is mined at block {} and valid, and it pays every payable settled amount ({} output(s)).",
             openings.mined_height,
