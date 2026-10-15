@@ -42,10 +42,8 @@ async function designFrame(
       if (lab !== undefined) return document.querySelector(`[data-screen-label="${lab}"]`);
       // Captions are short and may wrap part of their text in a span.
       const hit = [...document.querySelectorAll("*")]
-        .filter(
-          (e) => e.children.length <= 2 && (e.textContent ?? "").trim().startsWith(cap ?? "\u0000"),
-        )
-        .sort((a, b) => (a.textContent ?? "").length - (b.textContent ?? "").length)[0];
+        .filter((e) => e.children.length <= 2 && e.textContent.trim().startsWith(cap ?? "\u0000"))
+        .sort((a, b) => a.textContent.length - b.textContent.length)[0];
       return hit?.nextElementSibling ?? null;
     },
     [caption, label] as const,
