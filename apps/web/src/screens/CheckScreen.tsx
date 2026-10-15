@@ -11,15 +11,22 @@ import { Icon } from "../components/Icon";
 import { CheckRow, CopyButton } from "../components/ui";
 import { checkReducer, visibleRows } from "../machines/check";
 
-/** A second source from the build (VITE_ZEEK_SECOND_SOURCE), if configured. */
+/**
+ * A second source from the build (VITE_ZEEK_SECOND_SOURCE: an absolute URL or
+ * a path on this site, such as `/relay`), if configured.
+ */
+const SECOND_SETTING = (import.meta.env.VITE_ZEEK_SECOND_SOURCE as string | undefined) ?? "";
 const CONFIGURED_SECOND: string =
-  (import.meta.env.VITE_ZEEK_SECOND_SOURCE as string | undefined) ?? "";
+  SECOND_SETTING === ""
+    ? ""
+    : new URL(SECOND_SETTING, window.location.origin).href.replace(/\/+$/, "");
 
 export default function CheckScreen() {
   const param = useParams().round;
   const navigate = useNavigate();
   const rounds = useRounds();
   const config = useConfig();
+  const uivk = config.data?.uivk;
   const { pocket } = usePocket();
   const [state, dispatch] = useReducer(checkReducer, { kind: "idle" });
   const [round, setRound] = useState(param ?? "");
@@ -163,13 +170,13 @@ export default function CheckScreen() {
         </a>
         <span className="flex items-center gap-2 text-fog">
           <Icon name="key" size={16} /> Uses the public viewing key
-          {config.data !== undefined && (
+          {uivk !== undefined && (
             <span className="font-mono text-xs">
-              {config.data.uivk.slice(0, 16)}…{config.data.uivk.slice(-8)}
+              {uivk.slice(0, 16)}…{uivk.slice(-8)}
             </span>
           )}
         </span>
-        {config.data !== undefined && <CopyButton text={config.data.uivk} label="Copy key" />}
+        {uivk !== undefined && <CopyButton text={uivk} label="Copy key" />}
       </div>
       <details className="text-mist">
         <summary className="cursor-pointer text-white">Second source</summary>

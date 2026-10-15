@@ -54,5 +54,8 @@ describe("LiveClient", () => {
   it("derives the stream URL", () => {
     expect(streamUrl("http://127.0.0.1:8787")).toBe("ws://127.0.0.1:8787/v1/stream");
     expect(streamUrl("https://zeek.example")).toBe("wss://zeek.example/v1/stream");
+    expect(streamUrl("https://playzeek.pages.dev/api/")).toBe(
+      "wss://playzeek.pages.dev/api/v1/stream",
+    );
   });
 });

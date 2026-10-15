@@ -85,9 +85,9 @@ export class LiveClient {
   }
 }
 
-/** `ws://…/v1/stream` for an engine base URL. */
+/** `ws://…/v1/stream` for an engine base URL (which may carry a path, such as `/api`). */
 export function streamUrl(engineUrl: string): string {
-  const url = new URL("/v1/stream", engineUrl);
+  const url = new URL(`${engineUrl.replace(/\/+$/, "")}/v1/stream`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }

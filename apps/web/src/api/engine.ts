@@ -12,9 +12,16 @@ import type {
   RoundView,
 } from "./types";
 
-/** Engine base URL (VITE_ZEEK_ENGINE_URL, default the local engine). */
-export const ENGINE_URL: string =
-  (import.meta.env.VITE_ZEEK_ENGINE_URL as string | undefined) ?? "http://127.0.0.1:8787";
+/**
+ * Engine base URL, absolute and without a trailing slash: VITE_ZEEK_ENGINE_URL
+ * (an absolute URL, or a path such as `/api` on this site's own origin, which
+ * is how the public deployment reaches the engine through its proxy), by
+ * default the local engine.
+ */
+export const ENGINE_URL: string = new URL(
+  (import.meta.env.VITE_ZEEK_ENGINE_URL as string | undefined) ?? "http://127.0.0.1:8787",
+  window.location.origin,
+).href.replace(/\/+$/, "");
 
 /** The vault this build serves; the Pocket refuses any other. */
 export const PINNED_VAULT = __ZEEK_PINNED_VAULT__;

@@ -47,7 +47,7 @@ async function guarded(target: HTMLElement, action: () => Promise<void>): Promis
 
 let pocket: Pocket | undefined;
 async function wallet(): Promise<Pocket> {
-  pocket ??= await Pocket.start(engineUrl);
+  pocket ??= await Pocket.start(engineUrl, __ZEEK_PINNED_VAULT__);
   return pocket;
 }
 

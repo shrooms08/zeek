@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { pinnedVault } from "../../scripts/pinned-vault.mjs";
 
 /**
  * The wallet uses WebAssembly threads (SharedArrayBuffer), which browsers
@@ -14,6 +15,8 @@ export default defineConfig({
   server: { headers: isolation, port: 5173, strictPort: true },
   preview: { headers: isolation, port: 4173, strictPort: true },
   worker: { format: "es" },
+  // The vault the Pocket accepts (security review H3).
+  define: { __ZEEK_PINNED_VAULT__: JSON.stringify(pinnedVault()) },
   // @zeek/pocket is served as source (its worker and wasm must keep their
   // URLs), so its dependencies are pre-bundled up front; otherwise Vite finds
   // them on first use and reloads the page, killing the wallet worker

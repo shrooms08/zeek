@@ -19,7 +19,7 @@ export function subscribeCampfire(
   engineUrl: string,
   onMessage: (message: CampfireMessage) => void,
 ): () => void {
-  const url = new URL("/v1/stream", engineUrl);
+  const url = new URL(`${engineUrl.replace(/\/+$/, "")}/v1/stream`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(url);
   socket.onmessage = (event: MessageEvent<string>) => {
