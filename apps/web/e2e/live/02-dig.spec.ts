@@ -54,8 +54,17 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
   saveState({ dig: { round, tiles: TILES, message, txids } });
   await done.getByRole("button").first().click();
 
-  // The field shows the new depth once the dig is mined and ingested.
+  // Within seconds the mempool watcher shows the dig landing on its tiles,
+  // then the field shows the new depth once it is mined and ingested.
   await go(page, "/");
+  const landed = await page
+    .locator(`[data-tile="${TILES[0] ?? 0}"][data-landing="true"]`)
+    .waitFor({ timeout: 90_000 })
+    .then(() => true)
+    .catch(() => false);
+  console.log(
+    `[landing] pocket dig ${landed ? "shown landing on the field" : "mined before a landing was seen"}`,
+  );
   for (const [i, t] of TILES.entries()) {
     await expect
       .poll(

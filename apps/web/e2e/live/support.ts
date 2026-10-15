@@ -18,7 +18,7 @@ const run = promisify(execFile);
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const DIR = path.join(REPO, "data", "web-e2e");
 const STATE = path.join(DIR, "state.json");
-export const SHOTS = path.join(REPO, "docs", "examples", "phase7a");
+export const SHOTS = path.join(REPO, "docs", "examples", "phase7b", "live");
 export const ENGINE = process.env.VITE_ZEEK_ENGINE_URL ?? "http://127.0.0.1:8787";
 export const APP = "http://localhost:4174";
 
@@ -30,7 +30,9 @@ export interface LiveState {
   /** A 25-tile dig that stopped part-way: what's left to dig in that round. */
   winPartial?: { round: number; txids: string[]; unsent: number[] };
   proofId?: string;
-  other?: { round: number; tile: number };
+  other?: { round: number; tile: number; landingSeconds?: number; sawLanding?: boolean };
+  /** Earlier runs, kept for the record when a step is run afresh. */
+  history?: unknown[];
 }
 
 export function loadState(): LiveState {

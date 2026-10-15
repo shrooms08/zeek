@@ -56,14 +56,16 @@ pub fn check_consensus_support(
 pub async fn connect(url: &str) -> Result<Client, VaultError> {
     // Without these a dead connection hangs a call forever (seen live: the
     // engine's pass stalled for an hour holding its database lock). The
-    // request timeout covers unary calls and the start of a stream; the
+    // request timeout (5 min: a wallet's first sync can wait that long for a
+    // big block range to start) covers unary calls and the start of a
+    // stream; the
     // HTTP/2 keep-alives end a stream whose connection died mid-way. They
     // ping no more often than every 5 minutes and only during calls:
     // lightwalletd (grpc-go) answers more frequent or idle pings with
     // GOAWAY "too_many_pings".
     let mut endpoint = Endpoint::from_shared(url.to_owned())?
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(300))
         .http2_keep_alive_interval(Duration::from_secs(300))
         .keep_alive_timeout(Duration::from_secs(20))
         .keep_alive_while_idle(false);

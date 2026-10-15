@@ -54,11 +54,27 @@ test("other wallet: bob pays the QR request and the dig confirms", async ({ page
     /round (\d+)/.exec((await page.getByTestId("wallet-scan").textContent()) ?? "")?.[1],
   );
   await zeekDig("pay-uri", "bob", uri);
+  const broadcastAt = Date.now();
   await page.getByTestId("wallet-sent").click();
   await expect(page.getByTestId("wallet-waiting")).toBeVisible();
+  // The engine's mempool watcher sees the payment before it is mined.
+  await expect(page.getByTestId("payment-row").first()).toHaveAttribute(
+    "data-status",
+    /^(landing|landed)$/,
+    {
+      timeout: 5 * 60_000,
+    },
+  );
+  const landingSeconds = Math.round((Date.now() - broadcastAt) / 100) / 10;
+  const sawLanding =
+    (await page.getByTestId("payment-row").first().getAttribute("data-status")) === "landing";
+  console.log(
+    `[landing] other-wallet payment shown as ${sawLanding ? "landing" : "landed"} ${landingSeconds} s after broadcast`,
+  );
+  await shot(page, "dig-other-landing-1440");
   await shot(page, "dig-other-waiting-1440");
   await expect(page.getByTestId("wallet-confirmed")).toBeVisible({ timeout: 20 * 60_000 });
   await expect(page.getByTestId("wallet-confirmed")).toContainText("1 of 1 payments landed");
   await shot(page, "dig-other-confirmed-1440");
-  saveState({ other: { round, tile: tile - 1 } });
+  saveState({ other: { round, tile: tile - 1, landingSeconds, sawLanding } });
 });

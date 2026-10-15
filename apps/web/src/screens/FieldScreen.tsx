@@ -304,7 +304,7 @@ function EmptyGuide() {
     >
       <div className="flex items-start gap-3">
         <Zeb pose="idle" width={84} label={null} />
-        <div className="pointer-events-auto">
+        <div>
           <PictoBubble
             icons={["shovel", "tile", "nobody"]}
             joiners={["+", "="]}
