@@ -46,9 +46,28 @@ Verified on 2026-10-15 in Cloudflare's documentation.
 | Service | Limit | Effect |
 | --- | --- | --- |
 | Pages | 500 builds/month; 20,000 files, 25 MiB each | One deploy per release |
-| Pages Functions (Workers Free) | 100,000 requests/day, 10 ms CPU per request | Every `/api`, `/share`, `/relay` call counts; static files are free. A live WebSocket is one request. |
+| Pages Functions (Workers Free) | 100,000 requests/day (reset at midnight UTC), 10 ms CPU per request | Every `/api`, `/share`, `/relay` call counts, edge-cache hits included; static files are free (`public/_routes.json` keeps them off Functions). A live WebSocket is one request; its messages are free. |
 | Workers KV | 100,000 reads/day, 1,000 writes/day, 1 write/s per key, about 60 s propagation | The proxy caches reads for 10 s per isolate. The publisher writes only when a hostname changes. |
 | Quick tunnels | 200 requests in flight, no SSE, no uptime guarantee, new hostname per start | Fine for a demo; a named tunnel would need a domain |
+
+### Staying inside the quota
+
+What one open tab costs is measured in `docs/examples/phase8b/README.md`.
+
+- **The app** asks for little: one live stream, no refetch on focus, the
+  board pushed by the stream, round-event refetches coalesced, the stream
+  closed after a minute in a hidden tab, no polling while the engine is
+  offline (one health probe backing off to 2 minutes).
+- **Cacheable answers** (share pages and cards, final proof bundles, stored
+  win proofs) carry `Cache-Control: public`, so browsers and unfurlers
+  keep them, and the proxy keeps them in Cloudflare's edge cache. The edge
+  cache spares the Mac and keeps those links working while it is off; a
+  hit still counts as a Functions request.
+- **When the allowance is used up** the app says "Zeek is very busy, try
+  again shortly." and shows Replay mode. That needs the project's
+  **Settings → Runtime → Fail open / closed** set to **Fail open**: static
+  files keep being served (fail closed would serve an error page instead
+  of the app).
 
 ## Commands
 
@@ -100,9 +119,63 @@ Verified on 2026-10-15 in Cloudflare's documentation.
 - While the services run, caffeinate stops idle and system sleep on mains
   power. On battery the Mac may still sleep.
 
+## Uptime during judging
+
+### No automatic macOS update restarts
+
+An automatic macOS update restarts the Mac, and everything but the two
+daemons then waits for a login. For the judging period:
+
+1. Open **System Settings → General → Software Update**.
+2. Click the **ⓘ** next to **Automatic updates**.
+3. Turn off **Install macOS updates** and **Install Security Responses and
+   system files**. (Downloading updates may stay on; installing is what
+   restarts.)
+4. Click **Done**.
+
+Check from Terminal (both should print `0`; a missing key means the
+default, which is on):
+
+```sh
+defaults read /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates
+defaults read /Library/Preferences/com.apple.SoftwareUpdate CriticalUpdateInstall
+```
+
+Turn them back on after judging.
+
+### Services return after a reboot and one login
+
+1. Restart the Mac (Apple menu → Restart) and log in to your account.
+2. Wait two minutes: the daemons start at boot, the agents (tunnels,
+   relay, publisher, caffeinate) at login, and the publisher writes the
+   new tunnel addresses to KV.
+3. Run `scripts/zeek-status.sh`. Every service should be `running` and the
+   public checks `ok`; links on the site keep working because they never
+   name a tunnel.
+4. If something is not, run `scripts/zeek-up.sh`.
+
+`sudo pmset -a autorestart 1` makes the Mac power on by itself after a
+power cut; it still needs the one login (FileVault).
+
+### What the site does while the Mac is off
+
+- **Works:** the site and every screen load (static files). The field shows
+  Replay mode: the last settled rounds saved at the last deploy play back,
+  clearly labelled, and each can be checked in the browser as far as no
+  chain data is needed (the beacon against drand's public relays, the
+  settlement recompute, the payout openings). Share pages and cards that
+  were opened recently in a Cloudflare location keep loading there from its
+  edge cache.
+- **Does not work:** anything live. No digs, no new rounds, no Campfire, no
+  Pocket creation, sync or sending (the Pocket reads the chain through the
+  engine's relay), no checks that need chain data, no status of the
+  services other than "offline".
+- **Coming back:** when the engine answers again, open pages switch from
+  Replay to live by themselves within about two minutes.
+
 ## The public status page
 
-`/status` shows, refreshed every 15 s:
+`/status` shows, refreshed every 30 s:
 
 - the site, the engine (network, last block and its age, catching up), the
   relay;

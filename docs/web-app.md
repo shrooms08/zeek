@@ -80,12 +80,52 @@ pure.
 
 The app opens one WebSocket to `/v1/stream`:
 
-- It reconnects with exponential backoff: 1 s doubling to a 30 s cap, with
-  ±25% jitter.
-- `board` events write straight into the query cache.
-- Round and Campfire events invalidate the affected queries.
+- It reconnects with exponential backoff: 1 s doubling to 30 s, then 1, 2
+  and 5 minutes while the engine stays away, with ±25% jitter.
+- `board` events write straight into the query cache; the board is never
+  refetched for a round event (the stream pushes it every block).
+- Round and Campfire events invalidate the affected queries, coalesced over
+  1.5 s (they come in bursts).
+- A tab hidden for a minute closes the stream; on return it reconnects at
+  once and refreshes what it missed. Nothing polls while hidden, and
+  nothing refetches on focus.
 - While the socket is down, the top bar shows "Reconnecting…" and queries
-  fall back to polling.
+  fall back to polling, except while the engine is offline (see Replay).
+
+On the public site every request through `/api` is one of the free plan's
+100,000 Pages Functions requests a day, so the app asks for as little as it
+can (measured in `docs/examples/phase8b/README.md`).
+
+## Replay mode
+
+When the engine does not answer (or the site's free requests are used up,
+"Zeek is very busy, try again shortly."), the field plays back real past
+rounds instead of a dead end, labelled **Replay**, with "Live play resumes
+when the Zeek engine is back."
+
+- **Data:** `scripts/snapshot-rounds.mjs` (run by `deploy-web.sh`) saves
+  the last settled rounds into the build as static files: each proof
+  bundle and its replay from `zeek-verify replay` (depth stages per block,
+  the draw and the payout; never amounts per tile).
+- **Playback:** the field fills block by block, the round closes, the
+  reveal plays with the usual stage timings, then the result and payout.
+  With reduced motion it shows each round's end state.
+- **Coming back:** one probe of `/v1/health`, every 15 s doubling to 2
+  minutes and paused while hidden; when it answers, the field goes live.
+- **Verify this round here** runs `zeek_verify::offline` in the browser:
+
+  | Check | Without the engine |
+  | --- | --- |
+  | Beacon | rules, BLS signature, drand's own public copy (its public relays allow browsers), the draw |
+  | Beacon round bound by the first block's time | needs the live engine |
+  | Digs, Timing | need the live engine |
+  | Settlement | recomputed in full |
+  | Payout | openings against the settlement; the mined transaction needs the live engine |
+
+  A part that needs chain data shows "Needs the live engine" and never a
+  tick. No public testnet chain source can be read from a browser on this
+  site: lightwalletd speaks gRPC without grpc-web or CORS, and CipherScan's
+  API only allows its own origin.
 
 Every number on screen comes from the engine or the Pocket.
 
@@ -95,10 +135,31 @@ Amounts are `bigint` zatoshis everywhere. They are parsed from text without
 floats, and formatting truncates. Main screens show up to 4 decimals;
 details (totals, fees, payouts, history) show all 8.
 
+## Lite and Pro
+
+The dig panel has a Lite / Pro switch, remembered in this browser.
+
+- **Lite** (the default) is the flow above.
+- **Pro** adds ALL and Clear; +0.001, +0.01, +0.1 and MAX (the Pocket's
+  spendable balance minus fees, over the picked tiles); the exact total
+  line; and **Your digs**, this browser's own record with each round's
+  public result and a Verify link. "Pro shows more about you. It never
+  shows more about anyone else."
+- **Auto-dig** (Zeek Pocket only): after the passphrase, the Pocket digs
+  the same selection once in each new round for N rounds while the tab is
+  open, with a counter, the spend cap and a Stop button. It stops before a
+  round the balance would not cover, before passing the cap, after a whole
+  round hidden, and on any error (`src/lib/autoDig.ts`). Other wallets get
+  Pro's selection and the payment request, not auto-dig.
+
 ## Privacy
 
 - The seed never leaves the Pocket worker. The UI shows the 24 words only on
-  the backup screen. Screenshots blur them.
+  the backup screen. Screenshots blur them. The backup screen's Copy words
+  button puts them on the clipboard with the warning "Anyone who gets these
+  words gets your coins. Clipboards can be read by other apps."; after 60 s
+  the clipboard is cleared if it still holds them (best effort, never a
+  permission prompt).
 - No screen shows an address except the user's own deposit address, on
   their own wallet screen.
 - The payout address pasted for another wallet is sealed into memos and is
