@@ -246,6 +246,14 @@ impl Coordinator {
         let identity = Identity::load(&settings.identity_path)?;
         let secrets = SecretsDir::new(&settings.vault_secrets_dir);
         let vault = secrets.load_vault()?;
+        if vault.network()? != pool.network() {
+            return Err(EngineError::Config(format!(
+                "the vault in {} is a `{}` vault but the game runs on {:?}",
+                settings.vault_secrets_dir.display(),
+                vault.network,
+                pool.network()
+            )));
+        }
         let params = vault.params()?;
         let public_key_package = vault.public_key_package()?;
         let ufvk = vault.ufvk()?;

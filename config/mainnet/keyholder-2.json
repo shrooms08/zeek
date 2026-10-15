@@ -1,0 +1,32 @@
+{
+  "identifier": 2,
+  "threshold": 2,
+  "signers": 3,
+  "bind": "127.0.0.1:9202",
+  "data_dir": "data/mainnet/keyholder-2",
+  "secrets_dir": ".secrets/mainnet/keyholder-2",
+  "game_config": "config/game.mainnet.json",
+  "lightwalletd": [
+    "https://zec.rocks:443",
+    "https://eu.zec.rocks:443",
+    "https://na.zec.rocks:443",
+    "https://zec.0xrpc.io:443",
+    "https://zec-node.cakewallet.com:443",
+    "https://zcash.mysideoftheweb.com:9067",
+    "https://lwd.zcashexplorer.app:9067"
+  ],
+  "peers": [
+    {
+      "identifier": 1,
+      "url": "http://127.0.0.1:9201",
+      "identity": "961bf1ee5df1a3baa407f02d20d009fae54ab7b3b1ffe98ae11e94928d515c96"
+    },
+    {
+      "identifier": 3,
+      "url": "http://127.0.0.1:9203",
+      "identity": "d0d28548a12b467d472d7a2b584e3391e648c386a84b0e1ada02607e1a9771c2"
+    }
+  ],
+  "coordinator_identity": "00f69117ff72eefd12abde0f7038814649dfaeea6ff2cee0ad48e08c1bc67a49",
+  "poll_secs": 20
+}

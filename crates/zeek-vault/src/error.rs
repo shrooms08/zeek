@@ -69,9 +69,6 @@ pub enum VaultError {
         actual: usize,
     },
 
-    #[error("vault file was written for network `{0}`, but this build only supports `test`")]
-    WrongVaultNetwork(String),
-
     #[error("keyholder file {path} does not belong to this vault (group verifying key mismatch)")]
     ForeignKeyholder { path: PathBuf },
 

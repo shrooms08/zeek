@@ -315,9 +315,7 @@ impl SecretsDir {
             return Err(VaultError::VaultNotFound(path));
         }
         let vault: VaultFile = read_json(&path)?;
-        if vault.network != "test" {
-            return Err(VaultError::WrongVaultNetwork(vault.network));
-        }
+        vault.network()?;
         Ok(vault)
     }
 
