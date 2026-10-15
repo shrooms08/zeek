@@ -5,11 +5,15 @@ set -u
 # shellcheck source=scripts/zeek-env.sh
 . "$(dirname "$0")/zeek-env.sh"
 
+# check NAME URL [more curl arguments]
 check() {
-  if curl -fsS -m 5 -o /dev/null "$2" 2>/dev/null; then
-    say "  ok    $1"
+  name=$1
+  url=$2
+  shift 2
+  if curl -fsS -m 5 -o /dev/null "$@" "$url" 2>/dev/null; then
+    say "  ok    $name"
   else
-    say "  DOWN  $1 ($2)"
+    say "  DOWN  $name ($url)"
   fi
 }
 
@@ -29,7 +33,8 @@ for port in $KEYHOLDER_PORTS; do
   check "keyholder :$port" "http://127.0.0.1:$port/v1/health"
 done
 check "engine" "http://$ENGINE_LOCAL/v1/health"
-check "relay" "http://$RELAY_BIND/v1/chain/tip"
+check "relay" "http://$RELAY_BIND/v1/chain/tip" \
+  -H "x-zeek-proxy: $(proxy_secret)" -H "x-zeek-client: 127.0.0.1"
 
 say "Tunnels:"
 for service in engine relay; do

@@ -29,8 +29,7 @@ ORIGIN=$(public_origin) || fail "no Cloudflare deployment yet: run scripts/cloud
 CLOUDFLARED=$(command -v cloudflared)
 
 say "Building release binaries (no-op when up to date)…"
-(cd "$ZEEK_ROOT" && CARGO_INCREMENTAL=0 cargo build --release -q \
-  -p zeek-engine -p zeek-keyholder -p zeek-verify --features zeek-verify/cli)
+release_build
 
 mkdir -p "$AGENTS_DIR" "$LOG_DIR" "$RUN_DIR"
 BIN="$ZEEK_ROOT/target/release"
@@ -101,7 +100,9 @@ for port in $KEYHOLDER_PORTS; do
   wait_http "http://127.0.0.1:$port/v1/health" 120 || fail "keyholder on $port did not start (see $LOG_DIR)"
 done
 wait_http "http://$ENGINE_LOCAL/v1/health" 120 || fail "engine did not start (see $LOG_DIR/engine)"
-wait_http "http://$RELAY_BIND/v1/chain/tip" 120 || fail "relay did not start (see $LOG_DIR/relay.log)"
+wait_http "http://$RELAY_BIND/v1/chain/tip" 120 \
+  -H "x-zeek-proxy: $(proxy_secret)" -H "x-zeek-client: 127.0.0.1" ||
+  fail "relay did not start (see $LOG_DIR/relay.log)"
 
 say "Waiting for the tunnels and their publication…"
 for service in engine relay; do

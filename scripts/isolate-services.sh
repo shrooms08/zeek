@@ -150,7 +150,7 @@ install_config() {
 install_binary() {
   src="$REPO/target/release/$1"
   dst="$BIN_DIR/$1"
-  [ -x "$src" ] || fail "build it first (as $OWNER): cargo build --release -p $1"
+  [ -x "$src" ] || fail "build it first (as $OWNER): scripts/zeek-up.sh builds every binary"
   no_links "$src"
   sum=$(shasum -a 256 "$src" | cut -d' ' -f1)
   if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then

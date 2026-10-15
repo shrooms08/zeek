@@ -8,7 +8,7 @@
 # own users.
 
 ZEEK_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export PATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # Cloudflare deployment written by scripts/cloudflare-setup.sh.
 DEPLOY_FILE="$ZEEK_ROOT/apps/web/.zeek-deploy"
@@ -32,6 +32,15 @@ TESTNET_LIGHTWALLETD="https://testnet.zec.rocks:443"
 
 # User agents, in start order.
 AGENTS="caffeinate keyholder-1 keyholder-2 keyholder-3 engine relay tunnel-engine tunnel-relay publish demo-digger"
+
+# The one release build. Always the same packages and features: Cargo
+# unifies features across the packages built together, so another set
+# gives byte-different binaries (and a false "changed" for the daemons).
+release_build() {
+  (cd "$ZEEK_ROOT" && CARGO_INCREMENTAL=0 cargo build --release -q \
+    -p zeek-engine -p zeek-keyholder -p zeek-verify --features zeek-verify/cli \
+    -p zeek-dig -p zeek-vault)
+}
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -109,11 +118,21 @@ tunnel_host() {
     sed -n 's/.*"hostname":"\([a-z0-9-]*\.trycloudflare\.com\)".*/\1/p'
 }
 
-# Waits up to $2 seconds for URL $1 to answer 2xx.
+# The proxy secret, which the local relay needs: it only serves the public
+# site's proxy (and these local checks).
+proxy_secret() {
+  cat "$ZEEK_ROOT/.secrets/proxy-secret"
+}
+
+# Waits up to $2 seconds for URL $1 to answer 2xx (more curl arguments,
+# such as headers, may follow).
 wait_http() {
+  url=$1
+  limit=$2
+  shift 2
   i=0
-  while [ "$i" -lt "$2" ]; do
-    if curl -fsS -m 5 -o /dev/null "$1" 2>/dev/null; then
+  while [ "$i" -lt "$limit" ]; do
+    if curl -fsS -m 5 -o /dev/null "$@" "$url" 2>/dev/null; then
       return 0
     fi
     sleep 2
