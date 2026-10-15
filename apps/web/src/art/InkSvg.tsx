@@ -7,7 +7,16 @@
  * 9 fps by CSS opacity alone.
  */
 
-import { memo, useId, useMemo, type CSSProperties, type ReactNode, type SVGProps } from "react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import { boilVariant, defs, safeId } from "./ink";
 
 /** A <g> holding generated ink markup. */
@@ -59,10 +68,22 @@ export function BoilStack({
   children?: ReactNode;
 }) {
   const p = useInkPrefix();
+  // Mount the first variant now and the other two a frame later, so the
+  // first paint of a big scene is not one long task.
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    if (!live) return;
+    const id = requestAnimationFrame(() => {
+      setAll(true);
+    });
+    return () => {
+      cancelAnimationFrame(id);
+    };
+  }, [live]);
   const variants = useMemo(() => {
     const base = render(p);
-    return live ? [0, 1, 2].map((v) => boilVariant(base, v, amp)) : [base];
-  }, [render, p, live, amp]);
+    return live && all ? [0, 1, 2].map((v) => boilVariant(base, v, amp)) : [base];
+  }, [render, p, live, amp, all]);
   return (
     <>
       {variants.map((markup, v) => (
@@ -70,7 +91,7 @@ export function BoilStack({
           key={v}
           viewBox={viewBox}
           style={layerStyle}
-          className={live ? `zk-boil zk-boil-${v} ${className}` : className}
+          className={live && all ? `zk-boil zk-boil-${v} ${className}` : className}
           aria-hidden="true"
           focusable="false"
         >

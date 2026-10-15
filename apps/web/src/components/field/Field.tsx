@@ -162,6 +162,17 @@ export function Field(props: FieldProps) {
   const viewBox = world ? VIEWBOX_WORLD : VIEWBOX_FIELD;
   const [, , vw, vh] = viewBox.split(" ").map(Number) as [number, number, number, number];
   const { active, fire } = usePropReactions(props.onReact);
+  // The front layers mount a frame after the ground and tiles, so the
+  // first paint of the island is not one long task.
+  const [front, setFront] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      setFront(true);
+    });
+    return () => {
+      cancelAnimationFrame(id);
+    };
+  }, []);
 
   const toggle = useCallback(
     (i: number) => {
@@ -404,7 +415,7 @@ export function Field(props: FieldProps) {
           ))}
         </g>
       </svg>
-      {world ? <WorldFront {...worldProps} active={active} /> : null}
+      {world && front ? <WorldFront {...worldProps} active={active} /> : null}
       {reveal.dim === true && (
         <div className="zk-dim absolute inset-0 bg-black pointer-events-none" aria-hidden="true" />
       )}
@@ -413,7 +424,7 @@ export function Field(props: FieldProps) {
           <Star p={p} reduce={reduce} />
         </svg>
       )}
-      {world ? (
+      {world && front ? (
         <PropButtons
           interactive={interactive}
           cacheLabel={cacheLabel}

@@ -30,6 +30,12 @@ export default defineConfig({
     { name: "smoke-webkit", testMatch: "smoke.spec.ts", use: { ...devices["Desktop Safari"] } },
     { name: "live", testMatch: /live\/.*\.spec\.ts/, timeout: 3 * 60 * 60_000 },
     {
+      name: "perf",
+      testMatch: "perf.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+      timeout: 120_000,
+    },
+    {
       name: "shots",
       testMatch: "screenshots.spec.ts",
       timeout: 30 * 60_000,
