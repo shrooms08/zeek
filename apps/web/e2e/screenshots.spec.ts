@@ -6,7 +6,7 @@
  * connection, not fake data.
  */
 import { chromium, type Page } from "@playwright/test";
-import { expect, loadState, shot, test, unlock } from "./live/support";
+import { expect, go, loadState, shot, test, unlock } from "./live/support";
 
 const SIZES = [
   { name: "1440", width: 1440, height: 1000 },
@@ -16,6 +16,11 @@ const SIZES = [
 async function settle(page: Page): Promise<void> {
   await page.waitForLoadState("networkidle").catch(() => undefined);
   await page.waitForTimeout(800);
+  // No screen may scroll sideways (mobile 390 included).
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect.soft(overflow, `horizontal overflow on ${page.url()}`).toBeLessThanOrEqual(0);
 }
 
 test("screens at 1440 and 390", async ({ page }) => {
@@ -29,7 +34,6 @@ test("screens at 1440 and 390", async ({ page }) => {
     throw new Error("run the live steps first");
   }
   const { passphrase, win, dig, proofId } = state;
-  await unlock(page, passphrase);
   const routes: [string, string, (p: Page) => Promise<void>][] = [
     ["field", "/", (p) => expect(p.getByTestId("field")).toBeVisible()],
     ["menu", "/", (p) => p.getByTestId("menu-button").click()],
@@ -75,23 +79,24 @@ test("screens at 1440 and 390", async ({ page }) => {
   ];
   for (const size of SIZES) {
     await page.setViewportSize({ width: size.width, height: size.height });
+    // In-app navigation keeps the Pocket unlocked (a reload locks it).
+    await unlock(page, passphrase);
     for (const [name, route, ready] of routes) {
-      await page.goto(route);
+      await go(page, route);
       await ready(page);
       await settle(page);
       await shot(page, `${name}-${size.name}`);
     }
     // Check a round, run to the end.
-    await page.goto(`/check/${dig.round}`);
+    await go(page, `/check/${dig.round}`);
     await page.getByTestId("check-run").click();
     await expect(page.getByTestId("check-summary")).toBeVisible({ timeout: 15 * 60_000 });
     await shot(page, `check-done-${size.name}`);
     // Unlock screen.
-    await page.goto("/wallet");
+    await go(page, "/wallet");
     await page.getByTestId("wallet-lock").click();
     await expect(page.getByTestId("wallet-unlock")).toBeVisible();
     await shot(page, `wallet-unlock-${size.name}`);
-    await unlock(page, passphrase);
     // Offline and loading: the engine unreachable, then slow.
     await page.route("http://127.0.0.1:8787/**", (r) => r.abort());
     await page.goto("/rounds");

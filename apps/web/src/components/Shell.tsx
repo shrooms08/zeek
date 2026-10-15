@@ -1,8 +1,8 @@
 /** App shell: <TopBar> (logo, <NetBadge>, round, Menu) and the menu sheet. */
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useContext, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useContext, useEffect, useState, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { LiveContext } from "../api/LiveProvider";
 import { useBoard, useConfig } from "../api/queries";
 import { Icon } from "./Icon";
@@ -32,6 +32,11 @@ const MENU: { to: string; icon: string; label: string }[] = [
 
 export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // Any navigation (a menu row, a link, back/forward) closes the menu.
+  const { pathname } = useLocation();
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
   const board = useBoard();
   const config = useConfig();
   const live = useContext(LiveContext);

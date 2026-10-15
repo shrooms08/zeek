@@ -120,7 +120,7 @@ export function FieldScreen() {
           testId="deep-cache"
         />
       </div>
-      <div className="flex flex-col gap-4 order-3 lg:order-2">
+      <div className="flex flex-col gap-4 order-2">
         {b.digs === 0 && draft.tiles.length === 0 && open && (
           <Empty
             title="Tap tiles to dig"
@@ -139,7 +139,7 @@ export function FieldScreen() {
         />
         <RevealLine pending={pending.data ?? []} now={now} />
       </div>
-      <div className="order-2 lg:order-3">
+      <div className="order-3">
         <DigPanel
           tiles={draft.tiles}
           amountEach={draft.amountEach < minDig ? minDig : draft.amountEach}

@@ -27,6 +27,11 @@ export default defineConfig({
   projects: [
     { name: "smoke", testMatch: "smoke.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "live", testMatch: /live\/.*\.spec\.ts/, timeout: 3 * 60 * 60_000 },
-    { name: "shots", testMatch: "screenshots.spec.ts", timeout: 30 * 60_000 },
+    {
+      name: "shots",
+      testMatch: "screenshots.spec.ts",
+      timeout: 30 * 60_000,
+      expect: { timeout: 30_000 },
+    },
   ],
 });

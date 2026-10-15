@@ -44,8 +44,13 @@ export default function VerifiedWinScreen() {
         </h2>
         {v.valid && payout !== undefined && (
           <div
-            className="numeral text-num-m"
-            style={{ color: "var(--color-gold)" }}
+            className="numeral break-all"
+            // Full precision here: shrink with the viewport rather than overflow.
+            style={{
+              color: "var(--color-gold)",
+              fontSize: "clamp(32px, 9vw, 56px)",
+              lineHeight: 1,
+            }}
             data-testid="win-amount"
           >
             +{formatZec(zat(payout.net), { decimals: 8 })} <span className="label">ZEC</span>
