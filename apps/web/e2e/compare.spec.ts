@@ -23,7 +23,8 @@ interface Pair {
   /** Design page and the frame's caption or data-screen-label. */
   design: { page: string; caption?: string; label?: string };
   /** Drive the app to the screen; returns an optional note for the image. */
-  app: (page: Page) => Promise<string | void>;
+  /** Drive the app to the screen; a returned string is a note for the image. */
+  app: (page: Page) => Promise<unknown>;
 }
 
 /** Screenshots a design frame by its caption (next sibling) or screen label. */
@@ -334,7 +335,8 @@ test("design frames beside the live app", async ({ page }) => {
       pair.size === 1440 ? { width: 1440, height: 900 } : { width: 390, height: 844 },
     );
     await unlock(page, passphrase);
-    const note = (await pair.app(page)) ?? "";
+    const result = await pair.app(page);
+    const note = typeof result === "string" ? result : "";
     await page.screenshot({ path: appFile });
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await compose(
