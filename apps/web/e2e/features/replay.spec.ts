@@ -12,7 +12,12 @@
 
 import { expect, test, type Page } from "@playwright/test";
 
-const ENGINE = /^http:\/\/127\.0\.0\.1:8787\//;
+/** The engine as the app reaches it: the local engine, or the site's /api. */
+const APP = process.env.ZEEK_E2E_APP;
+const ENGINE =
+  APP === undefined
+    ? /^http:\/\/127\.0\.0\.1:8787\//
+    : new RegExp(`^${APP.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/api/`);
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 
