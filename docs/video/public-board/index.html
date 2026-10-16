@@ -1,0 +1,238 @@
+<!doctype html>
+<!--
+  Illustration for the Zeek demo video: what a generic public betting board
+  shows everyone. Every address and amount here is made up and generated on
+  the page; nothing is taken from any real project. Not part of the app.
+
+  Open with a local static server, for example:
+    python3 -m http.server --directory docs/video/public-board 8099
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Public board (illustration)</title>
+    <style>
+      :root {
+        --night: #0d0d0d;
+        --coal: #1a1a1a;
+        --ash: #4a4a4a;
+        --fog: #a6a6a6;
+        --white: #ffffff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--night);
+        color: var(--white);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      body {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 48px;
+        padding: 64px 72px;
+      }
+      h1 {
+        font: 900 30px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin: 0 0 8px;
+      }
+      .sub {
+        color: var(--fog);
+        margin: 0 0 28px;
+        font-size: 18px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+      }
+      .tile {
+        border: 2px solid var(--ash);
+        background: var(--coal);
+        padding: 10px;
+        min-height: 128px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 13px;
+        overflow: hidden;
+        transition: border-color 200ms;
+      }
+      .tile .n {
+        color: var(--fog);
+        font-size: 12px;
+      }
+      .tile .sum {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .tile .who {
+        color: var(--fog);
+        white-space: nowrap;
+      }
+      .tile.flash {
+        border-color: var(--white);
+      }
+      .mark {
+        background: var(--white);
+        color: var(--night);
+        padding: 0 4px;
+      }
+      .feed {
+        border: 2px solid var(--ash);
+        height: 560px;
+        overflow: hidden;
+        position: relative;
+      }
+      .feed h2,
+      .trail h2 {
+        font: 800 16px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fog);
+        margin: 0;
+        padding: 14px 16px;
+        border-bottom: 2px solid var(--ash);
+      }
+      .feed ul {
+        list-style: none;
+        margin: 0;
+        padding: 0 16px;
+      }
+      .feed li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--coal);
+        font-size: 17px;
+      }
+      .feed li .amt {
+        color: var(--fog);
+      }
+      .trail {
+        border: 2px solid var(--white);
+        margin-top: 24px;
+      }
+      .trail ol {
+        margin: 0;
+        padding: 12px 16px 14px 40px;
+        font-size: 17px;
+        line-height: 1.7;
+      }
+      .corner {
+        position: fixed;
+        right: 24px;
+        bottom: 20px;
+        border: 2px dashed var(--white);
+        padding: 6px 12px;
+        font: 800 16px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <section>
+      <h1>A public board</h1>
+      <p class="sub">Round <span id="round">41</span> · every bet, every wallet, in the open</p>
+      <div class="grid" id="grid"></div>
+    </section>
+    <section>
+      <div class="feed">
+        <h2>Live bets</h2>
+        <ul id="feed"></ul>
+      </div>
+      <div class="trail">
+        <h2>Following <span class="mark" id="target"></span></h2>
+        <ol id="trail"></ol>
+      </div>
+    </section>
+    <div class="corner">Illustration</div>
+    <script>
+      // Seeded, so every recording shows the same made-up board.
+      let seed = 20261016;
+      const rand = () => {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+      };
+      const hex = (n) =>
+        Array.from({ length: n }, () => "0123456789abcdef"[Math.floor(rand() * 16)]).join("");
+      const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+      const wallets = Array.from({ length: 40 }, () => `w${hex(31)}`);
+      const target = wallets[7];
+      document.getElementById("target").textContent = short(target);
+
+      let round = 41;
+      let tiles;
+      const reset = () => {
+        tiles = Array.from({ length: 25 }, () => ({ sum: 0, who: [] }));
+      };
+      const grid = document.getElementById("grid");
+      const cells = Array.from({ length: 25 }, (_, i) => {
+        const el = document.createElement("div");
+        el.className = "tile";
+        el.innerHTML = `<span class="n">tile ${i + 1}</span><span class="sum">0.00</span><span class="who"></span>`;
+        grid.appendChild(el);
+        return el;
+      });
+      const draw = (i) => {
+        const t = tiles[i];
+        const el = cells[i];
+        el.querySelector(".sum").textContent = t.sum.toFixed(2);
+        el.querySelector(".who").innerHTML = t.who
+          .slice(-3)
+          .map((w) => (w === target ? `<span class="mark">${short(w)}</span>` : short(w)))
+          .join("<br>");
+      };
+      const feed = document.getElementById("feed");
+      const trail = document.getElementById("trail");
+      let targetBets = [];
+
+      const bet = (wallet, tile, amount) => {
+        const t = tiles[tile];
+        t.sum += amount;
+        t.who.push(wallet);
+        draw(tile);
+        cells[tile].classList.add("flash");
+        setTimeout(() => cells[tile].classList.remove("flash"), 300);
+        const li = document.createElement("li");
+        const who = wallet === target ? `<span class="mark">${short(wallet)}</span>` : short(wallet);
+        li.innerHTML = `<span>${who} → tile ${tile + 1}</span><span class="amt">${amount.toFixed(2)}</span>`;
+        feed.prepend(li);
+        while (feed.children.length > 14) feed.lastChild.remove();
+        if (wallet === target) targetBets.push(`tile ${tile + 1} · ${amount.toFixed(2)}`);
+      };
+
+      const endRound = () => {
+        const line = document.createElement("li");
+        line.textContent = `Round ${round}: ${targetBets.join(", ") || "no bets"}`;
+        trail.appendChild(line);
+        while (trail.children.length > 4) trail.firstChild.remove();
+        targetBets = [];
+        round += 1;
+        document.getElementById("round").textContent = String(round);
+        reset();
+        cells.forEach((_, i) => draw(i));
+      };
+
+      reset();
+      cells.forEach((_, i) => draw(i));
+      let ticks = 0;
+      setInterval(() => {
+        ticks += 1;
+        const wallet = rand() < 0.16 ? target : wallets[Math.floor(rand() * wallets.length)];
+        bet(wallet, Math.floor(rand() * 25), 0.1 + Math.floor(rand() * 40) / 10);
+        // A round every 5 s, so a 15 s clip follows the wallet across rounds.
+        if (ticks % 25 === 0) endRound();
+      }, 200);
+    </script>
+  </body>
+</html>

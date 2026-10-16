@@ -1,0 +1,86 @@
+{
+ "name": "refusal",
+ "recorded": "2026-10-16T07:13:43.388Z",
+ "events": [
+  {
+   "at": 0,
+   "type": "comment",
+   "text": "# Zcash testnet, round 17, 2026-10-14: the payout coordinator was built with"
+  },
+  {
+   "at": 0,
+   "type": "comment",
+   "text": "# --features rogue-demo and redirected a payout to its own address."
+  },
+  {
+   "at": 0,
+   "type": "comment",
+   "text": "# The engine's and keyholders' logs from that live run:"
+  },
+  {
+   "at": 0,
+   "type": "cmd",
+   "text": "grep \"ROGUE DEMO\" docs/examples/phase4b/rogue-coordinator-refusals.log"
+  },
+  {
+   "at": 11,
+   "type": "out",
+   "text": "\u001b[2m2026-10-14T01:54:41.032658Z\u001b[0m \u001b[33m WARN\u001b[0m ROGUE DEMO: redirected the first payout to the operator-controlled address \u001b[3mround\u001b[0m\u001b[2m=\u001b[0m17\n"
+  },
+  {
+   "at": 12,
+   "type": "exit",
+   "code": 0
+  },
+  {
+   "at": 12,
+   "type": "cmd",
+   "text": "grep \"REFUSED to sign\" docs/examples/phase4b/rogue-coordinator-refusals.log"
+  },
+  {
+   "at": 18,
+   "type": "out",
+   "text": "kh1 \u001b[2m2026-10-14T01:54:58.051221Z\u001b[0m \u001b[33m WARN\u001b[0m REFUSED to sign \u001b[3msession\u001b[0m\u001b[2m=\u001b[0m5f3e5e3e63689b88dcd5d21ad43dd0f24f2b5eae600b7e5f6f13867bac3331b2 \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0moutput 1: recipient does not match the sealed payout receiver for round 17 (amount matches)\nkh2 \u001b[2m2026-10-14T01:54:58.150849Z\u001b[0m \u001b[33m WARN\u001b[0m REFUSED to sign \u001b[3msession\u001b[0m\u001b[2m=\u001b[0m5f3e5e3e63689b88dcd5d21ad43dd0f24f2b5eae600b7e5f6f13867bac3331b2 \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0moutput 1: recipient does not match the sealed payout receiver for round 17 (amount matches)\nkh3 \u001b[2m2026-10-14T01:54:58.250756Z\u001b[0m \u001b[33m WARN\u001b[0m REFUSED to sign \u001b[3msession\u001b[0m\u001b[2m=\u001b[0m5f3e5e3e63689b88dcd5d21ad43dd0f24f2b5eae600b7e5f6f13867bac3331b2 \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0moutput 1: recipient does not match the sealed payout receiver for round 17 (amount matches)\n"
+  },
+  {
+   "at": 19,
+   "type": "exit",
+   "code": 0
+  },
+  {
+   "at": 19,
+   "type": "cmd",
+   "text": "grep -o \"not enough keyholders approved the payout: 0 of 2\" docs/examples/phase4b/rogue-coordinator-refusals.log"
+  },
+  {
+   "at": 25,
+   "type": "out",
+   "text": "not enough keyholders approved the payout: 0 of 2\n"
+  },
+  {
+   "at": 25,
+   "type": "exit",
+   "code": 0
+  },
+  {
+   "at": 25,
+   "type": "comment",
+   "text": "# The same payout checks, run now against tampered payouts:"
+  },
+  {
+   "at": 25,
+   "type": "cmd",
+   "text": "cargo test --release -p zeek-keyholder --test verify_pczt 2>&1 | grep -E '^test |test result'"
+  },
+  {
+   "at": 21243,
+   "type": "out",
+   "text": "test rounds_settled_under_rules_v1_are_not_signed ... ok\ntest rules_v4_payouts_never_spend_shouts ... ok\ntest cache_payout_may_use_float_notes_but_only_within_the_collected_fees ... ok\ntest a_junk_receiver_is_left_in_the_vault_and_the_round_still_pays ... ok\ntest honest_payout_is_approved_and_tampered_ones_are_refused ... ok\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.48s\n"
+  },
+  {
+   "at": 21243,
+   "type": "exit",
+   "code": 0
+  }
+ ]
+}

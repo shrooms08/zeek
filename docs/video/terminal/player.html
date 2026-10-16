@@ -1,0 +1,144 @@
+<!doctype html>
+<!--
+  Replays a terminal capture (apps/web/video/capture-terminal.mjs) for the
+  demo video: commands are typed out, then their real output appears with
+  its recorded timing (waits longer than 1.5 s, such as a build, are
+  shortened). ANSI colours from the logs are kept.
+    player.html?data=refusal.json
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Terminal replay</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0d0d0d;
+      }
+      .win {
+        position: absolute;
+        inset: 40px 48px;
+        border: 2px solid #4a4a4a;
+        background: #111;
+        display: flex;
+        flex-direction: column;
+      }
+      .bar {
+        border-bottom: 2px solid #4a4a4a;
+        padding: 10px 16px;
+        color: #a6a6a6;
+        font: 600 18px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.06em;
+      }
+      pre {
+        margin: 0;
+        padding: 18px 22px;
+        flex: 1;
+        overflow: hidden;
+        color: #e6e6e6;
+        font: 22px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .c {
+        color: #a6a6a6;
+      }
+      .p {
+        color: #ffffff;
+        font-weight: 700;
+      }
+      .dim {
+        color: #8a8a8a;
+      }
+      .it {
+        font-style: italic;
+      }
+      .y {
+        color: #e8c66a;
+      }
+      .r {
+        color: #ff7b72;
+      }
+      .g {
+        color: #7ee787;
+      }
+      .cur {
+        display: inline-block;
+        width: 0.6em;
+        background: #e6e6e6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <div class="bar" id="title">zeek</div>
+      <pre id="out"></pre>
+    </div>
+    <script>
+      const out = document.getElementById("out");
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // ANSI SGR (the codes tracing writes) to spans; everything else dropped.
+      const ansi = (text) => {
+        let html = "";
+        let open = [];
+        for (const part of text.split(/(\x1b\[[0-9;]*m)/)) {
+          const m = /^\x1b\[([0-9;]*)m$/.exec(part);
+          if (m === null) {
+            html += esc(part);
+            continue;
+          }
+          for (const code of m[1].split(";")) {
+            const cls = { 2: "dim", 3: "it", 31: "r", 32: "g", 33: "y" }[code];
+            if (code === "0" || code === "") {
+              html += "</span>".repeat(open.length);
+              open = [];
+            } else if (cls !== undefined) {
+              html += `<span class="${cls}">`;
+              open.push(cls);
+            }
+          }
+        }
+        return html + "</span>".repeat(open.length);
+      };
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const add = (html) => {
+        out.insertAdjacentHTML("beforeend", html);
+        out.scrollTop = out.scrollHeight;
+      };
+      async function typeLine(cls, text) {
+        add(`<span class="${cls}"></span>`);
+        const span = out.lastElementChild;
+        for (const ch of text) {
+          span.textContent += ch;
+          await sleep(18);
+        }
+        add("\n");
+      }
+      async function play(data) {
+        document.getElementById("title").textContent = `zeek · ${data.name} · recorded ${data.recorded.slice(0, 10)}`;
+        let last = 0;
+        for (const e of data.events) {
+          const gap = Math.min(1500, Math.max(0, e.at - last));
+          last = e.at;
+          if (e.type === "comment") {
+            await sleep(250);
+            await typeLine("c", e.text);
+          } else if (e.type === "cmd") {
+            await sleep(500);
+            add('<span class="p">$ </span>');
+            await typeLine("p", e.text);
+          } else if (e.type === "out") {
+            await sleep(Math.min(gap, 900));
+            add(ansi(e.text));
+          }
+        }
+        add('<span class="p">$ </span><span class="cur">&nbsp;</span>');
+        document.body.dataset.done = "1";
+      }
+      const src = new URLSearchParams(location.search).get("data") ?? "refusal.json";
+      fetch(src).then((r) => r.json()).then(play);
+    </script>
+  </body>
+</html>
