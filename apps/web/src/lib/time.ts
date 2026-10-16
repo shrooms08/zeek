@@ -23,3 +23,10 @@ export function formatAgo(unix: number, now: number): string {
   if (seconds < 86_400) return `${Math.floor(seconds / 3600)} h ago`;
   return `${Math.floor(seconds / 86_400)} d ago`;
 }
+
+/** Percent of the wait from the round's close to its beacon, 0 to 100. */
+export function revealProgress(beaconTime: number, delay: number, now: number): number {
+  if (delay <= 0) return 100;
+  const done = (now - (beaconTime - delay)) / delay;
+  return Math.round(Math.min(1, Math.max(0, done)) * 100);
+}

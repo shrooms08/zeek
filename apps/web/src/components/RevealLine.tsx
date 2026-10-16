@@ -11,7 +11,19 @@ function when(p: PendingRound, now: number): string {
   return left > 0 ? `reveals in ${formatClock(left)}` : "is being revealed…";
 }
 
-export function RevealLine({ pending, now }: { pending: PendingRound[]; now: number }) {
+export function RevealLine({
+  pending,
+  now,
+  openRound,
+  onDigNow,
+}: {
+  pending: PendingRound[];
+  now: number;
+  /** The round open for digs now, if any. */
+  openRound?: number | undefined;
+  /** Takes the player to the field's tiles. */
+  onDigNow?: (() => void) | undefined;
+}) {
   const [open, setOpen] = useState(false);
   const first = pending[0];
   if (first === undefined) return null;
@@ -31,6 +43,16 @@ export function RevealLine({ pending, now }: { pending: PendingRound[]; now: num
         </span>
         <Icon name="back" size={16} />
       </button>
+      {openRound !== undefined && onDigNow !== undefined && openRound > first.round && (
+        <button
+          type="button"
+          className="w-full flex items-center gap-3 border-t hair px-3 py-2 text-left text-white underline"
+          onClick={onDigNow}
+          data-testid="reveal-line-dig"
+        >
+          <Icon name="shovel" size={16} /> While you wait: dig round {openRound}
+        </button>
+      )}
       {open && (
         <ul className="border-t hair">
           {pending.map((p) => (

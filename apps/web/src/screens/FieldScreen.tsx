@@ -135,6 +135,12 @@ export function FieldScreen() {
   const empty = b.digs === 0 && landing.length === 0 && draft.tiles.length === 0 && open;
   const modal = pathname !== "/";
 
+  // "While you wait: dig round N": straight to the tiles.
+  const focusField = () => {
+    const el = document.querySelector<SVGElement>('[data-testid="field"]');
+    el?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    el?.focus({ preventScroll: true });
+  };
   const doAutoPick = () => {
     const picked = autoPick(b.stages, Math.max(3, draft.tiles.length), cryptoRandom);
     draft.setTiles(picked);
@@ -289,7 +295,12 @@ export function FieldScreen() {
           </div>
           <div className="absolute right-10 top-8 z-10 w-[360px]">{panel}</div>
           <div className="absolute bottom-9 left-10 z-10 w-[360px]">
-            <RevealLine pending={pending.data ?? []} now={now} />
+            <RevealLine
+              pending={pending.data ?? []}
+              now={now}
+              openRound={open && !diggingOff ? b.round : undefined}
+              onDigNow={focusField}
+            />
           </div>
         </div>
       ) : (
@@ -310,7 +321,12 @@ export function FieldScreen() {
               </p>
             )}
           </div>
-          <RevealLine pending={pending.data ?? []} now={now} />
+          <RevealLine
+            pending={pending.data ?? []}
+            now={now}
+            openRound={open && !diggingOff ? b.round : undefined}
+            onDigNow={focusField}
+          />
           <div className="zk-sheet">{panel}</div>
         </div>
       )}

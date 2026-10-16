@@ -9,10 +9,10 @@
  */
 
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Mine } from "../art/Characters";
-import { usePending, useRound } from "../api/queries";
+import { useBoard, useConfig, usePending, useRound } from "../api/queries";
 import { Field } from "../components/field/Field";
 import { Icon } from "../components/Icon";
 import { ResultCard } from "../components/ResultCard";
@@ -20,7 +20,8 @@ import { Loading, Offline, Screen } from "../components/ui";
 import { cacheStage } from "../lib/digPlan";
 import { formatZec, zat } from "../lib/money";
 import { stagesFromDepths, stagesFromTotals } from "../lib/stages";
-import { formatClock } from "../lib/time";
+import { askToNotify, notify, notifyState, type NotifyState } from "../lib/notify";
+import { formatClock, revealProgress } from "../lib/time";
 import { useMedia } from "../lib/useMedia";
 import { prefersReducedMotion, useNow } from "../lib/useNow";
 import {
@@ -46,6 +47,11 @@ export default function RevealScreen() {
   const [state, dispatch] = useReducer(revealReducer, prefersReducedMotion(), initialReveal);
   // Light burst: a 250 ms glint (frame 1) before the full burst (frame 2).
   const [glint, setGlint] = useState(false);
+  const board = useBoard();
+  const config = useConfig();
+  const [notice, setNotice] = useState<NotifyState>(notifyState);
+  // The reveal landed while this screen was waiting (not opened afterwards).
+  const waited = useRef(false);
 
   const settled = round.data?.settled ?? null;
   useEffect(() => {
@@ -73,6 +79,11 @@ export default function RevealScreen() {
   }, [state.stage]);
 
   useEffect(() => {
+    if (state.stage === "closed") waited.current = true;
+    if (state.stage === "draw" && waited.current) {
+      play("pin");
+      notify(`Round ${n} is revealed`, "The draw is in. Open Zeek to see where the treasure was.");
+    }
     if (state.stage === "shake") play("crack");
     if (state.stage === "burst") {
       setGlint(true);
@@ -89,6 +100,7 @@ export default function RevealScreen() {
     }
     return undefined;
   }, [state.stage, state.result, n]);
+  const delay = config.data?.params.reveal_delay_secs ?? 900;
 
   const mine = useMemo(() => digsInRound(n, loadMyDigs()), [n]);
   const myTiles = useMemo(() => [...mine.keys()].sort((a, b) => a - b), [mine]);
@@ -166,10 +178,59 @@ export default function RevealScreen() {
           ? `Reveal in ${formatClock(beacon.beacon_time - now)}`
           : "Waiting for the draw…"}
       </p>
-      <p className="text-fog max-w-[420px]">
-        Holes stay; no new digs. The draw comes from a public random beacon nobody can steer, about
-        15 minutes after the round closes.
+      {beacon !== undefined && (
+        <div
+          className="w-full max-w-[420px] h-2 border-2 border-white"
+          role="progressbar"
+          aria-label="Time to the reveal"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={revealProgress(beacon.beacon_time, delay, now)}
+          data-testid="reveal-progress"
+        >
+          <div
+            className="h-full bg-white"
+            style={{ width: `${revealProgress(beacon.beacon_time, delay, now)}%` }}
+          />
+        </div>
+      )}
+      <p className="text-fog max-w-[420px]" data-testid="reveal-why">
+        Why the wait: the draw comes from a public random beacon published about{" "}
+        {Math.round(delay / 60)} minutes after the round closes, so the chain itself can prove every
+        dig was in before anyone could know the treasure tile.
       </p>
+      {board.data !== undefined && board.data.round > n && board.data.status === "open" && (
+        <Link
+          className="zk-dig flex items-center justify-center gap-3"
+          style={{ fontSize: 22, minHeight: 60 }}
+          to="/"
+          data-testid="reveal-dig-next"
+        >
+          <Icon name="shovel" size={22} /> While you wait: dig round {board.data.round}
+        </Link>
+      )}
+      {notice === "default" && (
+        <button
+          type="button"
+          className="underline text-white text-sm"
+          onClick={() => {
+            void askToNotify().then(setNotice);
+          }}
+          data-testid="reveal-notify"
+        >
+          Tell me when it lands
+        </button>
+      )}
+      {notice === "denied" && (
+        <p className="text-fog text-sm" data-testid="reveal-notify-blocked">
+          Notifications are blocked for this site in your browser settings.
+        </p>
+      )}
+      {notice === "granted" && (
+        <p className="text-fog text-sm" data-testid="reveal-notify-on">
+          This browser will tell you when round {n} is revealed (with a sound if sound is on).
+        </p>
+      )}
     </section>
   );
 
