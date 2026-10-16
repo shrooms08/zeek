@@ -1,6 +1,7 @@
 {
   "name": "zeek-web",
   "private": true,
+  "license": "MIT OR Apache-2.0",
   "packageManager": "pnpm@10.33.2",
   "type": "module",
   "scripts": {

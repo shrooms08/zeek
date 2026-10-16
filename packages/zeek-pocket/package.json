@@ -1,6 +1,7 @@
 {
   "name": "@zeek/pocket",
   "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
   "private": true,
   "type": "module",
   "description": "Zeek Pocket: a shielded Zcash testnet wallet that runs in the browser, plus the any-wallet ZIP 321 dig request builder",
