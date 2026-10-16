@@ -29,6 +29,7 @@ import { Loading, Offline } from "../components/ui";
 import { autoPick, cacheStage } from "../lib/digPlan";
 import { loadDigMode, saveDigMode, type DigMode } from "../lib/digMode";
 import { formatZec, zat } from "../lib/money";
+import { roundAcceptsDigs } from "../lib/readiness";
 import { useMedia } from "../lib/useMedia";
 import { prefersReducedMotion, useNow } from "../lib/useNow";
 import { CountUp, PULSE } from "../motion/CountUp";
@@ -149,8 +150,11 @@ export function FieldScreen() {
     if (!draft.tiles.includes(i)) play("pin");
     draft.toggle(i);
   };
+  // Digs stop 4 blocks before the round ends: a payment sent later might
+  // not be mined inside the window (the Pocket refuses it too).
+  const accepting = roundAcceptsDigs(b);
   const dig = () => {
-    if (draft.tiles.length === 0 || !open || diggingOff) return;
+    if (draft.tiles.length === 0 || !accepting || diggingOff) return;
     void navigate(
       unlocked
         ? "/dig/pocket"
@@ -251,8 +255,14 @@ export function FieldScreen() {
       separate={draft.separate}
       message={draft.message}
       campfire={campfire}
-      closed={!open || diggingOff}
-      closedText={diggingOff ? "Digs are not open yet" : undefined}
+      closed={!accepting || diggingOff}
+      closedText={
+        diggingOff
+          ? "Digs are not open yet"
+          : open && !accepting
+            ? `Round ${b.round} is closing · next round soon`
+            : undefined
+      }
       pocketLabel={pocketLabel}
       compact={!desktop}
       onAmount={draft.setAmountEach}

@@ -94,6 +94,10 @@ pub struct Balance {
     pub ready_in_blocks: Option<u32>,
     /// Blocks until everything confirming is spendable.
     pub all_ready_in_blocks: Option<u32>,
+    /// Values of the spendable notes, largest first: payments sent seconds
+    /// apart cannot share a note (an earlier one's change is not spendable
+    /// yet), so a plan of several payments needs this many notes.
+    pub spendable_notes: Vec<u64>,
 }
 
 /// Blocks from `scanned` until a note mined at `height` reaches `needed`
@@ -624,6 +628,7 @@ impl Wallet {
             scanned_height: self.state.scanned.height,
             ready_in_blocks: None,
             all_ready_in_blocks: None,
+            spendable_notes: Vec::new(),
         };
         let scanned = self.state.scanned.height;
         let mut waits: Vec<u32> = Vec::new();
@@ -636,6 +641,7 @@ impl Wallet {
                 b.orchard_pool_zat = add(b.orchard_pool_zat, note.value)?;
             } else if Self::is_spendable(note, target) {
                 b.spendable_zat = add(b.spendable_zat, note.value)?;
+                b.spendable_notes.push(note.value);
             } else {
                 b.pending_zat = add(b.pending_zat, note.value)?;
                 if note.value > 0 {
@@ -660,6 +666,7 @@ impl Wallet {
                 }
             }
         }
+        b.spendable_notes.sort_unstable_by(|a, b| b.cmp(a));
         b.ready_in_blocks = waits.iter().copied().min();
         b.all_ready_in_blocks = waits.iter().copied().max();
         b.total_zat = add(add(b.spendable_zat, b.pending_zat)?, b.orchard_pool_zat)?;

@@ -82,3 +82,36 @@ export const DEPTH_WORDS = [
   "dug a lot",
   "dug the most",
 ] as const;
+
+/**
+ * Whether the Pocket's spendable notes can pay every payment of a plan on
+ * its own: payments sent seconds apart cannot use an earlier one's change
+ * (it needs 3 confirmations), so each needs notes of its own. Notes go to
+ * the largest payments first, largest notes first; a payment's fee grows
+ * with its inputs (ZIP 317: 5,000 per action, actions = max(2, inputs,
+ * outputs)).
+ */
+export function notesCoverPlan(
+  payments: readonly (readonly number[])[],
+  amountEach: Zat,
+  notes: readonly Zat[],
+): { enough: boolean; payments: number; notes: number } {
+  const free = [...notes].sort((a, b) => (a > b ? -1 : a < b ? 1 : 0));
+  const costs = payments
+    .map((p) => ({ tiles: p.length, value: amountEach * BigInt(p.length) }))
+    .sort((a, b) => (a.value > b.value ? -1 : a.value < b.value ? 1 : 0));
+  for (const pay of costs) {
+    let total = 0n;
+    let inputs = 0;
+    const outputs = pay.tiles + 1;
+    const fee = () => MARGINAL_FEE * BigInt(Math.max(2, inputs, outputs));
+    while (total < pay.value + fee()) {
+      const next = free.shift();
+      if (next === undefined)
+        return { enough: false, payments: payments.length, notes: notes.length };
+      total += next;
+      inputs += 1;
+    }
+  }
+  return { enough: true, payments: payments.length, notes: notes.length };
+}

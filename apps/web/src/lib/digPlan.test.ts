@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { autoPick, cacheStage, digTotal, paymentFee, planPayments } from "./digPlan";
+import {
+  autoPick,
+  cacheStage,
+  digTotal,
+  notesCoverPlan,
+  paymentFee,
+  planPayments,
+} from "./digPlan";
 
 describe("dig planning", () => {
   it("splits into payments of up to 6, or one each", () => {
@@ -34,5 +41,28 @@ describe("dig planning", () => {
     expect(cacheStage(100_000_000n)).toBe(1);
     expect(cacheStage(200_000_000n)).toBe(2);
     expect(cacheStage(6_000_000_000n)).toBe(5);
+  });
+});
+
+describe("notes for a plan of separate payments", () => {
+  const plan2 = planPayments([3, 9], true);
+  it("needs one note per payment sent seconds apart", () => {
+    // One note (last dig's change): the second payment would have to wait.
+    expect(notesCoverPlan(plan2, 100_000n, [5_000_000n])).toEqual({
+      enough: false,
+      payments: 2,
+      notes: 1,
+    });
+    expect(notesCoverPlan(plan2, 100_000n, [3_000_000n, 2_000_000n]).enough).toBe(true);
+  });
+
+  it("a note too small for its payment does not count", () => {
+    // 0.001 + 0.0001 fee per payment; the second note covers only 0.0005.
+    expect(notesCoverPlan(plan2, 100_000n, [5_000_000n, 50_000n]).enough).toBe(false);
+  });
+
+  it("one payment can combine notes (fee grows with inputs)", () => {
+    expect(notesCoverPlan([[1, 2, 3]], 1_000_000n, [2_000_000n, 1_100_000n]).enough).toBe(true);
+    expect(notesCoverPlan([[1, 2, 3]], 1_000_000n, [2_000_000n, 1_010_000n]).enough).toBe(false);
   });
 });

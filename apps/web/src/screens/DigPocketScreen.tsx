@@ -1,7 +1,7 @@
 /** Dig with Zeek Pocket: confirm → sealing (per batch) → done / partial / error. */
 
 import { toPocketError } from "@zeek/pocket";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
@@ -12,13 +12,13 @@ import { Icon } from "../components/Icon";
 import { SealRing } from "../components/SealRing";
 import { BatchProgress, Loading, Modal, StepList } from "../components/ui";
 import { useFieldFx } from "../state/fieldFx";
-import { digTotal, MARGINAL_FEE, planPayments, paymentFee } from "../lib/digPlan";
+import { digTotal, MARGINAL_FEE, notesCoverPlan, planPayments, paymentFee } from "../lib/digPlan";
 import { formatZec, toNumber, zat } from "../lib/money";
 import { digReducer, SEAL_STEPS } from "../machines/dig";
 import { useDraft } from "../state/draft";
 import { recordMyDig } from "../state/myDigs";
 import { useBlockSpacing } from "../api/queries";
-import { fitsInRound, readyIn, readySecs, shortfall } from "../lib/readiness";
+import { fitsInRound, readyIn, readySecs, roundAcceptsDigs, shortfall } from "../lib/readiness";
 import { formatClock } from "../lib/time";
 import { play } from "../sound/sound";
 
@@ -46,6 +46,8 @@ export default function DigPocketScreen() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [state, dispatch] = useReducer(digReducer, { kind: "confirm" });
+  // "Dig in round N+1 instead": the round to wait for, while queued.
+  const [nextRound, setNextRound] = useState<number | null>(null);
   const close = () => void navigate("/");
   const fx = useFieldFx();
   const sealing = state.kind === "sealing";
@@ -141,6 +143,23 @@ export default function DigPocketScreen() {
   switch (state.kind) {
     case "idle":
     case "confirm": {
+      const live = board.data;
+      if (nextRound !== null || (live !== undefined && !roundAcceptsDigs(live))) {
+        return (
+          <RoundClosing
+            round={live?.round ?? 0}
+            nextRound={nextRound}
+            onQueue={(n) => {
+              setNextRound(n);
+            }}
+            onOpen={() => {
+              setNextRound(null);
+              void start();
+            }}
+            onClose={close}
+          />
+        );
+      }
       const short = spendable !== undefined && spendable < total.total;
       const sf =
         balance.data === undefined || spendable === undefined
@@ -163,6 +182,16 @@ export default function DigPocketScreen() {
           />
         );
       }
+      const notesOk =
+        balance.data === undefined ||
+        !draft.separate ||
+        total.payments.length < 2 ||
+        notesCoverPlan(
+          total.payments,
+          amountEach,
+          balance.data.spendable_notes.map((v) => zat(v)),
+        ).enough;
+      const readyNotes = balance.data === undefined ? 0 : balance.data.spendable_notes.length;
       if (short) {
         const fits = affordable(spendable, amountEach, draft.separate);
         return (
@@ -262,11 +291,20 @@ export default function DigPocketScreen() {
             From Zeek Pocket · {spendable === undefined ? "…" : formatZec(spendable)} ZEC · round{" "}
             {round ?? "…"}
           </p>
+          {!notesOk && (
+            <NotesShort
+              payments={total.payments.length}
+              notes={readyNotes}
+              onOnePayment={() => {
+                draft.setSeparate(false);
+              }}
+            />
+          )}
           <button
             type="button"
             className="zk-dig flex items-center justify-center gap-3"
             style={{ fontSize: 24, minHeight: 64 }}
-            disabled={tiles.length === 0 || spendable === undefined}
+            disabled={tiles.length === 0 || spendable === undefined || !notesOk}
             onClick={() => void start()}
             data-testid="dig-privately"
           >
@@ -506,6 +544,169 @@ function ChangeOnItsWay({
         </p>
       )}
     </Modal>
+  );
+}
+
+/**
+ * The round can no longer safely take a dig (closed, or fewer than 4 blocks
+ * left): never offer to dig into it. Offers the next round instead, and
+ * sends the dig once that round is open with room.
+ */
+function RoundClosing({
+  round,
+  nextRound,
+  onQueue,
+  onOpen,
+  onClose,
+}: {
+  round: number;
+  nextRound: number | null;
+  onQueue: (round: number) => void;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const board = useBoard();
+  const fired = useRef(false);
+  const live = board.data;
+  useEffect(() => {
+    if (nextRound === null || live === undefined || fired.current) return;
+    if (live.round >= nextRound && roundAcceptsDigs(live)) {
+      fired.current = true;
+      onOpen();
+    }
+  }, [nextRound, live, onOpen]);
+  if (nextRound !== null) {
+    return (
+      <Modal title={`Waiting for round ${nextRound}`} onClose={onClose} testId="dig-next-round">
+        <p className="text-white" role="status">
+          Your dig goes into round {nextRound} as soon as it opens. Keep this open.
+        </p>
+      </Modal>
+    );
+  }
+  return (
+    <Modal title={`Round ${round} is closing`} onClose={onClose} testId="dig-round-closing">
+      <p className="text-mist mb-5">
+        A dig sent now might not be mined before round {round} ends, so it can’t go into round{" "}
+        {round}. Nothing has been sent.
+      </p>
+      <button
+        type="button"
+        className="zk-dig flex items-center justify-center gap-3 w-full"
+        style={{ fontSize: 22, minHeight: 60 }}
+        onClick={() => {
+          onQueue(round + 1);
+        }}
+        data-testid="dig-next-round-button"
+      >
+        <Icon name="shovel" size={22} /> Dig in round {round + 1} instead
+      </button>
+    </Modal>
+  );
+}
+
+/**
+ * "Dig separately" sends one payment per tile, seconds apart, and a payment
+ * cannot use an earlier one's change until it confirms: with fewer
+ * spendable notes than payments, say so and offer one payment, or getting
+ * the coins ready first (a split) when the balance allows one.
+ */
+export function NotesShort({
+  payments,
+  notes,
+  onOnePayment,
+}: {
+  payments: number;
+  notes: number;
+  onOnePayment: () => void;
+}) {
+  const { pocket } = usePocket();
+  const client = useQueryClient();
+  const balance = usePocketBalance();
+  const spacing = useBlockSpacing();
+  const plan = useQuery({
+    queryKey: ["pocket", "split-plan", notes],
+    queryFn: async () => (await pocket()).splitPlan(),
+  });
+  const [splitting, setSplitting] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  // While the split confirms, keep the notes current.
+  useEffect(() => {
+    if (splitting !== "sent") return;
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          await (await pocket()).sync();
+        } finally {
+          void client.invalidateQueries({ queryKey: ["pocket"] });
+        }
+      })();
+    }, 20_000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [splitting, pocket, client]);
+  const ready = balance.data?.all_ready_in_blocks ?? null;
+  return (
+    <section
+      className="border-2 border-white p-4 mb-4"
+      aria-label="Not enough coins to dig separately"
+      data-testid="dig-notes-short"
+    >
+      <p className="text-white font-extrabold mb-2">Not enough coins to dig separately</p>
+      <p className="text-mist mb-4" data-testid="notes-short-text">
+        Digging separately sends {payments} payments a few seconds apart, and each needs a coin of
+        its own: a payment can’t spend the change of the one before it until that change confirms.
+        Your Pocket has {notes} {notes === 1 ? "coin" : "coins"} ready.
+      </p>
+      {splitting === "sent" ? (
+        <p className="text-white mb-4" role="status" data-testid="notes-splitting">
+          Getting your coins ready
+          {ready === null ? "." : `, ${readyIn(ready, spacing)}.`} This screen moves on by itself
+          then.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onOnePayment}
+            data-testid="notes-one-payment"
+          >
+            Send as one payment
+          </button>
+          {plan.data !== null && plan.data !== undefined && (
+            <button
+              type="button"
+              className="btn"
+              disabled={splitting === "sending"}
+              onClick={() => {
+                setSplitting("sending");
+                void (async () => {
+                  try {
+                    await (await pocket()).prepareCoins();
+                    setSplitting("sent");
+                  } catch {
+                    setSplitting("failed");
+                  } finally {
+                    void client.invalidateQueries({ queryKey: ["pocket"] });
+                  }
+                })();
+              }}
+              data-testid="notes-split"
+            >
+              {splitting === "sending"
+                ? "Getting your coins ready…"
+                : `Get my coins ready first (${plan.data.parts} coins, fee ${formatZec(zat(plan.data.feeZat), { decimals: 8 })})`}
+            </button>
+          )}
+          {splitting === "failed" && (
+            <p className="text-white text-sm" role="alert">
+              Could not get your coins ready. Send as one payment instead.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

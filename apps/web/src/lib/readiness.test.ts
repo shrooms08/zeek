@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitsInRound, readyIn, shortfall, spacingSecs } from "./readiness";
+import { fitsInRound, readyIn, roundAcceptsDigs, shortfall, spacingSecs } from "./readiness";
 
 describe("readiness", () => {
   it("uses the recent block rate, else the target spacing", () => {
@@ -27,5 +27,15 @@ describe("readiness", () => {
     expect(fitsInRound(3, 7)).toBe(true);
     expect(fitsInRound(3, 6)).toBe(false);
     expect(fitsInRound(10, 12)).toBe(false);
+  });
+});
+
+describe("whether a round still takes digs", () => {
+  it("needs the round open with at least 4 blocks left", () => {
+    expect(roundAcceptsDigs({ status: "open", blocks_remaining: 12 })).toBe(true);
+    expect(roundAcceptsDigs({ status: "open", blocks_remaining: 4 })).toBe(true);
+    expect(roundAcceptsDigs({ status: "open", blocks_remaining: 3 })).toBe(false);
+    expect(roundAcceptsDigs({ status: "open", blocks_remaining: 0 })).toBe(false);
+    expect(roundAcceptsDigs({ status: "closed", blocks_remaining: 20 })).toBe(false);
   });
 });

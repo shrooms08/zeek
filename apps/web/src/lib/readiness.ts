@@ -54,3 +54,12 @@ export function shortfall(
 export function fitsInRound(readyBlocks: number, blocksRemaining: number): boolean {
   return blocksRemaining - readyBlocks >= DIG_MARGIN_BLOCKS;
 }
+
+/**
+ * Whether a dig can still go into this round: it must be open with at least
+ * DIG_MARGIN_BLOCKS left (the Pocket refuses with fewer, since a payment
+ * sent later may not be mined inside the window).
+ */
+export function roundAcceptsDigs(board: { status: string; blocks_remaining: number }): boolean {
+  return board.status === "open" && board.blocks_remaining >= DIG_MARGIN_BLOCKS;
+}

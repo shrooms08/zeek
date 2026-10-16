@@ -16,6 +16,17 @@ export interface Balance {
   ready_in_blocks: number | null;
   /** Blocks until everything confirming is spendable. */
   all_ready_in_blocks: number | null;
+  /** Values of the spendable notes, largest first (one per payment sent seconds apart). */
+  spendable_notes: number[];
+}
+
+/** A split the Pocket would make now (`plan_split`). */
+export interface SplitPlan {
+  inputs: number;
+  totalZat: number;
+  parts: number;
+  partZat: number;
+  feeZat: number;
 }
 
 /** A split the Pocket made ("Getting your coins ready"). */

@@ -47,6 +47,7 @@ import type {
   VerifyProgress,
   WinVerdict,
   OfflineReport,
+  SplitPlan,
 } from "./types.js";
 
 /** Blocks fetched per relay request while syncing. */
@@ -645,6 +646,9 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   },
   history() {
     return Promise.resolve(needCore().history() as HistoryEntry[]);
+  },
+  splitPlan() {
+    return Promise.resolve(needCore().splitPlan() as SplitPlan | null);
   },
   async prepareCoins(_arg, id) {
     const c = needCore();

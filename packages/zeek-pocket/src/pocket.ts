@@ -35,6 +35,7 @@ import type {
   WinVerdict,
   OfflineReport,
   SplitResult,
+  SplitPlan,
 } from "./types.js";
 
 /** Progress callbacks of one call. */
@@ -260,6 +261,11 @@ export class Pocket {
    */
   prepareCoins(onProgress?: (progress: SyncProgress) => void): Promise<SplitResult | null> {
     return this.call("prepareCoins", undefined, onProgress);
+  }
+
+  /** The split `prepareCoins` would make now, or null (nothing is sent). */
+  splitPlan(): Promise<SplitPlan | null> {
+    return this.call("splitPlan", undefined);
   }
 
   /** Returns the 24-word phrase after checking the passphrase. */
