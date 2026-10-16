@@ -1,0 +1,31 @@
+{
+  "started": "2026-10-16T07:40:44.226Z",
+  "funding": "test-wallets",
+  "pocketTxid": "4ea3b5532e06134f237d273a6aaa6966878a9c288edca94c41ac1cb98f68525a",
+  "comingText": "Ready in about 4 min (9 more blocks).",
+  "balanceWhileConfirming": "0.0279ZEC",
+  "spendableWhileConfirming": "0",
+  "arrivedSpendable": "0.0449",
+  "split": "Getting your coins ready · 2 parts",
+  "afterSplitSpendable": "0.0449",
+  "round": 344,
+  "digs": [
+    {
+      "tile": 2,
+      "txids": [
+        "cefde0afbb1d90d30dfc0671a95593bdfa9021d80b774d8cda759fe5f717fc6f"
+      ]
+    },
+    {
+      "tile": 7,
+      "txids": [
+        "d69a1903b0421829404b061be9b63b0bfbe0bb600a34abe8c7ea928ef748bc5e"
+      ]
+    }
+  ],
+  "changeCountdown": "1:15",
+  "changeChoice": "queue offered",
+  "roundAfter": 344,
+  "changeSeen": true,
+  "finished": "2026-10-16T08:00:01.580Z"
+}
