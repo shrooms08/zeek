@@ -166,6 +166,108 @@ pub fn select(
     })
 }
 
+/// Smallest part a split makes: 0.02 ZEC covers a typical dig (for
+/// example 3 tiles at 0.005, or 15 at the 0.001 minimum, with fees) with
+/// room to spare. Below two such parts there is nothing to gain.
+pub const SPLIT_PART_MIN_ZAT: u64 = 2_000_000;
+/// Most parts a split makes. Under ZIP 317 a transaction costs 5,000
+/// zatoshis per action and a split of one note into k parts has k actions,
+/// so 4 parts cost 20,000 zatoshis (0.0002 ZEC); more would mostly make
+/// later digs spend extra inputs.
+pub const SPLIT_MAX_PARTS: u64 = 4;
+/// A split may cost at most this share of what it splits (1 %).
+pub const SPLIT_MAX_FEE_DIVISOR: u64 = 100;
+
+/// A planned split: `parts` notes of `part_zat` (the last one also takes the
+/// remainder) from `total_zat` of spendable notes, for `fee_zat`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitPlan {
+    pub inputs: usize,
+    pub total_zat: u64,
+    pub parts: u64,
+    pub part_zat: u64,
+    pub fee_zat: u64,
+}
+
+/// Whether and how to split `notes` (the spendable notes, any order).
+///
+/// A split only pays when it lets a second dig in the same round go ahead
+/// without waiting for the first one's change, so: never when two notes of
+/// at least [`SPLIT_PART_MIN_ZAT`] already exist (a second dig already has
+/// one), never into fewer than two such parts, and never when the fee would
+/// exceed 1 % of the amount.
+pub fn plan_split(notes: &[&StoredNote]) -> Result<Option<SplitPlan>, PocketError> {
+    let usable = notes
+        .iter()
+        .filter(|n| n.value >= SPLIT_PART_MIN_ZAT)
+        .count();
+    if usable >= 2 || notes.is_empty() {
+        return Ok(None);
+    }
+    let total = notes
+        .iter()
+        .try_fold(0u64, |acc, n| acc.checked_add(n.value))
+        .ok_or(PocketError::Overflow("split total"))?;
+    let mut parts = (total / SPLIT_PART_MIN_ZAT).min(SPLIT_MAX_PARTS);
+    while parts >= 2 {
+        let outputs = usize::try_from(parts).map_err(|_| PocketError::Overflow("parts"))?;
+        let fee = zip317_fee(notes.len(), outputs)?;
+        let part = total.saturating_sub(fee) / parts;
+        if part >= SPLIT_PART_MIN_ZAT {
+            if fee.saturating_mul(SPLIT_MAX_FEE_DIVISOR) > total {
+                return Ok(None);
+            }
+            return Ok(Some(SplitPlan {
+                inputs: notes.len(),
+                total_zat: total,
+                parts,
+                part_zat: part,
+                fee_zat: fee,
+            }));
+        }
+        parts -= 1;
+    }
+    Ok(None)
+}
+
+/// Which spendable notes a transaction uses.
+enum InputChoice {
+    /// The fewest, largest first, that cover it (payments).
+    Fewest,
+    /// All of them (a split).
+    All,
+}
+
+/// Spends every note in `notes` to pay `outputs_total` over `payments`
+/// outputs plus one change output.
+fn select_all(
+    notes: &[&StoredNote],
+    outputs_total: u64,
+    payments: usize,
+) -> Result<(Vec<StoredNote>, u64, u64), PocketError> {
+    let total = notes
+        .iter()
+        .try_fold(0u64, |acc, n| acc.checked_add(n.value))
+        .ok_or(PocketError::Overflow("inputs"))?;
+    let fee = zip317_fee(notes.len(), payments + 1)?;
+    let needed = outputs_total
+        .checked_add(fee)
+        .ok_or(PocketError::Overflow("needed"))?;
+    if total < needed || notes.is_empty() {
+        return Err(PocketError::InsufficientFunds {
+            needed,
+            spendable: total,
+            pending: 0,
+        });
+    }
+    Ok((
+        notes.iter().map(|n| (*n).clone()).collect(),
+        fee,
+        total - needed,
+    ))
+}
+
 struct Output {
     recipient: orchard::Address,
     value: u64,
@@ -401,6 +503,15 @@ impl Wallet {
         outputs: Vec<Output>,
         kind: OutgoingKind,
     ) -> Result<BuiltTransaction, PocketError> {
+        self.build_from(outputs, kind, InputChoice::Fewest)
+    }
+
+    fn build_from(
+        &mut self,
+        outputs: Vec<Output>,
+        kind: OutgoingKind,
+        choice: InputChoice,
+    ) -> Result<BuiltTransaction, PocketError> {
         let target = self.scanned_height() + 1;
         let anchor_height = target - TRUSTED_CONFIRMATIONS;
         let outputs_total = outputs
@@ -409,7 +520,10 @@ impl Wallet {
             .ok_or(PocketError::Overflow("outputs"))?;
         let pending = self.balance()?.pending_zat;
         let candidates = self.spendable_notes(target);
-        let (inputs, fee, change) = select(&candidates, outputs_total, outputs.len(), pending)?;
+        let (inputs, fee, change) = match choice {
+            InputChoice::Fewest => select(&candidates, outputs_total, outputs.len(), pending)?,
+            InputChoice::All => select_all(&candidates, outputs_total, outputs.len())?,
+        };
 
         let anchor_id = BlockHeight::from_u32(anchor_height);
         let root = self
@@ -533,6 +647,43 @@ impl Wallet {
         })
     }
 
+    /// The split the wallet would make now, if any (see [`plan_split`]).
+    pub fn split_plan(&self) -> Result<Option<SplitPlan>, PocketError> {
+        let target = self.scanned_height() + 1;
+        plan_split(&self.spendable_notes(target))
+    }
+
+    /// Builds, proves and signs the split of [`Wallet::split_plan`]: every
+    /// spendable note into `parts` notes at this wallet's own change
+    /// address, so they confirm as trusted change (3 blocks).
+    pub fn build_split(&mut self, chain_tip: u32) -> Result<BuiltTransaction, PocketError> {
+        self.require_synced(chain_tip)?;
+        let plan = self
+            .split_plan()?
+            .ok_or_else(|| PocketError::InvalidRequest("nothing worth splitting".into()))?;
+        // parts − 1 outputs here; the change output carries the last part
+        // and the remainder (all spendable notes are spent).
+        let count = usize::try_from(plan.parts - 1).map_err(|_| PocketError::Overflow("parts"))?;
+        let outputs = (0..count)
+            .map(|_| Output {
+                recipient: self.keys.change_address(),
+                value: plan.part_zat,
+                memo: MemoBytes::empty(),
+                scope: Scope::Internal,
+            })
+            .collect();
+        let parts = u32::try_from(plan.parts).map_err(|_| PocketError::Overflow("parts"))?;
+        let built = self.build_from(
+            outputs,
+            OutgoingKind::Split {
+                parts,
+                part_zat: plan.part_zat,
+            },
+            InputChoice::All,
+        )?;
+        Ok(built)
+    }
+
     /// The wallet's receive address (diversifier index 0).
     pub fn receive_address(&self) -> Result<String, PocketError> {
         encode_address(&self.keys.address(0))
@@ -574,6 +725,62 @@ mod tests {
             nullifier: [0; 32],
             spent: None,
             memo: None,
+        }
+    }
+
+    fn plan(values: &[u64]) -> Option<SplitPlan> {
+        let notes: Vec<StoredNote> = values.iter().map(|v| note(*v)).collect();
+        let refs: Vec<&StoredNote> = notes.iter().collect();
+        plan_split(&refs).expect("plan")
+    }
+
+    #[test]
+    fn a_faucet_deposit_splits_into_four() {
+        // The faucet's 0.125: four parts of 0.03120000, for 20,000 zatoshis.
+        let p = plan(&[12_500_000]).expect("split");
+        assert_eq!(p.parts, 4);
+        assert_eq!(p.fee_zat, 20_000);
+        assert_eq!(p.part_zat, (12_500_000 - 20_000) / 4);
+        assert!(p.part_zat >= SPLIT_PART_MIN_ZAT);
+    }
+
+    #[test]
+    fn smaller_balances_split_into_fewer_parts_or_not_at_all() {
+        assert_eq!(plan(&[6_000_000]).expect("split").parts, 2);
+        assert_eq!(plan(&[7_000_000]).expect("split").parts, 3);
+        // 0.0399: two parts would be under 0.02 after the fee.
+        assert_eq!(plan(&[3_990_000]), None);
+        assert_eq!(plan(&[1_000_000]), None);
+        assert_eq!(plan(&[]), None);
+    }
+
+    #[test]
+    fn never_splits_when_a_second_note_is_already_there() {
+        assert_eq!(plan(&[10_000_000, 2_000_000]), None);
+        assert_eq!(plan(&[3_000_000, 3_000_000, 500_000]), None);
+    }
+
+    #[test]
+    fn small_change_is_merged_into_the_split() {
+        let p = plan(&[10_000_000, 300_000, 200_000]).expect("split");
+        assert_eq!(p.inputs, 3);
+        assert_eq!(p.total_zat, 10_500_000);
+        assert_eq!(p.parts, 4);
+        // Three inputs, four outputs: still 4 actions.
+        assert_eq!(p.fee_zat, 20_000);
+    }
+
+    #[test]
+    fn never_costs_more_than_one_percent() {
+        // Many dust inputs push the action count (and fee) up.
+        let mut values = vec![4_200_000];
+        values.extend(std::iter::repeat_n(5_000, 60));
+        assert_eq!(plan(&values), None);
+        for total in [4_100_000u64, 8_000_000, 12_500_000, 50_000_000] {
+            if let Some(p) = plan(&[total]) {
+                assert!(p.fee_zat * SPLIT_MAX_FEE_DIVISOR <= p.total_zat, "{total}");
+                assert!(p.part_zat * p.parts + p.fee_zat <= p.total_zat);
+            }
         }
     }
 

@@ -646,6 +646,16 @@ const handlers: { [M in MethodName]: Handler<M> } = {
   history() {
     return Promise.resolve(needCore().history() as HistoryEntry[]);
   },
+  async prepareCoins(_arg, id) {
+    const c = needCore();
+    if (c.splitPlan() === null) return null;
+    const tip = await syncToTip(id);
+    const plan = c.splitPlan() as { parts: number; partZat: number; feeZat: number } | null;
+    if (plan === null) return null;
+    const built = c.buildSplit(tip) as BuiltTransaction;
+    await broadcastBuilt(c, built);
+    return { txid: built.txid, parts: plan.parts, partZat: plan.partZat, feeZat: built.feeZat };
+  },
   async confirmPassphrase({ passphrase }) {
     const c = needCore();
     const stored = await storage.load();

@@ -87,6 +87,23 @@ pub struct Balance {
     pub orchard_pool_zat: u64,
     pub total_zat: u64,
     pub scanned_height: u32,
+    /// Blocks until the first confirming amount becomes spendable (by this
+    /// wallet's policy: received notes 10 confirmations, its own change 3,
+    /// and a transaction not mined yet one block more); None if nothing is
+    /// confirming.
+    pub ready_in_blocks: Option<u32>,
+    /// Blocks until everything confirming is spendable.
+    pub all_ready_in_blocks: Option<u32>,
+}
+
+/// Blocks from `scanned` until a note mined at `height` reaches `needed`
+/// confirmations (0 when it already has them). Spendable means
+/// `scanned + 1 − height ≥ needed`.
+pub fn blocks_until_spendable(height: u32, needed: u32, scanned: u32) -> u32 {
+    height
+        .saturating_add(needed)
+        .saturating_sub(1)
+        .saturating_sub(scanned)
 }
 
 /// One history line.
@@ -605,7 +622,11 @@ impl Wallet {
             orchard_pool_zat: 0,
             total_zat: 0,
             scanned_height: self.state.scanned.height,
+            ready_in_blocks: None,
+            all_ready_in_blocks: None,
         };
+        let scanned = self.state.scanned.height;
+        let mut waits: Vec<u32> = Vec::new();
         let add = |a: u64, v: u64| a.checked_add(v).ok_or(PocketError::Overflow("balance"));
         for note in self.state.notes.iter().filter(|n| n.spent.is_none()) {
             if reserved.contains(&(note.txid.clone(), note.action_index)) {
@@ -617,6 +638,13 @@ impl Wallet {
                 b.spendable_zat = add(b.spendable_zat, note.value)?;
             } else {
                 b.pending_zat = add(b.pending_zat, note.value)?;
+                if note.value > 0 {
+                    let needed = match note.scope {
+                        NoteScope::External => UNTRUSTED_CONFIRMATIONS,
+                        NoteScope::Internal => TRUSTED_CONFIRMATIONS,
+                    };
+                    waits.push(blocks_until_spendable(note.height, needed, scanned).max(1));
+                }
             }
         }
         for out in &self.state.outgoing {
@@ -624,9 +652,16 @@ impl Wallet {
                 out.status,
                 OutgoingStatus::Built | OutgoingStatus::Broadcast
             ) {
-                b.pending_zat = add(b.pending_zat, out.change_zat)?;
+                let back = add(out.change_zat, out.kind.self_outputs_zat()?)?;
+                b.pending_zat = add(b.pending_zat, back)?;
+                if back > 0 {
+                    // Mined in the next block at best, then its confirmations.
+                    waits.push(TRUSTED_CONFIRMATIONS);
+                }
             }
         }
+        b.ready_in_blocks = waits.iter().copied().min();
+        b.all_ready_in_blocks = waits.iter().copied().max();
         b.total_zat = add(add(b.spendable_zat, b.pending_zat)?, b.orchard_pool_zat)?;
         Ok(b)
     }
@@ -690,5 +725,21 @@ impl Wallet {
             out.status = OutgoingStatus::Expired;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    #[test]
+    fn blocks_until_spendable_follows_the_confirmation_policy() {
+        // Mined at 100: 10 confirmations reached once scanned is 109.
+        assert_eq!(blocks_until_spendable(100, UNTRUSTED_CONFIRMATIONS, 100), 9);
+        assert_eq!(blocks_until_spendable(100, UNTRUSTED_CONFIRMATIONS, 108), 1);
+        assert_eq!(blocks_until_spendable(100, UNTRUSTED_CONFIRMATIONS, 109), 0);
+        // Own change: 3 confirmations.
+        assert_eq!(blocks_until_spendable(100, TRUSTED_CONFIRMATIONS, 100), 2);
+        assert_eq!(blocks_until_spendable(100, TRUSTED_CONFIRMATIONS, 102), 0);
     }
 }

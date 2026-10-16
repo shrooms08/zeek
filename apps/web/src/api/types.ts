@@ -8,6 +8,8 @@ export interface Window {
 }
 
 export interface Board {
+  /** Mean spacing of the last 20 blocks (s); absent from older engines. */
+  recent_spacing_secs?: number | null;
   tip_height: number;
   tip_time: number;
   chain_tip: number;
@@ -142,6 +144,7 @@ export interface EngineConfig {
     marginal_fee_zat: number;
     blocks_per_round: number;
     target_spacing_secs: number;
+    reveal_delay_secs?: number;
     genesis_height: number;
     rake_bps: number;
     cache_odds: number;

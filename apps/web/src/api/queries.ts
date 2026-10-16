@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useContext } from "react";
+import { spacingSecs } from "../lib/readiness";
 import { engine, EngineError } from "./engine";
 import { LiveContext } from "./LiveProvider";
 
@@ -95,4 +96,11 @@ export function useCampfire(includeHidden: boolean) {
     queryFn: () => engine.campfire(includeHidden),
     refetchInterval: useFallbackInterval(20_000),
   });
+}
+
+/** Seconds per block to estimate waits with: the recent rate, else the target. */
+export function useBlockSpacing(): number {
+  const board = useBoard();
+  const config = useConfig();
+  return spacingSecs(board.data?.recent_spacing_secs, config.data?.params.target_spacing_secs);
 }

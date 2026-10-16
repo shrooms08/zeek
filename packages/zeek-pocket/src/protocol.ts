@@ -16,6 +16,7 @@ import type {
   WinProofResult,
   WinVerdict,
   OfflineReport,
+  SplitResult,
 } from "./types.js";
 
 export interface WalletStatus {
@@ -97,6 +98,7 @@ export interface Methods {
   history: [undefined, HistoryEntry[]];
   exportSeed: [{ passphrase: string }, string];
   confirmPassphrase: [{ passphrase: string }, true];
+  prepareCoins: [undefined, SplitResult | null];
   buildDigRequest: [DigRequestOptions, Omit<AnyWalletDig, "qrSvg">];
   shout: [ShoutOptions, SendResult];
   buildShoutRequest: [ShoutRequestOptions, Omit<AnyWalletShout, "qrSvg">];

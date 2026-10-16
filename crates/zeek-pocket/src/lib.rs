@@ -464,6 +464,18 @@ impl PocketCore {
         }))
     }
 
+    /// The split this wallet would make now (`SplitPlan` JSON), or null.
+    #[wasm_bindgen(js_name = splitPlan)]
+    pub fn split_plan(&self) -> Result<JsValue, JsValue> {
+        to_js(&self.wallet.split_plan().map_err(js_err)?)
+    }
+
+    /// Builds the split of `splitPlan` (a shielded self-send) at `chain_tip`.
+    #[wasm_bindgen(js_name = buildSplit)]
+    pub fn build_split(&mut self, chain_tip: u32) -> Result<JsValue, JsValue> {
+        to_js(&self.wallet.build_split(chain_tip).map_err(js_err)?)
+    }
+
     /// Builds a send: JSON `{ to, amountZat, memo?, chainTip }`.
     #[wasm_bindgen(js_name = buildSend)]
     pub fn build_send(&mut self, request: &str) -> Result<JsValue, JsValue> {

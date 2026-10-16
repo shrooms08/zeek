@@ -208,3 +208,50 @@ treasure payout of `round` reached this wallet, submits it to the engine
 (which verifies it before storing) and returns its id and a share URL
 (`?winproof=<id>`), which the harness verifies on load. See
 `docs/prove-a-win.md`.
+
+## Phase 8c: confirming coins and note splitting
+
+### When coins become spendable
+
+The Pocket spends a note only after enough confirmations (ZIP 315): coins
+received from elsewhere need 10, its own change 3. `Balance` now carries
+`ready_in_blocks` (until the first confirming amount is spendable) and
+`all_ready_in_blocks` (until all of it is), from those counts; a
+transaction not mined yet adds one block. The app turns blocks into minutes
+with the engine board's `recent_spacing_secs` (the mean spacing of the last
+20 blocks), falling back to the 25 s target.
+
+- The wallet's headline is the total. Under it, "Ready to dig" shows the
+  exact spendable amount, and "Confirming" shows the rest and when it is
+  ready.
+- The faucet card says "Test coins on the way · ready in about N min" until
+  something is spendable, and "You can dig now" only then.
+- A dig that is short only because change is confirming says "Your change
+  is on its way" with a countdown, never "Add ZEC". It offers to send the
+  dig as soon as the change is ready if the round will still have the 4
+  blocks a dig needs; otherwise it says the dig must wait for the next
+  round.
+
+### Note splitting ("Getting your coins ready")
+
+After a dig, the Pocket's change needs 3 confirmations (about a minute and a
+half on testnet), and if all the money sat in one note, a second dig in the
+same round has to wait for it. After each sync on the wallet screen,
+`prepareCoins` therefore checks `plan_split` (`crates/zeek-pocket/src/tx.rs`)
+and, when it says so, splits the balance with a shielded self-send to the
+Pocket's own change address.
+
+| Rule | Value | Why |
+| --- | --- | --- |
+| Smallest part | 0.02 ZEC | Covers a typical dig with fees (3 tiles at 0.005, 15 at the 0.001 minimum) |
+| Parts | 2 to 4 | ZIP 317 charges 5,000 zatoshis per action; one note into k parts is k actions, so 4 parts cost 0.0002 ZEC. More parts mostly make later digs spend extra inputs. |
+| Only when | fewer than two notes of at least 0.02 exist | With two, a second dig already has its own note |
+| Fee cap | at most 1 % of the amount | Never pay more than it helps (many dust inputs raise the action count) |
+
+The faucet's 0.125 becomes four notes of 0.0312 for 0.0002. The split itself
+needs its 3 confirmations, so right after a deposit the coins are ready about
+a minute later than they would be unsplit; after that, a second dig in a
+round, and Pro auto-dig's next round, use another note instead of waiting
+for change. A split never runs inside a dig, a send or an auto-dig (only
+after the wallet screen's own sync), and it appears in the history as
+"Getting your coins ready".

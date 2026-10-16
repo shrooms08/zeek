@@ -169,9 +169,9 @@ export async function synced(page: Page): Promise<void> {
   });
 }
 
-/** Spendable balance in zatoshis, read off the wallet screen. */
+/** Spendable balance in zatoshis, read off the wallet screen (exact). */
 export async function balanceZat(page: Page): Promise<bigint> {
-  const text = (await page.getByTestId("wallet-balance").textContent()) ?? "";
+  const text = (await page.getByTestId("wallet-spendable").textContent()) ?? "";
   const match = /([0-9]+)(?:\.([0-9]+))?/.exec(text.replace(/,/g, ""));
   if (match === null) throw new Error(`no balance in "${text}"`);
   return (

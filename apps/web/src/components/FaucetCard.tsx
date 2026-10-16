@@ -1,15 +1,20 @@
 /**
  * "Get free test coins" (testnet only): how to fill a new Pocket from the
- * Valar Group testnet faucet, then "waiting for coins" until they arrive.
+ * Valar Group testnet faucet, then follows the coins:
+ *
+ *   waiting   nothing seen yet ("Waiting for coins")
+ *   coming    seen but confirming: "Test coins on the way · ready in about
+ *             N min", from the Pocket's own confirmation count and the
+ *             chain's recent block rate
+ *   arrived   spendable: "You can dig now" (only when spendable > 0)
  *
  * The faucet's page has no way to receive an address from a link, so the
- * card copies the address first and says so. While waiting, the wallet
- * re-syncs every 30 s; the wait ends when the balance (spendable plus
- * arriving) rises above where it was when the faucet was opened. The wait is
- * remembered in this browser only.
+ * card copies the address first and says so. While following, the wallet
+ * re-syncs every 30 s. The wait is remembered in this browser only.
  */
 
 import { useEffect, useRef, useState } from "react";
+import { readyIn } from "../lib/readiness";
 import { Icon } from "./Icon";
 import { CopyButton } from "./ui";
 
@@ -49,43 +54,50 @@ function saveWait(wait: Wait | null) {
 
 export function FaucetCard({
   address,
-  total,
+  spendable,
+  pending,
+  readyInBlocks,
+  spacing,
   sync,
 }: {
   address: string;
-  /** Spendable plus arriving, in zatoshis; undefined until known. */
-  total: bigint | undefined;
+  /** Spendable now, in zatoshis; undefined until known. */
+  spendable: bigint | undefined;
+  /** Confirming, in zatoshis. */
+  pending: bigint | undefined;
+  /** Blocks until the first confirming coins are spendable (the Pocket's policy). */
+  readyInBlocks: number | null;
+  /** Seconds per block (recent rate). */
+  spacing: number;
   sync: () => Promise<void>;
 }) {
   const [wait, setWait] = useState<Wait | null>(loadWait);
-  const [arrived, setArrived] = useState(false);
+  // Coins seen in this visit: the card follows them until they are spendable.
+  const [seen, setSeen] = useState(false);
   // The latest sync, without restarting the timer on every render.
   const syncRef = useRef(sync);
   syncRef.current = sync;
+  const total = spendable === undefined || pending === undefined ? undefined : spendable + pending;
 
   useEffect(() => {
     if (wait === null || total === undefined) return;
     if (total > BigInt(wait.from)) {
       saveWait(null);
       setWait(null);
-      setArrived(true);
+      setSeen(true);
     }
   }, [wait, total]);
 
+  const following = wait !== null || (seen && spendable === 0n);
   useEffect(() => {
-    if (wait === null) return;
+    if (!following) return;
     const id = window.setInterval(() => void syncRef.current(), RESYNC_MS);
     return () => {
       window.clearInterval(id);
     };
-  }, [wait]);
+  }, [following]);
 
-  if (wait === null && !arrived && (total === undefined || total > 0n)) {
-    // A funded Pocket does not need the faucet.
-    return null;
-  }
-
-  if (arrived) {
+  if (seen && spendable !== undefined && spendable > 0n) {
     return (
       <section className="zk-stat p-5" aria-label="Test coins" data-testid="faucet-arrived">
         <div className="label flex items-center gap-2">
@@ -94,6 +106,37 @@ export function FaucetCard({
         <p className="text-mist mt-2">You can dig now.</p>
       </section>
     );
+  }
+  if (seen) {
+    return (
+      <section
+        className="zk-stat p-5"
+        aria-label="Test coins"
+        aria-live="polite"
+        data-testid="faucet-coming"
+      >
+        <div className="label flex items-center gap-2">
+          <span className="zk-hourglass inline-flex">
+            <Icon name="hourglass" size={18} />
+          </span>
+          Test coins on the way
+        </div>
+        <p className="text-white mt-2" data-testid="faucet-ready-in">
+          {readyInBlocks === null
+            ? "Confirming."
+            : `Ready ${readyIn(readyInBlocks, spacing)} (${readyInBlocks} more ${
+                readyInBlocks === 1 ? "block" : "blocks"
+              }).`}
+        </p>
+        <p className="text-fog text-sm mt-1">
+          New coins need 10 blocks on the chain before they can be spent.
+        </p>
+      </section>
+    );
+  }
+  if (wait === null && (total === undefined || total > 0n)) {
+    // A funded Pocket does not need the faucet.
+    return null;
   }
   if (wait !== null) {
     return (
@@ -110,8 +153,8 @@ export function FaucetCard({
           Waiting for coins
         </div>
         <p className="text-mist mt-2">
-          Checking every 30 seconds. Faucet coins show up as “arriving” once the faucet sends them,
-          and can be spent once they confirm, a few minutes later.
+          Checking every 30 seconds. Faucet coins show up here once a block carries them; then they
+          need 10 blocks before they can be spent.
         </p>
         <button
           type="button"

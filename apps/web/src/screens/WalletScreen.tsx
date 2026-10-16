@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance, usePocketHistory } from "../api/pocketQueries";
-import { useConfig } from "../api/queries";
+import { useBlockSpacing, useConfig } from "../api/queries";
 import { FaucetCard } from "../components/FaucetCard";
 import { motion, useReducedMotion } from "framer-motion";
 import { Zeb } from "../art/Characters";
@@ -17,6 +17,7 @@ import { EASE } from "../motion/tokens";
 import { checkPayoutAddress, shortAddress } from "../lib/address";
 import { formatZec, parseZec, toNumber, zat } from "../lib/money";
 import { browserClearEnv, clearIfUnchanged, CLEAR_AFTER_MS } from "../lib/clipboard";
+import { readyIn } from "../lib/readiness";
 import { checkPositions, passphraseStrength } from "../lib/passphrase";
 import { formatTimeOfDay } from "../lib/time";
 import { useNow } from "../lib/useNow";
@@ -513,6 +514,13 @@ function historyLabel(e: HistoryEntry): {
       amount: -(zat(k.shout.amount_zat) + zat(e.fee_zat)),
       time: e.status,
     };
+  if ("split" in k)
+    return {
+      icon: "split",
+      label: `Getting your coins ready · ${k.split.parts} parts, so several digs can go in one round`,
+      amount: -zat(e.fee_zat),
+      time: e.status === "mined" ? `block ${e.mined_height ?? e.target_height}` : e.status,
+    };
   return {
     icon: "up2",
     label: k.send.memo === null ? "Withdrawn" : `Withdrawn · ${k.send.memo}`,
@@ -677,6 +685,13 @@ function Home() {
         });
       });
       dispatch({ type: "synced" });
+      // A deposit large enough to dig several times a round is split into a
+      // few notes (shown as "Getting your coins ready"); never during a dig.
+      try {
+        await (await pocket()).prepareCoins();
+      } catch (err) {
+        setSyncError(`Could not get your coins ready: ${toPocketError(err).message}`);
+      }
     } catch (err) {
       dispatch({ type: "failed", message: toPocketError(err).message });
       setSyncError(toPocketError(err).message);
@@ -693,6 +708,9 @@ function Home() {
   });
 
   const b = balance.data;
+  const spacing = useBlockSpacing();
+  const spendable = b === undefined ? undefined : zat(b.spendable_zat);
+  const confirming = b === undefined ? undefined : zat(b.pending_zat);
   const actions = (
     <div className="grid grid-cols-2 gap-3">
       <button
@@ -735,16 +753,35 @@ function Home() {
               className="numeral"
               style={{ fontSize: "clamp(56px, 9vw, 112px)", lineHeight: 0.95 }}
             >
-              {b === undefined ? "…" : <CountUp value={zat(b.spendable_zat)} />}
+              {spendable === undefined || confirming === undefined ? (
+                "…"
+              ) : (
+                <CountUp value={spendable + confirming} />
+              )}
             </span>
             <span className="zk-unit" style={{ fontSize: 26 }}>
               ZEC
             </span>
           </div>
-          {b !== undefined && b.pending_zat > 0 && (
-            <p className="text-fog mt-1">
-              {formatZec(zat(b.pending_zat), { sign: true })} arriving · confirming
-            </p>
+          {b !== undefined && spendable !== undefined && confirming !== undefined && (
+            <dl className="mt-2 flex flex-col gap-0.5 font-mono text-sm">
+              <div className="flex gap-2">
+                <dt className="text-fog">Ready to dig</dt>
+                <dd className="text-white" data-testid="wallet-spendable">
+                  {formatZec(spendable, { decimals: 8 })}
+                </dd>
+              </div>
+              {confirming > 0n && (
+                <div className="flex gap-2" data-testid="wallet-confirming">
+                  <dt className="text-fog">Confirming</dt>
+                  <dd className="text-white">
+                    {formatZec(confirming, { decimals: 8 })}
+                    {b.all_ready_in_blocks !== null &&
+                      ` · ready ${readyIn(b.all_ready_in_blocks, spacing)}`}
+                  </dd>
+                </div>
+              )}
+            </dl>
           )}
           <div className="flex items-center justify-between gap-3 mt-2">
             <p className="text-fog text-sm" role="status" data-testid="wallet-sync">
@@ -766,7 +803,10 @@ function Home() {
         {config.data?.params.network === "test" && address.data !== undefined && (
           <FaucetCard
             address={address.data}
-            total={b === undefined ? undefined : zat(b.spendable_zat) + zat(b.pending_zat)}
+            spendable={spendable}
+            pending={confirming}
+            readyInBlocks={b?.ready_in_blocks ?? null}
+            spacing={spacing}
             sync={sync}
           />
         )}

@@ -2,7 +2,7 @@
 
 import { toPocketError } from "@zeek/pocket";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance } from "../api/pocketQueries";
@@ -17,6 +17,9 @@ import { formatZec, toNumber, zat } from "../lib/money";
 import { digReducer, SEAL_STEPS } from "../machines/dig";
 import { useDraft } from "../state/draft";
 import { recordMyDig } from "../state/myDigs";
+import { useBlockSpacing } from "../api/queries";
+import { fitsInRound, readyIn, readySecs, shortfall } from "../lib/readiness";
+import { formatClock } from "../lib/time";
 import { play } from "../sound/sound";
 
 /** Most tiles affordable from `spendable` at `amountEach`. */
@@ -139,6 +142,27 @@ export default function DigPocketScreen() {
     case "idle":
     case "confirm": {
       const short = spendable !== undefined && spendable < total.total;
+      const sf =
+        balance.data === undefined || spendable === undefined
+          ? null
+          : shortfall(
+              total.total,
+              spendable,
+              zat(balance.data.pending_zat),
+              balance.data.all_ready_in_blocks,
+            );
+      if (short && sf?.kind === "confirming" && board.data !== undefined) {
+        return (
+          <ChangeOnItsWay
+            need={total.total}
+            blocks={sf.blocks}
+            round={board.data.round}
+            blocksRemaining={board.data.blocks_remaining}
+            onReady={() => void start()}
+            onClose={close}
+          />
+        );
+      }
       if (short) {
         const fits = affordable(spendable, amountEach, draft.separate);
         return (
@@ -372,6 +396,117 @@ export default function DigPocketScreen() {
       );
   }
   return null;
+}
+
+/**
+ * The dig is only short because the Pocket's own change (or new coins) is
+ * still confirming: say when it will be ready, never "Add ZEC", and offer to
+ * send the dig as soon as it is, if the round leaves time for that.
+ */
+function ChangeOnItsWay({
+  need,
+  blocks,
+  round,
+  blocksRemaining,
+  onReady,
+  onClose,
+}: {
+  need: bigint;
+  blocks: number;
+  round: number;
+  blocksRemaining: number;
+  onReady: () => void;
+  onClose: () => void;
+}) {
+  const { pocket } = usePocket();
+  const client = useQueryClient();
+  const board = useBoard();
+  const balance = usePocketBalance();
+  const spacing = useBlockSpacing();
+  const [queued, setQueued] = useState(false);
+  const fired = useRef(false);
+  const [missed, setMissed] = useState(false);
+  const [since] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  // Keep the confirmations current: sync every 20 s while this is open.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          await (await pocket()).sync();
+        } finally {
+          void client.invalidateQueries({ queryKey: ["pocket"] });
+        }
+      })();
+    }, 20_000);
+    const tick = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1_000);
+    return () => {
+      window.clearInterval(id);
+      window.clearInterval(tick);
+    };
+  }, [pocket, client]);
+  const spendable = balance.data === undefined ? 0n : zat(balance.data.spendable_zat);
+  const live = board.data;
+  // Queued: dig the moment the coins are spendable, while the round allows.
+  useEffect(() => {
+    if (!queued || live === undefined) return;
+    if (live.round !== round || live.blocks_remaining < 4) {
+      setQueued(false);
+      setMissed(true);
+      return;
+    }
+    if (spendable >= need && !fired.current) {
+      fired.current = true;
+      onReady();
+    }
+  }, [queued, live, round, spendable, need, onReady]);
+  const left = Math.max(0, readySecs(blocks, spacing) - Math.floor((now - since) / 1000));
+  const fits = fitsInRound(blocks, blocksRemaining);
+  return (
+    <Modal title="Your change is on its way" onClose={onClose} testId="dig-change-coming">
+      <p className="text-mist mb-3">
+        Your last payment’s change (or your new coins) is still confirming. It is yours; the Pocket
+        can spend it {readyIn(blocks, spacing)}.
+      </p>
+      <p
+        className="numeral text-white mb-4"
+        style={{ fontSize: 40 }}
+        data-testid="change-countdown"
+      >
+        {formatClock(left)}
+      </p>
+      {missed ? (
+        <p className="text-white" role="alert" data-testid="change-missed">
+          Round {round} closed before your change was ready, so nothing was sent. Your coins are
+          safe; dig again in the new round.
+        </p>
+      ) : queued ? (
+        <p className="text-white" role="status" data-testid="change-queued">
+          Queued: your dig goes into round {round} as soon as the change is ready. Keep this open.
+        </p>
+      ) : fits ? (
+        <button
+          type="button"
+          className="zk-dig flex items-center justify-center gap-3 w-full"
+          style={{ fontSize: 22, minHeight: 60 }}
+          onClick={() => {
+            setQueued(true);
+          }}
+          data-testid="change-queue"
+        >
+          <Icon name="hourglass" size={22} /> Dig as soon as it’s ready
+        </button>
+      ) : (
+        <p className="text-white" data-testid="change-too-late">
+          It will not be ready before round {round} closes ({blocksRemaining}{" "}
+          {blocksRemaining === 1 ? "block" : "blocks"} left), so this dig cannot go into round{" "}
+          {round}. Dig in the next round instead.
+        </p>
+      )}
+    </Modal>
+  );
 }
 
 export { paymentFee };

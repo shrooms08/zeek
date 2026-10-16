@@ -102,6 +102,24 @@ pub struct BoardState {
     pub stages: [u8; 25],
     /// Number of valid digs so far.
     pub digs: usize,
+    /// Mean spacing of the last [`SPACING_SAMPLE_BLOCKS`] stored blocks, in
+    /// seconds (how fast the chain runs now; wallets turn confirmations
+    /// into minutes with it). None until enough blocks are stored.
+    pub recent_spacing_secs: Option<u64>,
+}
+
+/// Blocks the recent spacing is measured over.
+pub const SPACING_SAMPLE_BLOCKS: u32 = 20;
+
+/// Mean spacing of consecutive block times (None for fewer than two, or
+/// times that run backwards overall).
+pub fn mean_spacing(times: &[u64]) -> Option<u64> {
+    let (first, last) = (times.first()?, times.last()?);
+    let gaps = u64::try_from(times.len().checked_sub(1)?).ok()?;
+    if gaps == 0 || last <= first {
+        return None;
+    }
+    Some((last - first) / gaps)
 }
 
 /// A closed round waiting for its reveal.
@@ -288,6 +306,10 @@ impl Processor {
             depths: view.depths,
             stages: view.stages,
             digs: classified.valid.len(),
+            recent_spacing_secs: mean_spacing(&db.block_times(
+                tip_height.saturating_sub(SPACING_SAMPLE_BLOCKS),
+                tip_height.saturating_add(1),
+            )?),
         })
     }
 
@@ -514,5 +536,18 @@ impl Processor {
             round += 1;
         }
         Ok(events)
+    }
+}
+
+#[cfg(test)]
+mod spacing_tests {
+    use super::mean_spacing;
+
+    #[test]
+    fn mean_spacing_of_block_times() {
+        assert_eq!(mean_spacing(&[100, 125, 150, 200]), Some(33));
+        assert_eq!(mean_spacing(&[100]), None);
+        assert_eq!(mean_spacing(&[]), None);
+        assert_eq!(mean_spacing(&[200, 100]), None);
     }
 }

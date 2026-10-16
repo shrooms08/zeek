@@ -150,6 +150,23 @@ pub enum OutgoingKind {
     /// A Campfire shout (rules v4). Appended last: postcard identifies
     /// variants by position, so stored states of earlier versions still load.
     Shout { amount_zat: u64, message: String },
+    /// A shielded self-send splitting the balance into `parts` notes of at
+    /// least `part_zat` ("Getting your coins ready"), so a second dig in a
+    /// round need not wait for the first one's change. Appended last too.
+    Split { parts: u32, part_zat: u64 },
+}
+
+impl OutgoingKind {
+    /// Value this transaction pays back to the wallet besides its change
+    /// (a split's other parts); it counts as confirming until mined.
+    pub fn self_outputs_zat(&self) -> Result<u64, crate::error::PocketError> {
+        match self {
+            OutgoingKind::Split { parts, part_zat } => part_zat
+                .checked_mul(u64::from(parts.saturating_sub(1)))
+                .ok_or(crate::error::PocketError::Overflow("split parts")),
+            _ => Ok(0),
+        }
+    }
 }
 
 /// Lifecycle of an outgoing transaction.

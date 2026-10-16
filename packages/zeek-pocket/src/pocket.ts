@@ -34,6 +34,7 @@ import type {
   WinProofResult,
   WinVerdict,
   OfflineReport,
+  SplitResult,
 } from "./types.js";
 
 /** Progress callbacks of one call. */
@@ -248,6 +249,17 @@ export class Pocket {
    */
   confirmPassphrase(passphrase: string): Promise<true> {
     return this.call("confirmPassphrase", { passphrase });
+  }
+
+  /**
+   * Gets the coins ready for several digs in a round: when the balance sits
+   * in fewer than two notes of at least 0.02 and splitting costs under 1 %,
+   * splits it with a shielded self-send into 2 to 4 notes (see
+   * `crates/zeek-pocket/src/tx.rs`, `plan_split`). Resolves null when
+   * nothing is worth splitting. Never called inside a dig, send or auto-dig.
+   */
+  prepareCoins(onProgress?: (progress: SyncProgress) => void): Promise<SplitResult | null> {
+    return this.call("prepareCoins", undefined, onProgress);
   }
 
   /** Returns the 24-word phrase after checking the passphrase. */

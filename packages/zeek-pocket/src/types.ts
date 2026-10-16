@@ -8,6 +8,22 @@ export interface Balance {
   orchard_pool_zat: number;
   total_zat: number;
   scanned_height: number;
+  /**
+   * Blocks until the first confirming amount is spendable (received notes
+   * need 10 confirmations, the wallet's own change 3, plus one block when
+   * not mined yet); null when nothing is confirming.
+   */
+  ready_in_blocks: number | null;
+  /** Blocks until everything confirming is spendable. */
+  all_ready_in_blocks: number | null;
+}
+
+/** A split the Pocket made ("Getting your coins ready"). */
+export interface SplitResult {
+  txid: string;
+  parts: number;
+  partZat: number;
+  feeZat: number;
 }
 
 export interface SyncProgress {
@@ -40,7 +56,8 @@ export type OutgoingKind =
       };
     }
   | { send: { to: string; amount_zat: number; memo: string | null } }
-  | { shout: { amount_zat: number; message: string } };
+  | { shout: { amount_zat: number; message: string } }
+  | { split: { parts: number; part_zat: number } };
 
 export interface Outgoing {
   txid: string;

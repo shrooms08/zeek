@@ -72,7 +72,9 @@ function historyRow(entry: HistoryEntry): HTMLTableRowElement {
       ? `dig round ${entry.kind.dig.round} tiles ${entry.kind.dig.tiles.join(",")} x ${formatZec(entry.kind.dig.amount_each_zat)}`
       : "shout" in entry.kind
         ? `shout ${formatZec(entry.kind.shout.amount_zat)}: ${entry.kind.shout.message}`
-        : `send ${formatZec(entry.kind.send.amount_zat)} to ${entry.kind.send.to.slice(0, 18)}…`;
+        : "split" in entry.kind
+          ? `split into ${entry.kind.split.parts} notes of ${formatZec(entry.kind.split.part_zat)}`
+          : `send ${formatZec(entry.kind.send.amount_zat)} to ${entry.kind.send.to.slice(0, 18)}…`;
   return el(
     "tr",
     { "data-testid": "history-sent" },
