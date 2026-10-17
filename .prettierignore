@@ -12,3 +12,4 @@ pnpm-lock.yaml
 design
 test-results*
 **/.wrangler
+apps/web/dist-fixtures
