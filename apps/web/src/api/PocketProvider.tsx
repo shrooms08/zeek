@@ -24,7 +24,7 @@ import {
 } from "../machines/wallet";
 import { ENGINE_URL, PINNED_VAULT } from "./engine";
 
-interface PocketApi {
+export interface PocketApi {
   /** Starts the worker if needed. */
   pocket: () => Promise<Pocket>;
   wallet: WalletState;
@@ -33,7 +33,7 @@ interface PocketApi {
   refresh: () => Promise<void>;
 }
 
-const PocketContext = createContext<PocketApi | undefined>(undefined);
+export const PocketContext = createContext<PocketApi | undefined>(undefined);
 
 /** An unlocked Pocket locks itself after this long without interaction. */
 const IDLE_LOCK_MS = 15 * 60_000;

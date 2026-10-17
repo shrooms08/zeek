@@ -57,7 +57,16 @@ export default defineConfig({
     exclude: ["@zeek/pocket"],
     include: ["@zeek/pocket > idb", "@zeek/pocket > qrcode"],
   },
-  build: { target: "es2022" },
+  // ZEEK_FIXTURES=1 also builds fixtures.html (test only) into dist-fixtures/;
+  // the deployed build never contains it.
+  build:
+    process.env.ZEEK_FIXTURES === "1"
+      ? {
+          target: "es2022",
+          outDir: "dist-fixtures",
+          rollupOptions: { input: { main: "index.html", fixtures: "fixtures.html" } },
+        }
+      : { target: "es2022" },
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "functions/**/*.test.ts"],

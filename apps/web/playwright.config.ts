@@ -27,14 +27,24 @@ export default defineConfig({
   },
   ...(target === undefined
     ? {
-        webServer: {
-          // The snapshot of saved rounds for Replay mode (needs the engine).
-          command:
-            "pnpm build && node ../../scripts/snapshot-rounds.mjs --out dist/replay && pnpm preview",
-          url: "http://localhost:4174",
-          reuseExistingServer: true,
-          timeout: 180_000,
-        },
+        webServer: [
+          {
+            // The snapshot of saved rounds for Replay mode (needs the engine).
+            command:
+              "pnpm build && node ../../scripts/snapshot-rounds.mjs --out dist/replay && pnpm preview",
+            url: "http://localhost:4174",
+            reuseExistingServer: true,
+            timeout: 180_000,
+          },
+          {
+            // Test-only fixtures (e2e/overflow.spec.ts), never deployed.
+            command:
+              "ZEEK_FIXTURES=1 pnpm exec vite build && pnpm exec vite preview --outDir dist-fixtures --port 4175 --strictPort",
+            url: "http://localhost:4175/fixtures.html",
+            reuseExistingServer: true,
+            timeout: 180_000,
+          },
+        ],
       }
     : {}),
   projects: [
@@ -50,6 +60,13 @@ export default defineConfig({
       use: { ...devices["Desktop Safari"] },
     },
     { name: "live", testMatch: /live\/.*\.spec\.ts/, timeout: 3 * 60 * 60_000 },
+    // No text overflows its box (both engines), at six widths.
+    { name: "overflow", testMatch: "overflow.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "overflow-webkit",
+      testMatch: "overflow.spec.ts",
+      use: { ...devices["Desktop Safari"] },
+    },
     { name: "quota", testMatch: "quota.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "record", testMatch: "record.spec.ts", timeout: 10 * 60_000 },
     { name: "compare", testMatch: "compare.spec.ts", timeout: 30 * 60_000 },

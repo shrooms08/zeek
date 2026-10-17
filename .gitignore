@@ -19,6 +19,7 @@
 /crates/zeek-pocket/pkg/
 node_modules/
 dist/
+dist-fixtures/
 /packages/zeek-pocket/wasm/
 test-results*/
 playwright-report/
