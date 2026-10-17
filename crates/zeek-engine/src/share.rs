@@ -126,6 +126,28 @@ fn advance(text: &str, size: f32) -> f32 {
         * size
 }
 
+/// The amount's largest size; it shrinks until amount and "ZEC" fit the
+/// text column (x 600 to 1140), never clipping digits.
+const AMOUNT_MAX_SIZE: f32 = 84.0;
+const AMOUNT_MIN_SIZE: f32 = 40.0;
+/// "ZEC" beside the amount, relative to it (34 at 84).
+const AMOUNT_UNIT_SCALE: f32 = 34.0 / 84.0;
+/// The column right of the chest icon: 1140 − 652.
+const AMOUNT_COLUMN: f32 = 488.0;
+
+/// The font size at which `amount`, a 12 px gap and "ZEC" fit the column.
+fn amount_size(amount: &str) -> f32 {
+    // The text scales with the size; the 12 px gap does not.
+    let text =
+        advance(amount, AMOUNT_MAX_SIZE) + advance("ZEC", AMOUNT_MAX_SIZE * AMOUNT_UNIT_SCALE);
+    if text + 12.0 <= AMOUNT_COLUMN {
+        return AMOUNT_MAX_SIZE;
+    }
+    (AMOUNT_MAX_SIZE * (AMOUNT_COLUMN - 12.0) / text)
+        .floor()
+        .max(AMOUNT_MIN_SIZE)
+}
+
 /// The card as SVG, in the Mono style of the design's prove-a-win card
 /// (10A): ink art on the left in a soft glow (gold: treasure), the round,
 /// a big headline, the gold amount, the check link, the tagline and the
@@ -156,11 +178,13 @@ pub fn card_svg(card: &Card) -> String {
     let after = top + line_h * (lines.len() as f32 - 1.0);
     let amount = card.amount.as_ref().map_or(String::new(), |a| {
         let y = after + 104.0;
-        let x_unit = 652.0 + advance(a, 84.0) + 12.0;
+        let size = amount_size(a);
+        let unit = size * AMOUNT_UNIT_SCALE;
+        let x_unit = 652.0 + advance(a, size) + 12.0;
         format!(
             r##"<g transform="translate(600 {:.0}) scale(1.6)" fill="none" stroke="#E8B54A" stroke-width="2.25" stroke-linecap="square"><path d="{CHEST}"/></g>
-<text x="652" y="{:.0}" font-family="Archivo Black" font-size="84" fill="#E8B54A">{}</text>
-<text x="{x_unit:.0}" y="{:.0}" font-family="Archivo Black" font-size="34" fill="#FFFFFF">ZEC</text>"##,
+<text x="652" y="{:.0}" font-family="Archivo Black" font-size="{size:.0}" fill="#E8B54A">{}</text>
+<text x="{x_unit:.0}" y="{:.0}" font-family="Archivo Black" font-size="{unit:.0}" fill="#FFFFFF">ZEC</text>"##,
             y - 52.0,
             y,
             escape(a),
@@ -360,6 +384,32 @@ pub async fn win_page(State(state): State<Arc<AppState>>, Path(name): Path<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_amounts_shrink_to_fit_the_card() {
+        assert_eq!(amount_size("+0.0225"), AMOUNT_MAX_SIZE);
+        for a in ["+12.3456", "123.4567", "+9999.9999"] {
+            let size = amount_size(a);
+            assert!(size < AMOUNT_MAX_SIZE, "{a}");
+            let right = 652.0 + advance(a, size) + 12.0 + advance("ZEC", size * AMOUNT_UNIT_SCALE);
+            assert!(right <= 1140.0, "{a}: {right}");
+        }
+        let card = Card {
+            kicker: "ROUND 99999 · VERIFIED WIN".into(),
+            headline: "I found the treasure in round 99999".into(),
+            amount: Some("+12.3456".into()),
+            check_label: "win 78ea3288".into(),
+            art: CardArt::Win,
+        };
+        assert!(
+            card_svg(&card).contains(">+12.3456</text>"),
+            "every digit is drawn"
+        );
+        // ZEEK_SHARE_CARD_OUT=<file.png> keeps the picture (docs/examples).
+        if let Ok(out) = std::env::var("ZEEK_SHARE_CARD_OUT") {
+            std::fs::write(out, render_png(&card).expect("render")).expect("write");
+        }
+    }
 
     #[test]
     fn cards_render_and_amounts_truncate() {
