@@ -10,6 +10,7 @@ import { FieldScreen } from "./screens/FieldScreen";
 import { AutoDigProvider } from "./state/autoDig";
 import { DraftProvider } from "./state/draft";
 import { FieldFxProvider } from "./state/fieldFx";
+import { ResplitScheduler } from "./state/resplit";
 
 const DigPocketScreen = lazy(() => import("./screens/DigPocketScreen"));
 const DigWalletScreen = lazy(() => import("./screens/DigWalletScreen"));
@@ -32,6 +33,7 @@ export function App() {
       <LiveProvider>
         <PocketProvider>
           <AutoDigProvider>
+            <ResplitScheduler />
             <DraftProvider>
               <FieldFxProvider>
                 <Shell>

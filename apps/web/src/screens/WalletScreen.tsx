@@ -23,6 +23,8 @@ import { checkPositions, passphraseStrength } from "../lib/passphrase";
 import { formatTimeOfDay } from "../lib/time";
 import { useNow } from "../lib/useNow";
 import { canTryUnlock } from "../machines/wallet";
+import { autoDigRunning } from "../state/autoDigFlag";
+import { asWithdrawal, withdrawing } from "../state/pocketActivity";
 
 function random(): number {
   const b = new Uint32Array(1);
@@ -556,9 +558,10 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
           setBusy(true);
           void (async () => {
             try {
-              const sent = await (
-                await pocket()
-              ).send({ to: to.trim(), amountZat: toNumber(value), passphrase });
+              const p = await pocket();
+              const sent = await asWithdrawal(() =>
+                p.send({ to: to.trim(), amountZat: toNumber(value), passphrase }),
+              );
               setPassphrase("");
               setResult(`Sent privately. ${sent.txid}`);
               onDone();
@@ -687,9 +690,10 @@ function Home() {
       });
       dispatch({ type: "synced" });
       // A deposit large enough to dig several times a round is split into a
-      // few notes (shown as "Getting your coins ready"); never during a dig.
+      // few notes (shown as "Getting your coins ready"); never during a dig,
+      // an auto-dig or a withdrawal.
       try {
-        await (await pocket()).prepareCoins();
+        if (!autoDigRunning() && !withdrawing()) await (await pocket()).prepareCoins();
       } catch (err) {
         setSyncError(`Could not get your coins ready: ${toPocketError(err).message}`);
       }

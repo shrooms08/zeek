@@ -755,6 +755,26 @@ mod tests {
     }
 
     #[test]
+    fn a_digs_change_splits_again_by_the_same_rule() {
+        // 0.5 split in four, three parts dug; the fourth (0.12495) paid one
+        // tile of 0.001 (fee 0.0001 incl. change): its change is the last coin.
+        let part = (50_000_000 - 20_000) / 4;
+        let change = part - 100_000 - 10_000;
+        let p = plan(&[change]).expect("re-split");
+        assert_eq!((p.inputs, p.parts, p.fee_zat), (1, 4, 20_000));
+        // Dust from earlier digs beside it goes along.
+        assert_eq!(plan(&[change, 40_000]).expect("re-split").inputs, 2);
+        // A faucet part's change after a 0.01 dig (0.0211) is too small for
+        // two parts of 0.02: it stays one coin.
+        assert_eq!(
+            plan(&[(12_500_000 - 20_000) / 4 - 1_000_000 - 10_000]),
+            None
+        );
+        // An untouched part beside the change: a second dig already has one.
+        assert_eq!(plan(&[change, part]), None);
+    }
+
+    #[test]
     fn never_splits_when_a_second_note_is_already_there() {
         assert_eq!(plan(&[10_000_000, 2_000_000]), None);
         assert_eq!(plan(&[3_000_000, 3_000_000, 500_000]), None);

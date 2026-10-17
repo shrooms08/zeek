@@ -25,6 +25,7 @@ import {
 import { toNumber, zat, type Zat } from "../lib/money";
 import { hiddenSince } from "../lib/visibility";
 import { setAutoDigRunning } from "./autoDigFlag";
+import { armResplit } from "./pocketActivity";
 import { recordMyDig } from "./myDigs";
 
 export interface AutoDigSelection {
@@ -101,6 +102,7 @@ export function AutoDigProvider({ children }: { children: ReactNode }) {
                 at: Date.now(),
               });
               void client.invalidateQueries({ queryKey: ["pocket"] });
+              armResplit();
               return { round: result.round, txids: result.batches.map((b) => b.txid) };
             } catch (error) {
               const e = toPocketError(error);

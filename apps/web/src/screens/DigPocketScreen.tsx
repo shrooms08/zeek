@@ -22,6 +22,7 @@ import { useBlockSpacing } from "../api/queries";
 import { fitsInRound, readyIn, readySecs, roundAcceptsDigs, shortfall } from "../lib/readiness";
 import { formatClock } from "../lib/time";
 import { play } from "../sound/sound";
+import { armResplit } from "../state/pocketActivity";
 
 /** Most tiles affordable from `spendable` at `amountEach`. */
 function affordable(spendable: bigint, amountEach: bigint, separate: boolean): number {
@@ -115,6 +116,7 @@ export default function DigPocketScreen() {
         at: Date.now(),
       });
       dispatch({ type: "done", round: result.round, sent });
+      armResplit();
       draft.clear();
       draft.setMessage("");
       void client.invalidateQueries({ queryKey: ["pocket"] });
@@ -122,6 +124,7 @@ export default function DigPocketScreen() {
     } catch (error) {
       const e = toPocketError(error);
       if (e.partial !== undefined && round !== undefined) {
+        armResplit();
         const sentTiles = e.partial.sent.flatMap((s) => s.tiles);
         recordMyDig({
           round,
