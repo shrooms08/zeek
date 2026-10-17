@@ -15,7 +15,8 @@
  * ZEEK_FUND=test-wallets keeps everything else the same (the card's own
  * "Open the faucet" link starts the wait) but the coins come from Zeek's
  * own public test Pocket's Withdraw (0.045). Results go to
- * docs/examples/phase8c/live-run.json, screenshots to docs/examples/phase8c/live.
+ * docs/examples/phase8c/live-run-<funding>.json, screenshots to
+ * docs/examples/phase8c/live/<funding>/ (funding: faucet or test-wallets).
  *
  *   ZEEK_E2E_APP=https://playzeek.pages.dev pnpm exec playwright test --project=live e2e/live/07
  */
@@ -30,7 +31,7 @@ import { APP, ENGINE, REPO, loadState } from "./support";
 const FUND = process.env.ZEEK_FUND ?? "faucet";
 
 const OUT = path.join(REPO, "docs", "examples", "phase8c");
-const SHOTS = path.join(OUT, "live");
+const SHOTS = path.join(OUT, "live", process.env.ZEEK_FUND ?? "faucet");
 const log: Record<string, unknown> = { started: new Date().toISOString() };
 
 async function shot(page: Page, name: string) {
@@ -231,7 +232,7 @@ test("a fresh Pocket: faucet, confirming, split, several digs in one round", asy
   log.roundAfter = (await board()).round;
   log.changeSeen = changeSeen;
   log.finished = new Date().toISOString();
-  writeFileSync(path.join(OUT, "live-run.json"), JSON.stringify(log, null, 2));
+  writeFileSync(path.join(OUT, `live-run-${FUND}.json`), JSON.stringify(log, null, 2));
   expect((log.digs as unknown[]).length).toBeGreaterThanOrEqual(2);
   expect(log.roundAfter).toBe(round);
 });

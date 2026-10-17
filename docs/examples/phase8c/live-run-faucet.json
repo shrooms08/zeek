@@ -1,0 +1,43 @@
+{
+  "started": "2026-10-17T10:54:27.724Z",
+  "funding": "faucet",
+  "faucetTxid": "722e8e629864f73aa11f80cd5b076ba16ce1ada3993cd1bae286ee5d5c2d24e5",
+  "comingText": "Ready in about 2 min (6 more blocks).",
+  "balanceWhileConfirming": "0.1233ZEC",
+  "spendableWhileConfirming": "0",
+  "arrivedSpendable": "0.125",
+  "split": "Getting your coins ready · 4 parts",
+  "afterSplitSpendable": "0.1248",
+  "round": 507,
+  "digs": [
+    {
+      "tile": 2,
+      "txids": [
+        "0bc3c65439427b006e0eadc573d4d0b1d75e356b4df138a6cba313afa47c058b"
+      ]
+    },
+    {
+      "tile": 7,
+      "txids": [
+        "8be76905c335d74e3f0c5c18f96a920aefb959cbd4bdc94e29b473afbf44e47f"
+      ]
+    },
+    {
+      "tile": 12,
+      "txids": [
+        "9224a284eb300d1d12e2a554a2e88d2e556808ea04320433d805d2314ef326a9"
+      ]
+    },
+    {
+      "tile": 17,
+      "txids": [
+        "06f6239360a6449f110c4d24c9be25fe0052d358b38ef0b833e934fc6da89a05"
+      ]
+    }
+  ],
+  "changeCountdown": "1:00",
+  "changeChoice": "queue offered",
+  "roundAfter": 507,
+  "changeSeen": true,
+  "finished": "2026-10-17T11:06:24.896Z"
+}
