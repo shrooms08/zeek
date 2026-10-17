@@ -4,6 +4,7 @@
  * stroke-dashoffset only; reduced motion: fades or instant).
  */
 
+import { FitAmount } from "./FitAmount";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -25,6 +26,12 @@ export function NetBadge({ net }: { net: "test" | "main" }) {
   );
 }
 
+/** Why digs are off: a short label and an optional detail line. */
+export interface ClosedReason {
+  label: string;
+  detail?: string | undefined;
+}
+
 /** <DigButton state count />: the one big action. */
 export function DigButton(props: {
   state: "idle" | "empty" | "loading" | "closed";
@@ -34,8 +41,11 @@ export function DigButton(props: {
   /** Compact sheet: the total sits on the button's right. */
   total?: string | undefined;
   compact?: boolean;
-  /** What a closed button says (default "Round closed"). */
-  closedText?: string | undefined;
+  /**
+   * What a closed button says: a short label (default "Round closed") and
+   * an optional smaller second line.
+   */
+  closed?: ClosedReason | undefined;
 }) {
   const reduce = useReducedMotion() === true;
   if (props.state === "empty") {
@@ -55,14 +65,14 @@ export function DigButton(props: {
     props.state === "loading"
       ? "Sealing…"
       : props.state === "closed"
-        ? (props.closedText ?? "Round closed")
+        ? (props.closed?.label ?? "Round closed")
         : props.compact === true
           ? "Dig"
           : `Dig ${props.count} ${props.count === 1 ? "tile" : "tiles"}`;
   return (
     <motion.button
       type="button"
-      className="zk-dig w-full flex items-center gap-3"
+      className="zk-dig zk-dig-sized w-full flex items-center gap-3"
       style={{ justifyContent: props.total === undefined ? "center" : "space-between" }}
       disabled={props.state !== "idle"}
       onClick={props.onClick}
@@ -70,13 +80,22 @@ export function DigButton(props: {
       transition={{ duration: 0.09 }}
       data-testid={props.testId ?? "dig-button"}
     >
-      <span className="flex items-center gap-3">
+      <span className="flex items-center gap-3 min-w-0">
         <Icon name="shovel" size={props.compact === true ? 24 : 28} />
-        {text}
+        <span className="zk-dig-label">
+          <span className="block">{text}</span>
+          {props.state === "closed" && props.closed?.detail !== undefined && (
+            <span className="zk-dig-detail block" data-testid="dig-button-detail">
+              {props.closed.detail}
+            </span>
+          )}
+        </span>
       </span>
       {props.total !== undefined && (
-        <span className="numeral" style={{ fontSize: 20, color: "inherit" }}>
-          {props.total} ZEC
+        <span className="min-w-0 flex-1" style={{ color: "inherit" }}>
+          <FitAmount size={20} min={11} unit="ZEC" unitScale={0.8} align="end">
+            {props.total}
+          </FitAmount>
         </span>
       )}
     </motion.button>
@@ -274,12 +293,9 @@ export function QrCard(props: {
         aria-label="QR code of the payment request"
         role="img"
       />
-      <div className="zk-amount justify-center">
-        <span className="numeral" style={{ fontSize: 32 }}>
-          {props.amount}
-        </span>
-        <span className="zk-unit">ZEC</span>
-      </div>
+      <FitAmount size={32} min={14} unit="ZEC" unitScale={0.62} align="center">
+        {props.amount}
+      </FitAmount>
       <p className="text-fog text-sm text-center">
         {props.tiles.length} {props.tiles.length === 1 ? "tile" : "tiles"} · fee included · memo
         filled in

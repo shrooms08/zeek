@@ -9,8 +9,9 @@
  * browser. A running auto-dig shows its Stop button in either mode.
  */
 
+import { FitAmount, useFitInput } from "./FitAmount";
 import { motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { digTotal } from "../lib/digPlan";
 import type { DigMode } from "../lib/digMode";
@@ -18,7 +19,7 @@ import { AMOUNT_STEP, formatZec, parseZec, PRESETS, type Zat } from "../lib/mone
 import { EASE } from "../motion/tokens";
 import { Icon } from "./Icon";
 import { AutoDigCard, ModeSwitch, ProTools, YourDigs } from "./ProTools";
-import { DigButton } from "./ui";
+import { DigButton, type ClosedReason } from "./ui";
 
 /** Bytes of a message as the memo stores it (UTF-8). */
 export function messageBytes(text: string): number {
@@ -44,6 +45,11 @@ export function AmountPicker(props: {
     setText(null);
   };
   const compact = props.compact === true;
+  // Every digit stays visible: the font shrinks to fit the field.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const mirrorRef = useRef<HTMLSpanElement>(null);
+  const fontSize = compact ? 22 : 30;
+  const fitted = useFitInput(inputRef, mirrorRef, shown, fontSize, 11);
   const step = (
     <>
       <button
@@ -58,10 +64,20 @@ export function AmountPicker(props: {
       >
         <Icon name="minus" size={22} />
       </button>
-      <label className="zk-amount-field flex-1 flex flex-col items-center justify-center">
+      <label className="zk-amount-field relative min-w-0 flex-1 flex flex-col items-center justify-center">
+        <span className="absolute left-0 top-0 w-0 h-0 overflow-hidden" aria-hidden="true">
+          <span
+            ref={mirrorRef}
+            className="numeral inline-block invisible whitespace-pre"
+            style={{ fontSize, lineHeight: 1 }}
+          >
+            {shown}
+          </span>
+        </span>
         <input
+          ref={inputRef}
           className="numeral bg-transparent text-center w-full"
-          style={{ fontSize: compact ? 22 : 30, border: "none", lineHeight: 1 }}
+          style={{ fontSize: fitted, border: "none", lineHeight: 1, height: fontSize }}
           inputMode="decimal"
           value={shown}
           onChange={(e) => {
@@ -108,9 +124,10 @@ export function AmountPicker(props: {
   return (
     <div className="flex flex-col gap-2" role="group" aria-label="Amount per tile">
       {compact ? (
-        <div className="flex items-stretch gap-2">
-          {step}
-          {presets}
+        // Narrow phones: the presets drop under the stepper instead of spilling.
+        <div className="flex flex-wrap items-stretch gap-2">
+          <div className="flex flex-1 items-stretch gap-2 min-w-[200px]">{step}</div>
+          <div className="flex items-stretch gap-2">{presets}</div>
         </div>
       ) : (
         <>
@@ -131,7 +148,7 @@ export interface DigPanelProps {
   campfire: boolean;
   closed: boolean;
   /** Why digs are closed, when it is not the round (digging off). */
-  closedText?: string | undefined;
+  closedReason?: ClosedReason | undefined;
   pocketLabel: string;
   /** The mobile bottom sheet. */
   compact?: boolean;
@@ -276,9 +293,9 @@ export function DigPanel(p: DigPanelProps) {
           state={state}
           count={n}
           onClick={p.onDig}
-          total={n > 0 ? formatZec(total.total, { decimals: 8 }) : undefined}
+          total={n > 0 && !p.closed ? formatZec(total.total, { decimals: 8 }) : undefined}
           compact
-          closedText={p.closedText}
+          closed={p.closedReason}
         />
         <div className="flex justify-between text-xs">
           <span className="text-fog flex items-center gap-1.5">
@@ -323,7 +340,7 @@ export function DigPanel(p: DigPanelProps) {
       >
         <AutoDigCard />
         {modeSwitch}
-        <DigButton state={state} count={0} onClick={p.onDig} closedText={p.closedText} />
+        <DigButton state={state} count={0} onClick={p.onDig} closed={p.closedReason} />
         <button
           type="button"
           className="btn flex items-center justify-center gap-2"
@@ -387,7 +404,7 @@ export function DigPanel(p: DigPanelProps) {
       </div>
       {message}
       <div
-        className="border-t hair pt-4 flex items-end justify-between gap-3"
+        className="border-t hair pt-4 flex flex-wrap items-end justify-between gap-3"
         data-testid="total"
         hidden={pro}
       >
@@ -403,11 +420,13 @@ export function DigPanel(p: DigPanelProps) {
             fee 0.00005 per tile + per payment ({total.payments.length})
           </div>
         </div>
-        <div className="numeral" style={{ fontSize: 30 }} data-testid="total-amount">
-          {formatZec(total.total, { decimals: 8 })}
+        <div className="flex-1 min-w-[8rem]">
+          <FitAmount size={30} min={13} align="end" testId="total-amount">
+            {formatZec(total.total, { decimals: 8 })}
+          </FitAmount>
         </div>
       </div>
-      <DigButton state={state} count={n} onClick={p.onDig} closedText={p.closedText} />
+      <DigButton state={state} count={n} onClick={p.onDig} closed={p.closedReason} />
       <div className="flex justify-between text-sm">
         <span className="text-fog flex items-center gap-2">
           <Icon name="wallet" size={16} /> {p.pocketLabel}

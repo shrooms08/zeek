@@ -1,5 +1,6 @@
 /** The public page a share link opens. Verified in this browser. */
 
+import { FitAmount } from "../components/FitAmount";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { usePocket } from "../api/PocketProvider";
@@ -39,7 +40,7 @@ export default function VerifiedWinScreen() {
       className="mx-auto w-full max-w-[1300px] px-4 sm:px-8 py-8 sm:py-12 grid gap-8 lg:grid-cols-[1fr_1fr] items-center"
       data-testid="win-screen"
     >
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 min-w-0">
         <motion.span
           className={`zk-verified self-start ${v.valid ? "" : "zk-verified-no"}`}
           initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.9, rotate: -10 }}
@@ -58,20 +59,14 @@ export default function VerifiedWinScreen() {
             : "This proof doesn’t check out"}
         </h1>
         {v.valid && payout !== undefined && (
-          <div className="zk-amount" data-testid="win-amount">
+          <div className="flex items-center gap-2 min-w-0" data-testid="win-amount">
             <Icon name="chest" size={30} />
-            <span
-              className="numeral break-all"
-              // Full precision here: shrink with the viewport rather than overflow.
-              style={{
-                color: "var(--color-gold)",
-                fontSize: "clamp(36px, 7vw, 76px)",
-                lineHeight: 1,
-              }}
-            >
-              +{formatZec(zat(payout.net), { decimals: 8 })}
-            </span>
-            <span className="zk-unit">ZEC</span>
+            {/* Full precision: the size shrinks to fit, never a digit. */}
+            <div className="flex-1 min-w-0">
+              <FitAmount size={76} min={16} unit="ZEC" unitScale={0.32} color="var(--color-gold)">
+                +{formatZec(zat(payout.net), { decimals: 8 })}
+              </FitAmount>
+            </div>
           </div>
         )}
         {!v.valid && v.reason !== null && (
@@ -103,7 +98,7 @@ export default function VerifiedWinScreen() {
         </div>
       </section>
       {settled !== null && settled.treasure_tile !== null && (
-        <div aria-hidden="true">
+        <div aria-hidden="true" className="min-w-0">
           <Field
             stages={stagesFromTotals(settled.tile_totals)}
             selected={[]}

@@ -1,5 +1,6 @@
 /** Who holds the keys (design 11): the 2-of-3 keyholders, refusals, the vault and the viewing key. */
 
+import { FitAmount } from "../components/FitAmount";
 import { useBoard, useConfig, useKeyholders, useLedger } from "../api/queries";
 import type { KeyholderStatus } from "../api/types";
 import { Icon } from "../components/Icon";
@@ -123,15 +124,17 @@ export default function KeysScreen() {
             </p>
           ) : (
             <dl data-testid="vault-ledger">
-              <div className="flex items-center justify-between px-5 py-4 border-b hair">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-4 border-b hair">
                 <dt className="flex items-center gap-3 text-white">
                   <Icon name="mine" size={18} /> Deep Cache
                 </dt>
-                <dd className="numeral" style={{ fontSize: 28 }}>
-                  <CountUp value={zat(ledger.data.cache)} />
+                <dd className="flex-1 min-w-[8rem]">
+                  <FitAmount size={28} min={13} align="end">
+                    <CountUp value={zat(ledger.data.cache)} />
+                  </FitAmount>
                 </dd>
               </div>
-              <div className="flex items-center justify-between px-5 py-4 border-b hair">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-4 border-b hair">
                 <dt className="flex items-center gap-3 text-white">
                   <Icon name="coin" size={18} />
                   <span>
@@ -139,17 +142,21 @@ export default function KeysScreen() {
                     <span className="block text-fog text-xs">pays network fees and refunds</span>
                   </span>
                 </dt>
-                <dd className="numeral" style={{ fontSize: 28 }}>
-                  {formatZec(zat(ledger.data.operator_float))}
+                <dd className="flex-1 min-w-[8rem]">
+                  <FitAmount size={28} min={13} align="end">
+                    {formatZec(zat(ledger.data.operator_float))}
+                  </FitAmount>
                 </dd>
               </div>
               {board.data !== undefined && (
-                <div className="flex items-center justify-between px-5 py-4 border-b hair">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-4 border-b hair">
                   <dt className="flex items-center gap-3 text-white">
                     <Icon name="chest" size={18} /> This round’s prize
                   </dt>
-                  <dd className="numeral" style={{ fontSize: 28, color: "var(--color-gold)" }}>
-                    <CountUp value={zat(board.data.prize_pool_zat)} />
+                  <dd className="flex-1 min-w-[8rem]">
+                    <FitAmount size={28} min={13} align="end" color="var(--color-gold)">
+                      <CountUp value={zat(board.data.prize_pool_zat)} />
+                    </FitAmount>
                   </dd>
                 </div>
               )}

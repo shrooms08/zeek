@@ -8,6 +8,7 @@
  * straight to the result. Tile pins never cover the treasure tile.
  */
 
+import { FitAmount } from "../components/FitAmount";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -143,6 +144,8 @@ export default function RevealScreen() {
           : { x: 0, y: 0 }
       }
       transition={{ duration: 0.7, ease: "linear" }}
+      // The burst's light may not widen the page.
+      style={{ overflowX: "clip" }}
       data-stage={stage}
       data-testid="reveal-field"
     >
@@ -201,7 +204,7 @@ export default function RevealScreen() {
       </p>
       {board.data !== undefined && board.data.round > n && board.data.status === "open" && (
         <Link
-          className="zk-dig flex items-center justify-center gap-3"
+          className="zk-dig flex items-center justify-center gap-3 w-full max-w-[420px]"
           style={{ fontSize: 22, minHeight: 60 }}
           to="/"
           data-testid="reveal-dig-next"
@@ -292,12 +295,13 @@ export default function RevealScreen() {
           <h1 className="zk-headline" style={{ color: "var(--color-gold)" }}>
             Deep Cache broke open
           </h1>
-          <div className="zk-amount">
+          <div className="flex items-center gap-2 min-w-0">
             <Icon name="mine" size={34} />
-            <span className="numeral" style={{ fontSize: 96, color: "var(--color-gold)" }}>
-              <CountUp value={zat(settled.cache_paid)} from={0n} duration={1400} delay={900} />
-            </span>
-            <span className="zk-unit">ZEC</span>
+            <div className="flex-1 min-w-0">
+              <FitAmount size={96} min={18} unit="ZEC" unitScale={0.28} color="var(--color-gold)">
+                <CountUp value={zat(settled.cache_paid)} from={0n} duration={1400} delay={900} />
+              </FitAmount>
+            </div>
           </div>
           <p className="text-mist mt-3">
             On top of the round’s prize. Everyone who dug tile {(treasure ?? 0) + 1} shares it by

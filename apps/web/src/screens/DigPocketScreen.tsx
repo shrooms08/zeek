@@ -1,5 +1,6 @@
 /** Dig with Zeek Pocket: confirm → sealing (per batch) → done / partial / error. */
 
+import { FitAmount } from "../components/FitAmount";
 import { toPocketError } from "@zeek/pocket";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useRef, useState } from "react";
@@ -245,17 +246,17 @@ export default function DigPocketScreen() {
               <div className="label flex items-center gap-2">
                 <Icon name="tile" size={16} /> Tiles
               </div>
-              <div className="numeral" style={{ fontSize: 44, lineHeight: 1 }}>
+              <FitAmount size={44} min={16} lineHeight={1}>
                 {tiles.length}
-              </div>
+              </FitAmount>
             </div>
             <div className="zk-stat p-3">
               <div className="label flex items-center gap-2">
                 <Icon name="coin" size={16} /> Each
               </div>
-              <div className="numeral" style={{ fontSize: 44, lineHeight: 1 }}>
+              <FitAmount size={44} min={16} lineHeight={1}>
                 {formatZec(amountEach)}
-              </div>
+              </FitAmount>
             </div>
           </div>
           <dl className="flex flex-col gap-1.5 text-sm mb-3">
@@ -272,11 +273,20 @@ export default function DigPocketScreen() {
               <dd className="font-mono text-white">{formatZec(total.fee, { decimals: 8 })}</dd>
             </div>
           </dl>
-          <div className="flex items-baseline justify-between border-t hair pt-3 mb-3">
+          <div className="flex items-baseline justify-between gap-3 border-t hair pt-3 mb-3">
             <span className="text-white font-extrabold text-xl">Total</span>
-            <span className="numeral" style={{ fontSize: 26 }} data-testid="confirm-total">
-              {formatZec(total.total, { decimals: 8 })} ZEC
-            </span>
+            <div className="flex-1 min-w-0">
+              <FitAmount
+                size={26}
+                min={13}
+                unit="ZEC"
+                unitScale={0.7}
+                align="end"
+                testId="confirm-total"
+              >
+                {formatZec(total.total, { decimals: 8 })}
+              </FitAmount>
+            </div>
           </div>
           {total.payments.length > 1 && (
             <p className="text-fog text-sm mb-2">

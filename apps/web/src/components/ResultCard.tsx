@@ -4,6 +4,7 @@
  * voided / watched. Rises 48 px in 320 ms; reduced motion fades in 150 ms.
  */
 
+import { FitAmount } from "./FitAmount";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Zeb } from "../art/Characters";
@@ -52,21 +53,19 @@ export function ResultCard(p: ResultCardProps) {
           <h2 className="zk-title" style={{ color: "var(--color-gold)" }}>
             {p.outcome === "cache-win" ? "Deep Cache broke open" : "You found the treasure"}
           </h2>
-          <div className="zk-amount justify-center" data-testid="result-share">
+          <div className="flex items-center gap-2 min-w-0 w-full" data-testid="result-share">
             <Icon name="chest" size={34} />
-            <span
-              className="numeral"
-              style={{ fontSize: "clamp(48px, 7vw, 84px)", color: "var(--color-gold)" }}
-            >
-              <CountUp
-                value={p.share}
-                from={0n}
-                sign
-                duration={p.outcome === "cache-win" ? 1400 : 900}
-                delay={p.outcome === "cache-win" ? 900 : 200}
-              />
-            </span>
-            <span className="zk-unit">ZEC</span>
+            <div className="flex-1 min-w-0">
+              <FitAmount size={84} min={18} unit="ZEC" unitScale={0.3} color="var(--color-gold)">
+                <CountUp
+                  value={p.share}
+                  from={0n}
+                  sign
+                  duration={p.outcome === "cache-win" ? 1400 : 900}
+                  delay={p.outcome === "cache-win" ? 900 : 200}
+                />
+              </FitAmount>
+            </div>
           </div>
           <p className="text-mist">
             Your share of {tile}

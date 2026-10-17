@@ -15,9 +15,10 @@ import { EngineError } from "../api/engine";
 import { LiveContext } from "../api/LiveProvider";
 import { usePocket } from "../api/PocketProvider";
 import { usePocketBalance } from "../api/pocketQueries";
-import { useBoard, useConfig, usePending } from "../api/queries";
+import { useBlockSpacing, useBoard, useConfig, usePending } from "../api/queries";
 import { DigPanel } from "../components/DigPanel";
 import { Field } from "../components/field/Field";
+import { FitAmount } from "../components/FitAmount";
 import type { PropReaction } from "../components/field/World";
 import { Icon } from "../components/Icon";
 import { hasSeenOnboarding, Onboarding } from "../components/Onboarding";
@@ -67,6 +68,7 @@ export function FieldScreen() {
   const [onboarding, setOnboarding] = useState(() => !hasSeenOnboarding());
   const [prizePulse, setPrizePulse] = useState(0);
   const [mode, setMode] = useState<DigMode>(loadDigMode);
+  const spacing = useBlockSpacing();
 
   // A round this browser dug in has closed: the reveal takes over once.
   useEffect(() => {
@@ -180,15 +182,16 @@ export function FieldScreen() {
           <span className="text-fog normal-case tracking-normal font-normal">· reconnecting</span>
         )}
       </div>
-      <div className="zk-amount">
-        <span
-          className="numeral"
-          style={{ color: "var(--color-gold)", fontSize: desktop ? "clamp(48px, 5vw, 68px)" : 40 }}
-        >
-          <CountUp value={zat(b.prize_pool_zat)} onGrow={onGrow} />
-        </span>
-        <span className="zk-unit">ZEC</span>
-      </div>
+      <FitAmount
+        size={desktop ? 68 : 40}
+        min={14}
+        unit="ZEC"
+        unitScale={desktop ? 0.3 : 0.4}
+        color="var(--color-gold)"
+        testId="prize-amount"
+      >
+        <CountUp value={zat(b.prize_pool_zat)} onGrow={onGrow} />
+      </FitAmount>
       {b.prize_pool_zat === 0 && desktop && (
         <p className="text-fog text-sm mt-1">Grows with every dig</p>
       )}
@@ -220,9 +223,9 @@ export function FieldScreen() {
         <Icon name="mine" size={14} />
         Deep Cache
       </div>
-      <div className="numeral" style={{ fontSize: desktop ? 26 : 18 }}>
+      <FitAmount size={desktop ? 26 : 18} min={11}>
         <CountUp value={cache} />
-      </div>
+      </FitAmount>
     </div>
   );
 
@@ -256,11 +259,17 @@ export function FieldScreen() {
       message={draft.message}
       campfire={campfire}
       closed={!accepting || diggingOff}
-      closedText={
+      closedReason={
         diggingOff
-          ? "Digs are not open yet"
+          ? { label: "Digs not open yet" }
           : open && !accepting
-            ? `Round ${b.round} is closing · next round soon`
+            ? {
+                label: "Round closing",
+                detail:
+                  b.blocks_remaining === 0
+                    ? "Next round any moment"
+                    : `Next round in ~${Math.max(1, Math.round(b.blocks_remaining * spacing))} s`,
+              }
             : undefined
       }
       pocketLabel={pocketLabel}

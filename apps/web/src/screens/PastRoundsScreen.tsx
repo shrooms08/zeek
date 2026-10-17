@@ -44,17 +44,27 @@ export default function PastRoundsScreen() {
             <li key={r.round}>
               <Link
                 to={`/rounds/${r.round}`}
-                className="zk-roundrow grid grid-cols-[1fr_auto_auto] sm:grid-cols-[minmax(170px,1fr)_120px_1fr_auto_auto] items-center gap-4 px-5 py-4 text-white"
+                className="zk-roundrow grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(170px,1fr)_120px_minmax(0,1fr)_auto_auto] items-center gap-4 px-5 py-4 text-white"
                 data-testid="round-row"
               >
-                <span className="font-black text-2xl" style={{ fontStretch: "112%" }}>
-                  Round {r.round}
+                <span className="min-w-0">
+                  <span
+                    className="block font-black text-2xl [overflow-wrap:anywhere]"
+                    style={{ fontStretch: "112%" }}
+                  >
+                    Round {r.round}
+                  </span>
+                  {/* On phones the prize sits under the round. */}
+                  <span className="sm:hidden text-mist flex items-center gap-2 font-mono text-sm">
+                    <Icon name="chest" size={14} />
+                    {formatZec(zat(r.prize))}
+                  </span>
                 </span>
                 <span className="text-mist hidden sm:flex items-center gap-2">
                   <Icon name="tile" size={16} />
                   {r.treasure_tile === null ? "—" : `Tile ${r.treasure_tile + 1}`}
                 </span>
-                <span className="text-mist flex items-center gap-2 font-mono">
+                <span className="text-mist hidden sm:flex items-center gap-2 font-mono min-w-0">
                   <Icon name="chest" size={16} />
                   {formatZec(zat(r.prize))}
                 </span>

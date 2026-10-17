@@ -39,8 +39,8 @@ function Row({
       data-health={health}
     >
       <div className="min-w-0">
-        <div className="text-white font-bold">{title}</div>
-        <div className="text-fog text-sm break-words">{detail}</div>
+        <div className="text-white font-bold [overflow-wrap:anywhere]">{title}</div>
+        <div className="text-fog text-sm [overflow-wrap:anywhere]">{detail}</div>
       </div>
       <span
         className={`zk-chip flex shrink-0 items-center gap-1.5 ${health === "ok" ? "zk-chip-fill" : ""}`}

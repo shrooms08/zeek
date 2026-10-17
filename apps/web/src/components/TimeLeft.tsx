@@ -6,6 +6,7 @@
  * no pulse, and the stamp fades in.
  */
 
+import { FitAmount } from "./FitAmount";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { formatClock } from "../lib/time";
@@ -47,7 +48,8 @@ export function TimeLeft({
 
   return (
     <section
-      className={`zk-timer relative ${compact ? "p-3" : "px-6 py-5"}`}
+      // The stamp sits in the bottom corner: room for it under the note.
+      className={`zk-timer relative ${compact ? "p-3" : `px-6 pt-5 ${stamped ? "pb-[68px]" : "pb-5"}`}`}
       aria-label="Time left"
       data-testid="time-left"
       data-last-minute={lastMinute}
@@ -62,19 +64,20 @@ export function TimeLeft({
       </div>
       <motion.div
         key={pulse ? left : "steady"}
-        className="numeral origin-left"
-        style={{ fontSize: compact ? 40 : "clamp(48px, 5vw, 68px)", lineHeight: 0.95 }}
+        className="origin-left"
         initial={pulse && !reduce ? { scale: 1.12 } : false}
         animate={{ scale: 1 }}
         transition={{ duration: 0.16, ease: EASE.out }}
         aria-live={left <= 10 ? "polite" : "off"}
       >
-        {open ? formatClock(left) : "0:00"}
+        <FitAmount size={compact ? 40 : 68} min={14}>
+          {open ? formatClock(left) : "0:00"}
+        </FitAmount>
       </motion.div>
       {note !== undefined && !compact && <p className="text-fog text-sm mt-1">{note}</p>}
       {stamped && (
         <motion.div
-          className="zk-stamp absolute"
+          className={compact ? "zk-stamp zk-stamp-inline" : "zk-stamp absolute"}
           initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.9, rotate: -10 }}
           animate={
             reduce ? { opacity: 1 } : { opacity: 1, scale: [1.9, 0.94, 1], rotate: [-10, -6, -6] }
@@ -105,7 +108,8 @@ function Fuse({ burnt, reduce }: { burnt: number; reduce: boolean }) {
     };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
+    // The border box: padding changes (room for the stamp) resize the panel too.
+    ro.observe(el, { box: "border-box" });
     return () => {
       ro.disconnect();
     };

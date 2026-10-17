@@ -33,7 +33,8 @@ test("the field: Dig is off with fewer than 4 blocks left", async ({ page }) => 
   await page.locator('[data-tile="4"]').click();
   const dig = page.getByTestId("dig-button");
   await expect(dig).toBeDisabled();
-  await expect(dig).toContainText(/Round \d+ is closing/);
+  await expect(dig).toContainText("Round closing");
+  await expect(page.getByTestId("dig-button-detail")).toHaveText(/^Next round in ~\d+ s$/);
 });
 
 test("Check your dig: offers the next round, never the closing one", async ({ page }) => {

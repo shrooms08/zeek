@@ -1,5 +1,6 @@
 /** One past round: per-tile amounts, treasure, payouts (amounts only), check link. */
 
+import { FitAmount } from "../components/FitAmount";
 import { Link, useParams } from "react-router-dom";
 import { ENGINE_URL } from "../api/engine";
 import { useRound, useRounds } from "../api/queries";
@@ -64,12 +65,13 @@ export default function RoundDetailScreen() {
               aria-label={`Tile ${i + 1}: ${formatZec(zat(v), { decimals: 8 })} ZEC${treasure === i ? ", the treasure" : ""}`}
             >
               <span className="text-fog text-xs">{i + 1}</span>
-              <span
-                className="numeral text-sm"
-                style={{ color: treasure === i ? "var(--color-gold)" : undefined }}
+              <FitAmount
+                size={14}
+                min={8}
+                {...(treasure === i ? { color: "var(--color-gold)" } : {})}
               >
                 {formatZec(zat(v))}
-              </span>
+              </FitAmount>
             </li>
           ))}
         </ol>
@@ -91,9 +93,9 @@ export default function RoundDetailScreen() {
           <div className="label flex items-center gap-2">
             <Icon name="chest" size={16} /> Prize
           </div>
-          <div className="numeral" style={{ fontSize: 48, color: "var(--color-gold)" }}>
+          <FitAmount size={48} min={16} color="var(--color-gold)">
             {formatZec(zat(s.distributable))}
-          </div>
+          </FitAmount>
         </section>
       </div>
       <section className="panel p-4" aria-label="Payouts">

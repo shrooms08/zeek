@@ -873,15 +873,9 @@ body {
 }
 .zk-stat,
 .zk-timer {
+  min-width: 0;
   border: var(--border-panel) solid var(--color-white);
   background: var(--color-night);
-}
-/* Big numbers: the unit sits on the numeral's baseline, right next to it. */
-.zk-amount {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: nowrap;
 }
 .zk-unit {
   font-size: 20px;
@@ -892,6 +886,9 @@ body {
 .zk-badge {
   border: var(--border-panel) solid var(--color-white);
   background: var(--color-night);
+  /* Long amounts shrink to fit (<FitAmount>) instead of widening the badge. */
+  max-width: min(100%, 280px);
+  min-width: 0;
   padding: 8px 14px;
   display: inline-flex;
   flex-direction: column;
@@ -921,6 +918,13 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   background: var(--color-night);
+}
+/* On phones the panel is short: the stamp sits under the clock, not over it. */
+.zk-stamp-inline {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 8px;
+  font-size: 18px;
 }
 .zk-field-desktop {
   position: relative;
@@ -1335,19 +1339,9 @@ body {
 [data-testid="field"]:focus-visible {
   outline: none;
 }
-.zk-dig {
-  white-space: nowrap;
-}
 .zk-lift .zk-dig,
 [data-testid="dig-panel"] .zk-dig {
   font-size: 26px;
-}
-
-/* Narrow screens: big amounts wrap their unit rather than overflow. */
-@media (max-width: 639px) {
-  .zk-amount {
-    flex-wrap: wrap;
-  }
 }
 
 /* Lite / Pro switch on the dig panel. */
@@ -1387,4 +1381,61 @@ body {
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+/* <FitAmount>: a number and its unit, scaled to fit their box. */
+.zk-fit {
+  width: 100%;
+  min-width: 0;
+  /* Its width comes from the container only: unscaled digits never widen a
+     card, a grid track or the page while the fit is measured. */
+  contain: inline-size;
+}
+.zk-fit-inner {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.14em;
+  white-space: nowrap;
+  /* The fit measures the size on the page: it must never be mid-transition
+     (reduced motion gives every property a short transition). */
+  transition-property: none;
+}
+.zk-fit-inner * {
+  transition-property: none;
+}
+/* At the smallest size the unit may drop under the number; digits never clip. */
+.zk-fit-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+/* The Dig button's label: a short line that wraps and scales to the button,
+   and an optional smaller second line; never wider than the button. */
+/* The Dig button (always full width) sizes its label to itself. Only there:
+   a size container has no width of its own. */
+.zk-dig-sized {
+  container-type: inline-size;
+}
+.zk-dig {
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.zk-dig-label {
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.05;
+  font-size: clamp(16px, 6.5cqi, 1em);
+}
+.zk-dig-detail {
+  font-size: 14px;
+  font-weight: 700;
+  font-stretch: 100%;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-top: 2px;
 }

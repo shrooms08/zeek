@@ -1,5 +1,6 @@
 /** My wallet (Zeek Pocket). Lives in this browser. */
 
+import { FitAmount } from "../components/FitAmount";
 import { qrSvg, toPocketError, type HistoryEntry } from "@zeek/pocket";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -748,26 +749,18 @@ function Home() {
           <div className="label flex items-center gap-2">
             <Icon name="wallet" size={18} /> Balance
           </div>
-          <div className="zk-amount" data-testid="wallet-balance">
-            <span
-              className="numeral"
-              style={{ fontSize: "clamp(56px, 9vw, 112px)", lineHeight: 0.95 }}
-            >
-              {spendable === undefined || confirming === undefined ? (
-                "…"
-              ) : (
-                <CountUp value={spendable + confirming} />
-              )}
-            </span>
-            <span className="zk-unit" style={{ fontSize: 26 }}>
-              ZEC
-            </span>
-          </div>
+          <FitAmount size={112} min={20} unit="ZEC" unitScale={0.24} testId="wallet-balance">
+            {spendable === undefined || confirming === undefined ? (
+              "…"
+            ) : (
+              <CountUp value={spendable + confirming} />
+            )}
+          </FitAmount>
           {b !== undefined && spendable !== undefined && confirming !== undefined && (
             <dl className="mt-2 flex flex-col gap-0.5 font-mono text-sm">
               <div className="flex gap-2">
                 <dt className="text-fog">Ready to dig</dt>
-                <dd className="text-white" data-testid="wallet-spendable">
+                <dd className="text-white min-w-0 break-all" data-testid="wallet-spendable">
                   {formatZec(spendable, { decimals: 8 })}
                 </dd>
               </div>
