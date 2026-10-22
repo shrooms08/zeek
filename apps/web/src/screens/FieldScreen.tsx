@@ -28,6 +28,7 @@ import { RevealLine } from "../components/RevealLine";
 import { TimeLeft } from "../components/TimeLeft";
 import { Loading, Offline } from "../components/ui";
 import { autoPick, cacheStage } from "../lib/digPlan";
+import { livePrize } from "../lib/prize";
 import { liteTiles, loadDigMode, saveDigMode, tapTile, type DigMode } from "../lib/digMode";
 import { formatZec, zat } from "../lib/money";
 import { roundAcceptsDigs } from "../lib/readiness";
@@ -137,6 +138,8 @@ export function FieldScreen() {
   const cache = zat(b.cache);
   const stage = cacheStage(cache);
   const landing = (b.landing ?? []).filter((d) => d.round === b.round);
+  // Mined prize plus this round's landing digs (src/lib/prize.ts).
+  const prizeNow = livePrize(b, config.data?.params);
   const empty = b.digs === 0 && landing.length === 0 && draft.tiles.length === 0 && open;
   const modal = pathname !== "/";
 
@@ -195,10 +198,15 @@ export function FieldScreen() {
         color="var(--color-gold)"
         testId="prize-amount"
       >
-        <CountUp value={zat(b.prize_pool_zat)} onGrow={onGrow} />
+        <CountUp value={prizeNow.total} onGrow={onGrow} />
       </FitAmount>
-      {b.prize_pool_zat === 0 && desktop && (
-        <p className="text-fog text-sm mt-1">Grows with every dig</p>
+      {prizeNow.landing > 0n ? (
+        <p className="text-fog text-sm mt-1 min-w-0" data-testid="prize-landing">
+          +{formatZec(prizeNow.landing)} landing
+        </p>
+      ) : (
+        prizeNow.total === 0n &&
+        desktop && <p className="text-fog text-sm mt-1">Grows with every dig</p>
       )}
     </motion.section>
   );
