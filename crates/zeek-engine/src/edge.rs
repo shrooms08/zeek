@@ -9,6 +9,12 @@
 //!   refused. Behind the tunnel every TCP peer is the local `cloudflared`, so
 //!   the client is the address the Function reports in [`CLIENT_HEADER`],
 //!   trusted only because the secret matched.
+//! * In **direct** mode (`ZEEK_CLIENT_IP_HEADER`, for a host whose own edge
+//!   is the only way in, such as Railway) the public listener also serves
+//!   requests without the secret, so the app can call it straight from the
+//!   browser. The client is then the last address in that header, the one
+//!   the host's edge appended (earlier entries are whatever the client
+//!   sent). A request that carries a wrong secret is still refused.
 //!
 //! Rate limits ([`crate::relay::RateLimiter`]) key on the resulting
 //! [`ClientIp`].
@@ -17,7 +23,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderName, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -134,31 +140,94 @@ async fn peer(mut request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
+/// Who may call the public listener.
+#[derive(Clone)]
+pub struct PublicAccess {
+    secret: ProxySecret,
+    /// Direct mode: the header the host's edge sets to the client address.
+    direct: Option<HeaderName>,
+}
+
+impl PublicAccess {
+    /// Only the proxy (the secret is required).
+    pub fn proxy_only(secret: ProxySecret) -> Self {
+        PublicAccess {
+            secret,
+            direct: None,
+        }
+    }
+
+    /// The proxy, and anyone else through the host's edge, which names the
+    /// client in `header`.
+    pub fn direct(secret: ProxySecret, header: &str) -> Result<Self, EngineError> {
+        let header = HeaderName::try_from(header.trim().to_ascii_lowercase())
+            .map_err(|_| EngineError::Config(format!("`{header}` is not a header name")))?;
+        if header.as_str() == PROXY_HEADER || header.as_str() == CLIENT_HEADER {
+            return Err(EngineError::Config(format!(
+                "the client address header cannot be `{header}`"
+            )));
+        }
+        Ok(PublicAccess {
+            secret,
+            direct: Some(header),
+        })
+    }
+
+    /// Whether requests without the secret are served.
+    pub fn is_direct(&self) -> bool {
+        self.direct.is_some()
+    }
+}
+
+/// The last address in a header value: `203.0.113.7`, `a, b, 203.0.113.7`,
+/// `[2001:db8::1]:443` or `203.0.113.7:443`.
+fn last_address(value: &str) -> Option<IpAddr> {
+    let last = value.rsplit(',').next()?.trim();
+    last.parse::<IpAddr>()
+        .ok()
+        .or_else(|| last.parse::<SocketAddr>().ok().map(|a| a.ip()))
+}
+
 async fn proxied(
-    State((secret, limits)): State<(ProxySecret, Arc<PublicLimits>)>,
+    State((access, limits)): State<(PublicAccess, Arc<PublicLimits>)>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let authentic = request
-        .headers()
-        .get(PROXY_HEADER)
-        .is_some_and(|v| secret.matches(v.as_bytes()));
-    if !authentic {
-        return refused(
-            StatusCode::FORBIDDEN,
-            "use the public site; this address only serves its proxy",
-        );
-    }
-    let client = request
-        .headers()
-        .get(CLIENT_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<IpAddr>().ok());
-    let Some(ip) = client else {
-        return refused(StatusCode::BAD_REQUEST, "the proxy did not name the client");
+    let given = request.headers().get(PROXY_HEADER);
+    let authentic = given.is_some_and(|v| access.secret.matches(v.as_bytes()));
+    let client = if authentic {
+        let client = request
+            .headers()
+            .get(CLIENT_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<IpAddr>().ok());
+        let Some(ip) = client else {
+            return refused(StatusCode::BAD_REQUEST, "the proxy did not name the client");
+        };
+        ip
+    } else {
+        // A wrong secret is refused in every mode; no secret is fine only
+        // in direct mode.
+        let Some(header) = access.direct.as_ref().filter(|_| given.is_none()) else {
+            return refused(
+                StatusCode::FORBIDDEN,
+                "use the public site; this address only serves its proxy",
+            );
+        };
+        let client = request
+            .headers()
+            .get(header)
+            .and_then(|v| v.to_str().ok())
+            .and_then(last_address);
+        let Some(ip) = client else {
+            return refused(StatusCode::BAD_REQUEST, "the client address is missing");
+        };
+        ip
     };
     // Nothing downstream needs the secret or the forwarded address header.
     request.headers_mut().remove(PROXY_HEADER);
+    request.headers_mut().remove(CLIENT_HEADER);
+    let ip = client;
     let client = ClientIp::new(ip);
     let now = std::time::Instant::now();
     if !(limits.global.allow(IpAddr::from([0, 0, 0, 0]), now).await
@@ -178,11 +247,12 @@ pub fn local(router: Router) -> Router {
     router.layer(middleware::from_fn(peer))
 }
 
-/// The router for the public listener: only the proxy may call it, and
-/// every route is rate limited per client and in total.
-pub fn public(router: Router, secret: ProxySecret) -> Router {
+/// The router for the public listener: the proxy (and, in direct mode,
+/// anyone through the host's edge) may call it, and every route is rate
+/// limited per client and in total.
+pub fn public(router: Router, access: PublicAccess) -> Router {
     router.layer(middleware::from_fn_with_state(
-        (secret, Arc::new(PublicLimits::default())),
+        (access, Arc::new(PublicLimits::default())),
         proxied,
     ))
 }
@@ -197,20 +267,37 @@ mod tests {
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
 
-    fn app() -> Router {
+    fn secret() -> ProxySecret {
+        ProxySecret::new(SECRET).expect("secret")
+    }
+
+    fn app(access: PublicAccess) -> Router {
         let echo = Router::new().route(
             "/who",
-            get(|request: Request| async move { ClientIp::of(&request).to_string() }),
+            get(|request: Request| async move {
+                // The forwarded address header never reaches the routes.
+                assert!(request.headers().get(CLIENT_HEADER).is_none());
+                ClientIp::of(&request).to_string()
+            }),
         );
-        public(echo, ProxySecret::new(SECRET).expect("secret"))
+        public(echo, access)
     }
 
     async fn call(headers: &[(&str, &str)]) -> (StatusCode, String) {
+        call_with(PublicAccess::proxy_only(secret()), headers).await
+    }
+
+    async fn call_direct(headers: &[(&str, &str)]) -> (StatusCode, String) {
+        let access = PublicAccess::direct(secret(), "X-Forwarded-For").expect("header");
+        call_with(access, headers).await
+    }
+
+    async fn call_with(access: PublicAccess, headers: &[(&str, &str)]) -> (StatusCode, String) {
         let mut builder = HttpRequest::builder().uri("/who");
         for (k, v) in headers {
             builder = builder.header(*k, *v);
         }
-        let response = app()
+        let response = app(access)
             .oneshot(builder.body(Body::empty()).expect("request"))
             .await
             .expect("response");
@@ -249,6 +336,43 @@ mod tests {
                 .0,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    #[tokio::test]
+    async fn direct_mode_takes_the_address_the_edge_appended() {
+        // What the client sent itself comes first; the edge's entry is last.
+        assert_eq!(
+            call_direct(&[("x-forwarded-for", "10.0.0.1, 203.0.113.9")]).await,
+            (StatusCode::OK, "203.0.113.9".to_owned())
+        );
+        assert_eq!(
+            call_direct(&[("x-forwarded-for", "[2001:db8:1:2::5]:443")]).await,
+            (StatusCode::OK, "2001:db8:1:2::".to_owned())
+        );
+        // A client cannot pick its bucket with the proxy's header.
+        assert_eq!(
+            call_direct(&[
+                ("x-forwarded-for", "203.0.113.9"),
+                (CLIENT_HEADER, "10.9.9.9")
+            ])
+            .await,
+            (StatusCode::OK, "203.0.113.9".to_owned())
+        );
+        assert_eq!(call_direct(&[]).await.0, StatusCode::BAD_REQUEST);
+        // The proxy still names its client.
+        assert_eq!(
+            call_direct(&[(PROXY_HEADER, SECRET), (CLIENT_HEADER, "198.51.100.4")]).await,
+            (StatusCode::OK, "198.51.100.4".to_owned())
+        );
+        // A wrong secret is refused, not served as a direct request.
+        assert_eq!(
+            call_direct(&[(PROXY_HEADER, "wrong"), ("x-forwarded-for", "203.0.113.9")])
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        assert!(PublicAccess::direct(secret(), "x-zeek-client").is_err());
+        assert!(PublicAccess::direct(secret(), "not a header").is_err());
     }
 
     #[test]

@@ -101,6 +101,10 @@ pub const DIGGING_VAR: &str = "ZEEK_DIGGING";
 pub const PUBLIC_BIND_VAR: &str = "ZEEK_PUBLIC_BIND";
 /// File holding the secret the Pages Function sends on every request.
 pub const PROXY_SECRET_FILE_VAR: &str = "ZEEK_PROXY_SECRET_FILE";
+/// Direct mode of the public listener (`crate::edge`): the header the host's
+/// edge sets to the client address, for example `X-Forwarded-For` on
+/// Railway. Unset: only the proxy may call the public listener.
+pub const CLIENT_IP_HEADER_VAR: &str = "ZEEK_CLIENT_IP_HEADER";
 pub const DB_PATH_VAR: &str = "ZEEK_ENGINE_DB";
 pub const BIND_VAR: &str = "ZEEK_ENGINE_BIND";
 pub const CORS_VAR: &str = "ZEEK_ENGINE_CORS";
@@ -130,6 +134,8 @@ pub struct EngineSettings {
     pub digging: Option<bool>,
     /// Public listener and the file holding its proxy secret.
     pub public: Option<(String, PathBuf)>,
+    /// `ZEEK_CLIENT_IP_HEADER`, when set (direct mode).
+    pub client_ip_header: Option<String>,
     /// Allowed CORS origins; empty means CORS headers are not sent.
     pub cors_origins: Vec<String>,
     pub relays: Vec<String>,
@@ -195,6 +201,7 @@ impl EngineSettings {
                 )),
                 None => None,
             },
+            client_ip_header: var(CLIENT_IP_HEADER_VAR)?.filter(|h| !h.trim().is_empty()),
             cors_origins: list(var(CORS_VAR)?, ""),
             relays: list(var(RELAYS_VAR)?, DEFAULT_RELAYS),
             poll_secs,

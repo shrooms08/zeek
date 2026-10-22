@@ -310,11 +310,21 @@ async fn run(settings: EngineSettings, config: GameConfig) -> anyhow::Result<()>
     if let Some((bind, secret_file)) = &settings.public {
         let secret = std::fs::read_to_string(secret_file)
             .with_context(|| format!("reading the proxy secret {}", secret_file.display()))?;
-        let public = edge::public(app, edge::ProxySecret::new(&secret)?);
+        let secret = edge::ProxySecret::new(&secret)?;
+        let access = match &settings.client_ip_header {
+            Some(header) => edge::PublicAccess::direct(secret, header)?,
+            None => edge::PublicAccess::proxy_only(secret),
+        };
+        let direct = access.is_direct();
+        let public = edge::public(app, access);
         let listener = tokio::net::TcpListener::bind(bind)
             .await
             .with_context(|| format!("binding {bind}"))?;
-        tracing::info!(bind = %bind, "public API listening (proxy secret required)");
+        if direct {
+            tracing::info!(bind = %bind, "public API listening (direct, and the proxy)");
+        } else {
+            tracing::info!(bind = %bind, "public API listening (proxy secret required)");
+        }
         servers.spawn(async move {
             axum::serve(
                 listener,
