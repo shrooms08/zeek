@@ -339,14 +339,17 @@ async fn config(State(state): State<Arc<AppState>>) -> ApiResult<ConfigResponse>
 }
 
 async fn board(State(state): State<Arc<AppState>>) -> ApiResult<BoardResponse> {
-    let board = {
+    // Landing digs whose transaction is already stored are left out: the
+    // board counts them (one indexed lookup per pending transaction).
+    let (board, landing) = {
         let db = reader(&state)?;
-        state.processor.board(&db)?
+        let board = state.processor.board(&db)?;
+        let landing = state
+            .landing
+            .digs_unmined(|txid| db.has_note_from_tx(txid))?;
+        (board, landing)
     };
-    Ok(Json(BoardResponse {
-        board,
-        landing: state.landing.digs(),
-    }))
+    Ok(Json(BoardResponse { board, landing }))
 }
 
 async fn pending(State(state): State<Arc<AppState>>) -> ApiResult<PendingResponse> {

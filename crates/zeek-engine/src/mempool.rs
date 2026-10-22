@@ -217,6 +217,47 @@ impl Landing {
         self.lock().published.clone()
     }
 
+    /// The current landing digs (oldest first) without those whose
+    /// transaction `is_mined` says is already stored. `GET /v1/board` serves
+    /// these: between storing a block and [`Landing::drop_mined`], a dig the
+    /// board already counts would otherwise also be landing, and an app
+    /// adding landing digs to the prize would count it twice.
+    pub fn digs_unmined(
+        &self,
+        mut is_mined: impl FnMut(&[u8; 32]) -> Result<bool, EngineError>,
+    ) -> Result<Vec<LandingDig>, EngineError> {
+        let (published, txids): (Vec<LandingDig>, HashMap<String, [u8; 32]>) = {
+            let inner = self.lock();
+            let txids = inner
+                .entries
+                .iter()
+                .map(|(k, e)| (e.dig.id.clone(), k.txid))
+                .collect();
+            (inner.published.clone(), txids)
+        };
+        let mut checked: HashMap<[u8; 32], bool> = HashMap::new();
+        let mut out = Vec::with_capacity(published.len());
+        for dig in published {
+            // `published` always mirrors the entries; a dig without one was
+            // dropped meanwhile and is left out.
+            let Some(txid) = txids.get(&dig.id) else {
+                continue;
+            };
+            let mined = match checked.get(txid) {
+                Some(m) => *m,
+                None => {
+                    let m = is_mined(txid)?;
+                    checked.insert(*txid, m);
+                    m
+                }
+            };
+            if !mined {
+                out.push(dig);
+            }
+        }
+        Ok(out)
+    }
+
     fn publish(&self, inner: &mut Inner) {
         let mut digs: Vec<LandingDig> = inner.entries.values().map(|e| e.dig.clone()).collect();
         digs.sort_by(|a, b| a.first_seen.cmp(&b.first_seen).then(a.id.cmp(&b.id)));
@@ -718,6 +759,14 @@ mod tests {
             .await
             .expect("ingest");
         let store = &f.store;
+        // Stored but not yet dropped: the board's landing list already
+        // leaves it out (deduplicated by txid), so it is never counted twice.
+        assert_eq!(f.landing.digs().len(), 1);
+        let unmined = f
+            .landing
+            .digs_unmined(|txid| store.read(|db| db.has_note_from_tx(txid)))
+            .expect("unmined");
+        assert!(unmined.is_empty());
         let dropped = f
             .landing
             .drop_mined(unix_now(), |txid| {
