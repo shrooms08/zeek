@@ -63,6 +63,8 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
     await expect(page.getByTestId("field-screen")).toBeVisible({ timeout: 60_000 });
     // Resuming a dig that stopped part-way digs exactly the tiles not sent.
     const tiles = resumeFrom?.unsent ?? Array.from({ length: 25 }, (_, t) => t);
+    // Several tiles: Pro (Lite digs one).
+    await page.getByTestId("mode-pro").click();
     for (const t of tiles) await page.locator(`[data-tile="${t}"]`).click();
     await page.getByTestId("amount-input").fill("0.001");
     await page.getByTestId("amount-input").press("Enter");
@@ -73,7 +75,7 @@ test("25 tiles, a win, a proof, its share page and the Verified win page", async
     }
     await page.getByTestId("dig-button").click();
     await expect(page.getByTestId("dig-confirm")).toBeVisible({ timeout: 60_000 });
-    await page.getByTestId("dig-privately").click();
+    await page.getByTestId("dig-send").click();
     await expect(page.getByTestId("batch-progress")).toBeVisible({ timeout: 120_000 });
     await shot(page, resume ? "dig-pocket-batches-resumed-1440" : "dig-pocket-batches-1440");
     const done = page.getByTestId("dig-done");

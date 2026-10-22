@@ -646,7 +646,7 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
             busy || value === null || !verdict.ok || value + fee > spendable || passphrase === ""
           }
         >
-          {busy ? "Sending…" : "Withdraw privately"}
+          {busy ? "Sending…" : "Withdraw"}
         </button>
       </form>
     </Panel>

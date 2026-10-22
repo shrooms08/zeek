@@ -29,6 +29,8 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
       Number(await page.locator(`[data-tile="${t}"]`).getAttribute("data-depth")),
     ),
   );
+  // Several tiles: Pro (Lite digs one).
+  await page.getByTestId("mode-pro").click();
   for (const t of TILES) await page.locator(`[data-tile="${t}"]`).click();
   await page.getByTestId("amount-input").fill("0.001");
   await page.getByTestId("amount-input").press("Enter");
@@ -41,7 +43,7 @@ test("dig 2 tiles with a message; depth changes; message reaches the Campfire", 
   await expect(page.getByTestId("dig-confirm")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("confirm-total")).toContainText("0.00215");
   await shot(page, "dig-pocket-confirm-1440");
-  await page.getByTestId("dig-privately").click();
+  await page.getByTestId("dig-send").click();
   await expect(page.getByTestId("dig-sealing")).toBeVisible();
   await shot(page, "dig-pocket-sealing-1440");
   const done = page.getByTestId("dig-done");

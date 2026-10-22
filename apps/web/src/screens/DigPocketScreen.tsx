@@ -319,9 +319,9 @@ export default function DigPocketScreen() {
             style={{ fontSize: 24, minHeight: 64 }}
             disabled={tiles.length === 0 || spendable === undefined || !notesOk}
             onClick={() => void start()}
-            data-testid="dig-privately"
+            data-testid="dig-send"
           >
-            <Icon name="shovel" size={24} /> Dig privately
+            <Icon name="shovel" size={24} /> Dig
           </button>
           <p className="text-fog text-xs mt-3">
             The game also takes 0.00005 per dig from the prize at the end of the round.

@@ -91,7 +91,7 @@ async function withdrawFromPublicPocket(to: string, amount: string): Promise<str
     await card.getByPlaceholder("utest1…").fill(to);
     await card.locator("input[inputmode=decimal]").fill(amount);
     await p.getByTestId("withdraw-passphrase").fill(state.passphrase);
-    await card.getByRole("button", { name: "Withdraw privately" }).click();
+    await card.getByRole("button", { name: "Withdraw", exact: true }).click();
     const status = card.getByRole("status");
     await expect(status).toContainText(/[0-9a-f]{64}/, { timeout: 300_000 });
     return /[0-9a-f]{64}/.exec((await status.textContent()) ?? "")?.[0];
@@ -111,7 +111,7 @@ async function digOne(page: Page, tile: number): Promise<"done" | "change"> {
   const change = page.getByTestId("dig-change-coming");
   await expect(confirm.or(change)).toBeVisible({ timeout: 60_000 });
   if (await change.isVisible()) return "change";
-  await page.getByTestId("dig-privately").click();
+  await page.getByTestId("dig-send").click();
   const done = page.getByTestId("dig-done");
   await expect(done.or(page.getByTestId("dig-error"))).toBeVisible({ timeout: 300_000 });
   await expect(done).toBeVisible();
