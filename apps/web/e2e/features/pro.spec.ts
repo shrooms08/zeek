@@ -15,6 +15,18 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("zeek.seenOnboarding", "1");
   });
+  // An open round whatever the real clock says (Auto-pick, ALL and auto-dig
+  // are off while a round closes); the live stream stays silent so it stays
+  // open.
+  await page.routeWebSocket(/\/v1\/stream/, () => undefined);
+  await page.route(/\/v1\/board$/, async (route) => {
+    const response = await route.fetch();
+    const real = (await response.json()) as { blocks_remaining: number };
+    await route.fulfill({
+      response,
+      json: { ...real, status: "open", blocks_remaining: Math.max(real.blocks_remaining, 20) },
+    });
+  });
 });
 
 test("Lite by default; Pro is remembered in this browser", async ({ page }) => {
