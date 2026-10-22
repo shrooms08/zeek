@@ -46,6 +46,15 @@ pub struct KeyholderConfig {
     pub coordinator_identity: String,
     /// Seconds between chain polls.
     pub poll_secs: u64,
+    /// Whether `serve` also answers DKG messages. `false` where a key
+    /// ceremony must never run, such as a hosted node: its DKG round-2
+    /// packages travel signed but not encrypted (security review M5).
+    #[serde(default = "dkg_default")]
+    pub dkg: bool,
+}
+
+fn dkg_default() -> bool {
+    true
 }
 
 impl KeyholderConfig {
@@ -160,6 +169,7 @@ mod tests {
             peers: (1..=3).filter(|i| *i != identifier).map(peer).collect(),
             coordinator_identity: "22".repeat(32),
             poll_secs: 10,
+            dkg: true,
         }
     }
 
@@ -178,5 +188,16 @@ mod tests {
         let mut bad = sample(1);
         bad.lightwalletd.clear();
         assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn dkg_is_on_unless_a_config_turns_it_off() {
+        let mut json = serde_json::to_value(sample(1)).expect("json");
+        json.as_object_mut().expect("object").remove("dkg");
+        let old: KeyholderConfig = serde_json::from_value(json.clone()).expect("old config");
+        assert!(old.dkg, "configs written before the switch keep DKG");
+        json["dkg"] = serde_json::Value::Bool(false);
+        let hosted: KeyholderConfig = serde_json::from_value(json).expect("hosted config");
+        assert!(!hosted.dkg);
     }
 }

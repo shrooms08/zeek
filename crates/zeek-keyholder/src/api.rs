@@ -92,13 +92,18 @@ pub fn dkg_router(node: Arc<DkgNode>) -> Router {
 }
 
 /// Builds the router.
+/// Builds the router; the DKG endpoints only when the config allows them.
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/v1/sign/request", post(sign_request))
         .route("/v1/sign/round2", post(sign_round2))
         .route("/v1/health", get(health))
-        .with_state(state.clone())
-        .merge(dkg_router(state.dkg.clone()))
+        .with_state(state.clone());
+    if state.config.dkg {
+        app.merge(dkg_router(state.dkg.clone()))
+    } else {
+        app
+    }
 }
 
 fn bad_request(e: impl std::fmt::Display) -> Response {
