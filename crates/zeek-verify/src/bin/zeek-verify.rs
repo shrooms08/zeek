@@ -105,6 +105,12 @@ enum Command {
         /// clients are counted by the address the proxy names.
         #[arg(long)]
         proxy_secret_file: Option<PathBuf>,
+        /// Direct mode, behind a host whose own edge is the only way in
+        /// (Railway): browsers call the relay straight, and each is counted
+        /// by the last address in this header, the one the edge appended.
+        /// Requests with the proxy secret still name their client.
+        #[arg(long)]
+        client_ip_header: Option<String>,
     },
     /// Print a settled round's replay (depth stages block by block, the
     /// draw and the payout; never amounts per tile) as JSON, from its proof
@@ -571,49 +577,80 @@ fn client_key(ip: std::net::IpAddr) -> std::net::IpAddr {
     }
 }
 
-/// Checks the proxy secret (when configured) and the rate limits.
+/// Who may call the relay and how a client is named.
+#[derive(Clone, Default)]
+struct Access {
+    /// The proxy's secret, when the relay sits behind the public site.
+    secret: Option<Arc<str>>,
+    /// Direct mode: the header the host's edge sets to the client address.
+    direct: Option<axum::http::HeaderName>,
+}
+
+/// The last address in a header value (`a, b, 203.0.113.7`,
+/// `[2001:db8::1]:443`, `203.0.113.7:443`).
+fn last_address(value: &str) -> Option<std::net::IpAddr> {
+    let last = value.rsplit(',').next()?.trim();
+    last.parse::<std::net::IpAddr>()
+        .ok()
+        .or_else(|| last.parse::<SocketAddr>().ok().map(|a| a.ip()))
+}
+
+/// The client a request is counted against, or the refusal.
+fn client_of(
+    access: &Access,
+    headers: &axum::http::HeaderMap,
+    peer: std::net::IpAddr,
+) -> Result<std::net::IpAddr, (StatusCode, &'static str)> {
+    let given = headers.get("x-zeek-proxy").map(|v| v.as_bytes());
+    if let (Some(secret), Some(given)) = (&access.secret, given) {
+        let expected = secret.as_bytes();
+        let same = given.len() == expected.len()
+            && given
+                .iter()
+                .zip(expected)
+                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                == 0;
+        if !same {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "use the public site; this address only serves its proxy",
+            ));
+        }
+        return headers
+            .get("x-zeek-client")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<std::net::IpAddr>().ok())
+            .ok_or((StatusCode::BAD_REQUEST, "the proxy did not name the client"));
+    }
+    if let Some(header) = &access.direct {
+        if given.is_some() {
+            return Err((StatusCode::FORBIDDEN, "unexpected proxy header"));
+        }
+        return headers
+            .get(header)
+            .and_then(|v| v.to_str().ok())
+            .and_then(last_address)
+            .ok_or((StatusCode::BAD_REQUEST, "the client address is missing"));
+    }
+    if access.secret.is_some() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "use the public site; this address only serves its proxy",
+        ));
+    }
+    Ok(peer)
+}
+
+/// Checks who calls (see [`client_of`]) and the rate limits.
 async fn guard(
-    State((secret, limits)): State<(Option<Arc<str>>, Arc<Limits>)>,
+    State((access, limits)): State<(Access, Arc<Limits>)>,
     axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<SocketAddr>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
-    let client = match &secret {
-        None => peer.ip(),
-        Some(secret) => {
-            let given = request
-                .headers()
-                .get("x-zeek-proxy")
-                .map(|v| v.as_bytes())
-                .unwrap_or_default();
-            let expected = secret.as_bytes();
-            let same = given.len() == expected.len()
-                && given
-                    .iter()
-                    .zip(expected)
-                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                    == 0;
-            if !same {
-                return relay_error(
-                    StatusCode::FORBIDDEN,
-                    "use the public site; this address only serves its proxy".to_owned(),
-                );
-            }
-            match request
-                .headers()
-                .get("x-zeek-client")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.trim().parse::<std::net::IpAddr>().ok())
-            {
-                Some(ip) => ip,
-                None => {
-                    return relay_error(
-                        StatusCode::BAD_REQUEST,
-                        "the proxy did not name the client".to_owned(),
-                    )
-                }
-            }
-        }
+    let client = match client_of(&access, request.headers(), peer.ip()) {
+        Ok(ip) => ip,
+        Err((status, message)) => return relay_error(status, message.to_owned()),
     };
     if !limits.allow(client_key(client)) {
         return relay_error(
@@ -629,6 +666,7 @@ async fn run_relay(
     bind: SocketAddr,
     cors: String,
     proxy_secret_file: Option<PathBuf>,
+    client_ip_header: Option<String>,
 ) -> anyhow::Result<()> {
     let secret: Option<Arc<str>> = match &proxy_secret_file {
         Some(path) => {
@@ -643,6 +681,19 @@ async fn run_relay(
         }
         None => None,
     };
+    let direct = match client_ip_header.as_deref().map(str::trim) {
+        Some(h) if !h.is_empty() => {
+            let name = axum::http::HeaderName::try_from(h.to_ascii_lowercase())
+                .with_context(|| format!("`{h}` is not a header name"))?;
+            anyhow::ensure!(
+                !name.as_str().starts_with("x-zeek-"),
+                "the client address header cannot be `{name}`"
+            );
+            Some(name)
+        }
+        _ => None,
+    };
+    let access = Access { secret, direct };
     let urls: Vec<String> = lightwalletd
         .split(',')
         .map(str::trim)
@@ -676,7 +727,7 @@ async fn run_relay(
         )
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(
-            (secret, Arc::new(Limits::default())),
+            (access, Arc::new(Limits::default())),
             guard,
         ));
     eprintln!("read-only relay for {lightwalletd} on http://{bind}");
@@ -707,9 +758,16 @@ fn main() -> anyhow::Result<()> {
                 bind,
                 cors,
                 proxy_secret_file,
-            } => run_relay(lightwalletd, bind, cors, proxy_secret_file)
-                .await
-                .map(|()| true),
+                client_ip_header,
+            } => run_relay(
+                lightwalletd,
+                bind,
+                cors,
+                proxy_secret_file,
+                client_ip_header,
+            )
+            .await
+            .map(|()| true),
             Command::Replay { bundle } => run_replay(&bundle),
         }
     })?;
@@ -717,4 +775,74 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    const SECRET: &str = "0123456789abcdef0123456789abcdef";
+    const PEER: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().expect("value"));
+        }
+        h
+    }
+
+    fn ip(s: &str) -> std::net::IpAddr {
+        s.parse().expect("ip")
+    }
+
+    #[test]
+    fn local_relays_count_the_peer() {
+        assert_eq!(client_of(&Access::default(), &headers(&[]), PEER), Ok(PEER));
+    }
+
+    #[test]
+    fn behind_the_proxy_only_the_secret_gets_through() {
+        let access = Access {
+            secret: Some(SECRET.into()),
+            direct: None,
+        };
+        let ok = headers(&[("x-zeek-proxy", SECRET), ("x-zeek-client", "203.0.113.7")]);
+        assert_eq!(client_of(&access, &ok, PEER), Ok(ip("203.0.113.7")));
+        let none = headers(&[("x-forwarded-for", "203.0.113.7")]);
+        assert_eq!(
+            client_of(&access, &none, PEER).map_err(|e| e.0),
+            Err(StatusCode::FORBIDDEN)
+        );
+        let wrong = headers(&[("x-zeek-proxy", "x"), ("x-zeek-client", "203.0.113.7")]);
+        assert_eq!(
+            client_of(&access, &wrong, PEER).map_err(|e| e.0),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn direct_mode_takes_the_address_the_edge_appended() {
+        let access = Access {
+            secret: None,
+            direct: Some(axum::http::HeaderName::from_static("x-forwarded-for")),
+        };
+        let h = headers(&[
+            ("x-forwarded-for", "10.0.0.1, 203.0.113.9"),
+            ("x-zeek-client", "10.9.9.9"),
+        ]);
+        assert_eq!(client_of(&access, &h, PEER), Ok(ip("203.0.113.9")));
+        let v6 = headers(&[("x-forwarded-for", "[2001:db8::5]:443")]);
+        assert_eq!(client_of(&access, &v6, PEER), Ok(ip("2001:db8::5")));
+        assert_eq!(
+            client_of(&access, &headers(&[]), PEER).map_err(|e| e.0),
+            Err(StatusCode::BAD_REQUEST)
+        );
+        let spoof = headers(&[("x-zeek-proxy", SECRET), ("x-forwarded-for", "203.0.113.9")]);
+        assert_eq!(
+            client_of(&access, &spoof, PEER).map_err(|e| e.0),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
 }
