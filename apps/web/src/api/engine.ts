@@ -106,10 +106,22 @@ export const engine = {
     get<CampfirePage>(`/v1/campfire?limit=50${includeHidden ? "&include_hidden=1" : ""}`),
 };
 
+/**
+ * Where share pages and cards are linked from: VITE_ZEEK_SHARE_URL (this
+ * site's own origin in the public build, whose /share/* proxy keeps them
+ * in the edge cache and their links stable wherever the engine is hosted),
+ * by default the engine itself.
+ */
+const SHARE_SETTING = import.meta.env.VITE_ZEEK_SHARE_URL as string | undefined;
+export const SHARE_BASE: string =
+  SHARE_SETTING === undefined || SHARE_SETTING === ""
+    ? ENGINE_URL
+    : new URL(SHARE_SETTING, window.location.origin).href.replace(/\/+$/, "");
+
 /** Share page and image URLs for a proof (served by the engine). */
 export function shareUrls(proofId: string): { page: string; image: string } {
   return {
-    page: `${ENGINE_URL}/share/win/${proofId}`,
-    image: `${ENGINE_URL}/share/win/${proofId}.png`,
+    page: `${SHARE_BASE}/share/win/${proofId}`,
+    image: `${SHARE_BASE}/share/win/${proofId}.png`,
   };
 }

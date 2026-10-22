@@ -29,6 +29,12 @@ export interface Env {
   ZEEK: KVNamespace;
   /** Shared secret also stored in `.secrets/proxy-secret` on the Mac. */
   ZEEK_PROXY_SECRET: string;
+  /**
+   * Hosted on Railway: the engine's and the relay's fixed public origins
+   * (`https://*.up.railway.app`, wrangler.toml). When set, KV is not read.
+   */
+  ZEEK_ENGINE_ORIGIN?: string;
+  ZEEK_RELAY_ORIGIN?: string;
 }
 
 /** A KV entry written by `scripts/zeek-up.sh`. */
@@ -162,7 +168,15 @@ export function validUpstream(value: unknown): Upstream | null {
   return { url, updated };
 }
 
+/** A fixed hosted origin: only an https Railway service domain. */
+export function fixedUpstream(value: string): Upstream | null {
+  if (!/^https:\/\/[a-z0-9-]+\.up\.railway\.app$/.test(value)) return null;
+  return { url: value, updated: 0 };
+}
+
 async function upstreamOf(env: Env, service: Service): Promise<Upstream | null> {
+  const fixed = service === "engine" ? env.ZEEK_ENGINE_ORIGIN : env.ZEEK_RELAY_ORIGIN;
+  if (fixed !== undefined && fixed !== "") return fixedUpstream(fixed);
   const now = Date.now();
   const hit = remembered.get(service);
   if (hit !== undefined && now - hit.at < KV_REUSE_MS) return hit.upstream;

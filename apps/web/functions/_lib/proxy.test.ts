@@ -4,6 +4,7 @@ import {
   type Env,
   allowed,
   edgeCacheable,
+  fixedUpstream,
   forward,
   subpath,
   validUpstream,
@@ -44,6 +45,42 @@ describe("proxy", () => {
     ).toBeNull();
     expect(validUpstream({ url: "https://a.trycloudflare.com/path", updated: 1 })).toBeNull();
     expect(validUpstream(null)).toBeNull();
+  });
+
+  it("accepts a fixed hosted origin only on Railway's https service domains", () => {
+    expect(fixedUpstream("https://engine-production.up.railway.app")).toEqual({
+      url: "https://engine-production.up.railway.app",
+      updated: 0,
+    });
+    expect(fixedUpstream("http://engine-production.up.railway.app")).toBeNull();
+    expect(fixedUpstream("https://engine.up.railway.app.evil.example")).toBeNull();
+    expect(fixedUpstream("https://engine.up.railway.app/path")).toBeNull();
+    expect(fixedUpstream("https://evil.example")).toBeNull();
+  });
+
+  it("uses the fixed origin instead of KV when one is configured", async () => {
+    const kv = vi.fn(() => Promise.resolve(null));
+    const targets: string[] = [];
+    const fetchMock = vi.fn((target: string) => {
+      targets.push(target);
+      return Promise.resolve(
+        new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      ZEEK: { get: kv },
+      ZEEK_PROXY_SECRET: "s",
+      ZEEK_ENGINE_ORIGIN: "https://engine-production.up.railway.app",
+    } as unknown as Env;
+    const request = new Request("https://playzeek.pages.dev/api/v1/board", {
+      headers: { "CF-Connecting-IP": "203.0.113.7" },
+    });
+    const response = await forward(request, env, "engine", "/v1/board");
+    expect(response.status).toBe(200);
+    expect(kv).not.toHaveBeenCalled();
+    expect(targets).toEqual(["https://engine-production.up.railway.app/v1/board"]);
+    vi.unstubAllGlobals();
   });
 
   it("maps route parameters to upstream paths", () => {
