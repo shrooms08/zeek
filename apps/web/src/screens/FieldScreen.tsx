@@ -28,7 +28,7 @@ import { RevealLine } from "../components/RevealLine";
 import { TimeLeft } from "../components/TimeLeft";
 import { Loading, Offline } from "../components/ui";
 import { autoPick, cacheStage } from "../lib/digPlan";
-import { loadDigMode, saveDigMode, type DigMode } from "../lib/digMode";
+import { liteTiles, loadDigMode, saveDigMode, tapTile, type DigMode } from "../lib/digMode";
 import { formatZec, zat } from "../lib/money";
 import { roundAcceptsDigs } from "../lib/readiness";
 import { useMedia } from "../lib/useMedia";
@@ -68,6 +68,8 @@ export function FieldScreen() {
   const [onboarding, setOnboarding] = useState(() => !hasSeenOnboarding());
   const [prizePulse, setPrizePulse] = useState(0);
   const [mode, setMode] = useState<DigMode>(loadDigMode);
+  // Switching to Lite dropped tiles: say so until the pick changes.
+  const [liteTrimmed, setLiteTrimmed] = useState(false);
   const spacing = useBlockSpacing();
 
   // A round this browser dug in has closed: the reveal takes over once.
@@ -144,13 +146,16 @@ export function FieldScreen() {
     el?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
     el?.focus({ preventScroll: true });
   };
+  // Lite picks one quiet tile; Pro at least 3 (or as many as are picked).
   const doAutoPick = () => {
-    const picked = autoPick(b.stages, Math.max(3, draft.tiles.length), cryptoRandom);
-    draft.setTiles(picked);
+    const count = mode === "lite" ? 1 : Math.max(3, draft.tiles.length);
+    draft.setTiles(autoPick(b.stages, count, cryptoRandom));
+    setLiteTrimmed(false);
   };
   const toggle = (i: number) => {
     if (!draft.tiles.includes(i)) play("pin");
-    draft.toggle(i);
+    draft.setTiles(tapTile(mode, draft.tiles, i));
+    setLiteTrimmed(false);
   };
   // Digs stop 4 blocks before the round ends: a payment sent later might
   // not be mined inside the window (the Pocket refuses it too).
@@ -284,7 +289,17 @@ export function FieldScreen() {
       onMode={(m) => {
         setMode(m);
         saveDigMode(m);
+        if (m === "lite") {
+          // One tile is one payment: nothing to dig separately.
+          const kept = liteTiles(draft.tiles);
+          draft.setTiles(kept.tiles);
+          draft.setSeparate(false);
+          setLiteTrimmed(kept.trimmed);
+        } else {
+          setLiteTrimmed(false);
+        }
       }}
+      liteTrimmed={liteTrimmed && mode === "lite"}
       onTiles={draft.setTiles}
       spendable={
         unlocked && balance.data !== undefined ? zat(balance.data.spendable_zat) : undefined

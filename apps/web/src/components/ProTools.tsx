@@ -15,7 +15,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useRounds } from "../api/queries";
 import { digTotal } from "../lib/digPlan";
-import type { DigMode } from "../lib/digMode";
+import { MODE_LINE, type DigMode } from "../lib/digMode";
 import { formatZec, type Zat } from "../lib/money";
 import { ALL_TILES, maxPerTile, QUICK_ADD } from "../lib/pro";
 import { stopMessage } from "../lib/autoDig";
@@ -34,22 +34,27 @@ export function ModeSwitch({
   onChange: (mode: DigMode) => void;
 }) {
   return (
-    <div className="zk-mode flex" role="radiogroup" aria-label="Dig panel mode">
-      {(["lite", "pro"] as const).map((m) => (
-        <button
-          key={m}
-          type="button"
-          role="radio"
-          aria-checked={mode === m}
-          className={`zk-mode-option ${mode === m ? "zk-mode-on" : ""}`}
-          onClick={() => {
-            onChange(m);
-          }}
-          data-testid={`mode-${m}`}
-        >
-          {m === "lite" ? "Lite" : "Pro"}
-        </button>
-      ))}
+    <div className="flex flex-col gap-1.5">
+      <div className="zk-mode flex" role="radiogroup" aria-label="Dig panel mode">
+        {(["lite", "pro"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            className={`zk-mode-option ${mode === m ? "zk-mode-on" : ""}`}
+            onClick={() => {
+              onChange(m);
+            }}
+            data-testid={`mode-${m}`}
+          >
+            {m === "lite" ? "Lite" : "Pro"}
+          </button>
+        ))}
+      </div>
+      <p className="text-fog text-sm" data-testid="mode-line">
+        {MODE_LINE[mode]}
+      </p>
     </div>
   );
 }

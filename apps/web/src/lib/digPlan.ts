@@ -45,9 +45,10 @@ export function digTotal(tiles: readonly number[], amountEach: Zat, separate: bo
 }
 
 /**
- * Auto-pick: `count` tiles (at least 3), favouring the shallowest (lowest
- * stage); ties broken at random with `random`, so different players spread
- * out. Returns tile indices in pick order.
+ * Auto-pick: `count` tiles (at least 1; Lite asks for one, Pro for at least
+ * 3), favouring the shallowest (lowest stage); ties broken at random with
+ * `random`, so different players spread out. Returns tile indices in pick
+ * order.
  */
 export function autoPick(
   stages: readonly number[],
@@ -55,7 +56,7 @@ export function autoPick(
   random: () => number,
   exclude: readonly number[] = [],
 ): number[] {
-  const want = Math.min(TILE_COUNT - exclude.length, Math.max(3, count));
+  const want = Math.min(TILE_COUNT - exclude.length, Math.max(1, count));
   const candidates = stages
     .map((stage, tile) => ({ tile, stage, jitter: random() }))
     .filter((c) => !exclude.includes(c.tile))

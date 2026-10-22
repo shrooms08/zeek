@@ -4,9 +4,11 @@
  * choice. Empty, it shrinks to "Tap tiles to dig" and Auto-pick (1B).
  * `compact` is the mobile bottom sheet (1C).
  *
- * Lite (the default) is that flow. Pro adds <ProTools> (ALL, quick
- * amounts, MAX, auto-dig) and "Your digs"; the mode is remembered in this
- * browser. A running auto-dig shows its Stop button in either mode.
+ * Lite (the default) digs one tile (src/lib/digMode.ts): no "Dig
+ * separately", since one tile is one payment. Pro adds many tiles,
+ * <ProTools> (ALL, quick amounts, MAX, auto-dig), Dig separately and "Your
+ * digs"; the mode is remembered in this browser. A running auto-dig shows
+ * its Stop button in either mode.
  */
 
 import { FitAmount, useFitInput } from "./FitAmount";
@@ -14,7 +16,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { digTotal } from "../lib/digPlan";
-import type { DigMode } from "../lib/digMode";
+import { LITE_TRIMMED, type DigMode } from "../lib/digMode";
 import { AMOUNT_STEP, formatZec, parseZec, PRESETS, type Zat } from "../lib/money";
 import { EASE } from "../motion/tokens";
 import { Icon } from "./Icon";
@@ -149,6 +151,8 @@ export interface DigPanelProps {
   closed: boolean;
   /** Why digs are closed, when it is not the round (digging off). */
   closedReason?: ClosedReason | undefined;
+  /** Switching to Lite dropped extra tiles. */
+  liteTrimmed?: boolean;
   pocketLabel: string;
   /** The mobile bottom sheet. */
   compact?: boolean;
@@ -205,7 +209,16 @@ export function DigPanel(p: DigPanelProps) {
   const compact = p.compact === true;
   const state = p.closed ? "closed" : n === 0 ? "empty" : tooLong ? "closed" : "idle";
   const pro = p.mode === "pro";
-  const modeSwitch = <ModeSwitch mode={p.mode} onChange={p.onMode} />;
+  const modeSwitch = (
+    <>
+      <ModeSwitch mode={p.mode} onChange={p.onMode} />
+      {p.liteTrimmed === true && (
+        <p className="text-white text-sm" role="status" data-testid="lite-trimmed">
+          {LITE_TRIMMED}
+        </p>
+      )}
+    </>
+  );
   const proTools = pro && (
     <ProTools
       tiles={p.tiles}
@@ -284,7 +297,7 @@ export function DigPanel(p: DigPanelProps) {
           >
             <Icon name="wand" size={16} /> Auto
           </button>
-          <SeparateSwitch on={p.separate} onChange={p.onSeparate} short />
+          {pro && <SeparateSwitch on={p.separate} onChange={p.onSeparate} short />}
         </div>
         <AmountPicker value={p.amountEach} min={p.minDig} onChange={p.onAmount} compact />
         {proTools}
@@ -348,7 +361,7 @@ export function DigPanel(p: DigPanelProps) {
           disabled={p.closed}
           data-testid="auto-pick"
         >
-          <Icon name="wand" size={18} /> Auto-pick 3 quiet tiles
+          <Icon name="wand" size={18} /> Auto-pick a quiet tile
         </button>
         <span className="sr-only" data-testid="tile-count">
           0
@@ -400,7 +413,7 @@ export function DigPanel(p: DigPanelProps) {
         >
           <Icon name="wand" size={18} /> Auto-pick
         </button>
-        <SeparateSwitch on={p.separate} onChange={p.onSeparate} short={false} />
+        {pro && <SeparateSwitch on={p.separate} onChange={p.onSeparate} short={false} />}
       </div>
       {message}
       <div

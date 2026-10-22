@@ -31,9 +31,14 @@ describe("dig planning", () => {
 
   it("auto-picks the shallowest tiles, at least 3", () => {
     const stages = Array.from({ length: 25 }, (_, i) => (i < 5 ? 0 : 3));
-    const picked = autoPick(stages, 1, () => 0.5);
+    const picked = autoPick(stages, 3, () => 0.5);
     expect(picked).toHaveLength(3);
     expect(picked.every((t) => t < 5)).toBe(true);
+    // Lite's one tile is one of the shallowest too.
+    const one = autoPick(stages, 1, () => 0.5);
+    expect(one).toHaveLength(1);
+    expect(one.every((t) => t < 5)).toBe(true);
+    expect(autoPick(stages, 0, () => 0.5)).toHaveLength(1);
     expect(autoPick(stages, 4, () => 0.5, [0, 1]).every((t) => t !== 0 && t !== 1)).toBe(true);
   });
 

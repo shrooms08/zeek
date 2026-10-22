@@ -137,10 +137,17 @@ details (totals, fees, payouts, history) show all 8.
 
 ## Lite and Pro
 
-The dig panel has a Lite / Pro switch, remembered in this browser.
+The dig panel has a Lite / Pro switch, remembered in this browser, with
+one line under it: Lite "One tile, quick dig.", Pro "Many tiles, auto-dig,
+your history." The rules are in `src/lib/digMode.ts`.
 
-- **Lite** (the default) is the flow above.
-- **Pro** adds ALL and Clear; +0.001, +0.01, +0.1 and MAX (the Pocket's
+- **Lite** (the default) digs one tile. Tapping another tile moves the
+  pick, Auto-pick picks one quiet tile, and "Dig separately" is hidden: one
+  tile is one payment. The amount presets and the Campfire message stay.
+  Switching from Pro with several tiles keeps the first one and says "Lite
+  digs one tile. Switch to Pro for more."
+- **Pro** picks many tiles and adds ALL and Clear; Dig separately;
+  +0.001, +0.01, +0.1 and MAX (the Pocket's
   spendable balance minus fees, over the picked tiles); the exact total
   line; and **Your digs**, this browser's own record with each round's
   public result and a Verify link. "Pro shows more about you. It never

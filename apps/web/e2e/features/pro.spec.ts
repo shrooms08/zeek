@@ -36,6 +36,61 @@ test("Lite by default; Pro is remembered in this browser", async ({ page }) => {
   await expect(page.getByTestId("dig-panel")).toHaveAttribute("data-mode", "lite");
 });
 
+test("Lite digs one tile; Pro picks many; back in Lite the first is kept", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
+  const panel = page.getByTestId("dig-panel");
+  const tile = (n: number) => page.locator(`[data-tile="${n}"]`);
+  await expect(page.getByTestId("mode-line")).toHaveText("One tile, quick dig.");
+
+  // Lite: tapping another tile moves the pick; no "Dig separately".
+  await tile(3).click();
+  await tile(9).click();
+  await expect(page.getByTestId("tile-count")).toHaveText("1");
+  await expect(tile(9)).toHaveAttribute("data-selected", "true");
+  await expect(tile(3)).toHaveAttribute("data-selected", "false");
+  await expect(panel.getByTestId("separate")).toHaveCount(0);
+  // Tapping the picked tile again clears it; Auto-pick picks one.
+  await tile(9).click();
+  await expect(page.getByTestId("tile-count")).toHaveText("0");
+  await page.getByTestId("auto-pick").click();
+  await expect(page.getByTestId("tile-count")).toHaveText("1");
+
+  // Pro: many tiles and the separate switch.
+  await page.getByTestId("mode-pro").click();
+  await expect(page.getByTestId("mode-line")).toHaveText("Many tiles, auto-dig, your history.");
+  const first = Number(
+    await page.locator('[data-selected="true"]').first().getAttribute("data-tile"),
+  );
+  const others = [0, 1, 2].filter((n) => n !== first).slice(0, 2);
+  for (const n of others) await tile(n).click();
+  await expect(page.getByTestId("tile-count")).toHaveText("3");
+  await expect(panel.getByTestId("separate")).toBeVisible();
+  await panel.getByTestId("separate").check();
+
+  // Back to Lite: the first tile stays, with a note; one payment again.
+  await page.getByTestId("mode-lite").click();
+  await expect(page.getByTestId("tile-count")).toHaveText("1");
+  await expect(tile(first)).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("lite-trimmed")).toHaveText(
+    "Lite digs one tile. Switch to Pro for more.",
+  );
+  await page.getByTestId("mode-pro").click();
+  await expect(panel.getByTestId("separate")).not.toBeChecked();
+  await expect(page.getByTestId("lite-trimmed")).toHaveCount(0);
+});
+
+test("the dig and withdraw buttons say what they do, not that it is private", async ({ page }) => {
+  // Every dig and every withdrawal is private; the buttons do not suggest a choice.
+  await page.goto("http://localhost:4175/fixtures.html?state=check-your-dig");
+  await expect(page.getByTestId("dig-send")).toHaveText("Dig");
+  await page.goto("http://localhost:4175/fixtures.html?state=wallet");
+  await page.getByRole("button", { name: "Withdraw" }).click();
+  const withdraw = page.getByTestId("wallet-withdraw");
+  await expect(withdraw.locator('button[type="submit"]')).toHaveText("Withdraw");
+  await expect(withdraw.getByText(/privately/i)).toHaveCount(0);
+});
+
 test("Pro: ALL, quick amounts and the exact total", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });

@@ -15,7 +15,6 @@ export interface DigDraft {
 }
 
 interface DraftApi extends DigDraft {
-  toggle: (tile: number) => void;
   setTiles: (tiles: number[]) => void;
   clear: () => void;
   setAmountEach: (amount: Zat) => void;
@@ -36,9 +35,6 @@ export function DraftProvider({ children }: { children: ReactNode }) {
       amountEach,
       separate,
       message,
-      toggle: (tile) => {
-        setTiles((t) => (t.includes(tile) ? t.filter((x) => x !== tile) : [...t, tile]));
-      },
       setTiles,
       clear: () => {
         setTiles([]);
