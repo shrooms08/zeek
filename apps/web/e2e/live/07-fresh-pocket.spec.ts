@@ -26,11 +26,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { chromium } from "@playwright/test";
-import { APP, ENGINE, REPO, loadState } from "./support";
+import { APP, ENGINE, EXAMPLES, REPO, loadState } from "./support";
 
 const FUND = process.env.ZEEK_FUND ?? "faucet";
 
-const OUT = path.join(REPO, "docs", "examples", "phase8c");
+const OUT = path.join(REPO, "docs", "examples", EXAMPLES ?? "phase8c");
 const SHOTS = path.join(OUT, "live", process.env.ZEEK_FUND ?? "faucet");
 const log: Record<string, unknown> = { started: new Date().toISOString() };
 

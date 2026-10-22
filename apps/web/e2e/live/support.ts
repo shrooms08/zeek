@@ -28,10 +28,18 @@ export const IS_PUBLIC = PUBLIC !== undefined;
 export const APP = PUBLIC ?? "http://localhost:4174";
 const DIR = path.join(REPO, "data", PUBLIC === undefined ? "web-e2e" : "web-e2e-public");
 const STATE = path.join(DIR, "state.json");
+/**
+ * Where a run's screenshots and results go: ZEEK_E2E_EXAMPLES (a folder
+ * under docs/examples, such as phase9a), else the phase that recorded them
+ * first.
+ */
+export const EXAMPLES = process.env.ZEEK_E2E_EXAMPLES;
 export const SHOTS =
-  PUBLIC === undefined
-    ? path.join(REPO, "docs", "examples", "phase7b", "live")
-    : path.join(REPO, "docs", "examples", "phase8", "live");
+  EXAMPLES !== undefined
+    ? path.join(REPO, "docs", "examples", EXAMPLES, "live")
+    : PUBLIC === undefined
+      ? path.join(REPO, "docs", "examples", "phase7b", "live")
+      : path.join(REPO, "docs", "examples", "phase8", "live");
 export const ENGINE =
   PUBLIC === undefined
     ? (process.env.VITE_ZEEK_ENGINE_URL ?? "http://127.0.0.1:8787")
