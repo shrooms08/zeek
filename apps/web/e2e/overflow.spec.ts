@@ -14,14 +14,12 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { engineRequests } from "./engine";
 import { findOverflows } from "./overflow-check";
 
 const WIDTHS = [360, 390, 768, 1024, 1440, 1920];
 const APP = process.env.ZEEK_E2E_APP;
-const ENGINE =
-  APP === undefined
-    ? /^http:\/\/127\.0\.0\.1:8787\//
-    : new RegExp(`^${APP.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/api/`);
+const ENGINE = engineRequests();
 const SHOTS = process.env.ZEEK_OVERFLOW_SHOTS;
 /** The test-only fixtures build (playwright.config.ts, second web server). */
 const FIXTURES = "http://localhost:4175/fixtures.html";

@@ -11,8 +11,9 @@ import { expect, test, type Page } from "@playwright/test";
 import type { Board, LandingDig } from "../../src/api/types";
 import { formatZec } from "../../src/lib/money";
 import { prizeOfPot } from "../../src/lib/prize";
+import { engineRequests } from "../engine";
 
-const ENGINE = /^http:\/\/127\.0\.0\.1:8787\/v1\/board$/;
+const ENGINE = engineRequests("/v1/board");
 const FEE = 5_000;
 const VALUE = 1_000_000;
 

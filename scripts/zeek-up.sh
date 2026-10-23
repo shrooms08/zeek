@@ -25,6 +25,10 @@ chmod -R go-rwx "$ZEEK_ROOT/data" "$ZEEK_ROOT/.secrets" 2>/dev/null || true
 command -v cloudflared >/dev/null || fail "cloudflared is not installed (brew install cloudflared)"
 [ -x "$WRANGLER" ] || fail "wrangler is missing: run pnpm install"
 ORIGIN=$(public_origin) || fail "no Cloudflare deployment yet: run scripts/cloudflare-setup.sh"
+# Hosted on Railway: this Mac is the fallback only (docs/deployment.md).
+if [ -n "$(deploy_value ENGINE_ORIGIN || true)" ]; then
+  fail "the testnet is hosted on Railway (apps/web/.zeek-deploy names ENGINE_ORIGIN); to make this Mac the server again follow 'Rollback to the Mac' in docs/deployment.md first"
+fi
 [ -s "$ZEEK_ROOT/.secrets/proxy-secret" ] || fail "missing .secrets/proxy-secret: run scripts/cloudflare-setup.sh"
 CLOUDFLARED=$(command -v cloudflared)
 

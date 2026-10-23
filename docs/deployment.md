@@ -58,7 +58,15 @@ proxy still carry the proxy secret and name their client.
 | What is running, and whether the vault covers the Cache | `scripts/zeek-status.sh` |
 | Daily engine database backup to this Mac (kept 7) | `scripts/railway-backup.sh --install` |
 | Logs | `(cd data/railway && railway logs --service SERVICE)` |
-| Stop a stateful service without losing reach (`railway ssh` still works) | `railway variable set ZEEK_HOLD=1 --service SERVICE` (delete it to resume) |
+| Stop a stateful service without losing reach (`railway ssh` still works) | `railway variable set ZEEK_HOLD=1 --service SERVICE`; to resume, `railway variable delete ZEEK_HOLD --service SERVICE` and `railway service redeploy --service SERVICE --yes` (deleting alone does not redeploy) |
+
+## Local tests
+
+The Mac's engine and keyholders are disabled (they must never run beside
+Railway's). The local preview and the smoke and overflow suites use the
+Railway engine instead: `playwright.config.ts` takes it from
+`apps/web/.zeek-deploy` (`ENGINE_ORIGIN`), and the engine's CORS also allows
+`http://localhost:4174` and `:4175` (public data only, as on the Mac).
 
 ## The cut-over (2026-10-23)
 
@@ -127,7 +135,10 @@ Railway had a major outage from 2026-10-21 07:24 UTC (Hobby deploys paused
 until 2026-10-22 21:59 UTC); running services were not the problem then, but
 it is a single provider. When the engine does not answer, the site plays
 back saved rounds (Replay), and share links keep loading from the edge
-cache. The status page shows each service and the vault.
+cache: checked on 2026-10-23 by holding the engine for 13 minutes (the site
+showed Replay of round 1370, a share card answered 200; the engine caught
+up by itself when released). The status page shows each service and the
+vault.
 
 ## Rollback to the Mac
 

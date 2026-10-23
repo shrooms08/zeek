@@ -1,0 +1,24 @@
+{
+  "started": "2026-10-23T12:10:03.221Z",
+  "fundingTxid": "4ea4fadef3c79ab53c1bd7821566de7b9fa55fd60fd87b9c4673c3a525f2f853",
+  "dig": {
+    "sentInRound": 1377,
+    "memoRound": 1477,
+    "txid": "72b208077ffba672630cf4e1eb0272ac7367d588a846a0cb1eee7adcf49ca042"
+  },
+  "round": 1377,
+  "refundNet": 190000,
+  "payout": {
+    "round": 1377,
+    "state": "broadcast",
+    "session": "b2648fafb3b8fc1d84965d2ada69e492228fc0f7694b06209267ac3070be2370",
+    "txid": "d2e5f2e9de0224306e58688ab979b7a2ca7ed9040ca96d986744142bb9903b3f",
+    "height": 4532463,
+    "fee": 10000,
+    "signers": [
+      1,
+      2
+    ]
+  },
+  "done": "2026-10-23T12:40:21.150Z"
+}

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -13,6 +14,19 @@ import { defineConfig, devices } from "@playwright/test";
  */
 /** A deployed site to test instead of the local preview (live suite). */
 const target = process.env.ZEEK_E2E_APP;
+
+// The engine the local preview and the tests use: VITE_ZEEK_ENGINE_URL, else
+// the hosted engine named in .zeek-deploy (ENGINE_ORIGIN, on Railway), else
+// an engine on this Mac. Set before the web servers start, so the build, its
+// CSP and the Replay snapshot all use the same one (e2e/engine.ts).
+if (process.env.VITE_ZEEK_ENGINE_URL === undefined) {
+  try {
+    const hosted = /^ENGINE_ORIGIN=(.+)$/m.exec(readFileSync(".zeek-deploy", "utf8"))?.[1];
+    if (hosted !== undefined) process.env.VITE_ZEEK_ENGINE_URL = hosted.trim();
+  } catch {
+    // No deployment file: the local engine.
+  }
+}
 
 export default defineConfig({
   testDir: "e2e",
@@ -31,7 +45,7 @@ export default defineConfig({
           {
             // The snapshot of saved rounds for Replay mode (needs the engine).
             command:
-              "pnpm build && node ../../scripts/snapshot-rounds.mjs --out dist/replay && pnpm preview",
+              "pnpm build && node ../../scripts/snapshot-rounds.mjs --engine ${VITE_ZEEK_ENGINE_URL:-http://127.0.0.1:8787} --out dist/replay && pnpm preview",
             url: "http://localhost:4174",
             reuseExistingServer: true,
             timeout: 180_000,

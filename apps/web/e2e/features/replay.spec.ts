@@ -10,14 +10,11 @@
  * web server writes it after building).
  */
 
+import { engineRequests } from "../engine";
 import { expect, test, type Page } from "@playwright/test";
 
-/** The engine as the app reaches it: the local engine, or the site's /api. */
-const APP = process.env.ZEEK_E2E_APP;
-const ENGINE =
-  APP === undefined
-    ? /^http:\/\/127\.0\.0\.1:8787\//
-    : new RegExp(`^${APP.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/api/`);
+/** The engine as the app reaches it (e2e/engine.ts). */
+const ENGINE = engineRequests();
 
 test.use({ viewport: { width: 1440, height: 1000 } });
 

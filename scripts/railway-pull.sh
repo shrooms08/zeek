@@ -16,7 +16,8 @@
 #      and checks its sha256 here;
 #   3. removes the copy from the volume.
 # The services stay on hold: nothing on Railway signs or pays any more (to
-# resume one: railway variable delete ZEEK_HOLD --service SERVICE). The
+# resume one: railway variable delete ZEEK_HOLD --service SERVICE, then
+# railway service redeploy --service SERVICE --yes). The
 # relay is stopped too. Prints hashes and counts only.
 set -eu
 umask 077

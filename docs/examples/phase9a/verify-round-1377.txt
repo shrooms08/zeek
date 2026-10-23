@@ -1,0 +1,28 @@
+lightwalletd https://testnet.zec.rocks:443: chain test at height 4532474 (ECC LightWalletD v0.5.4)
+Round 1377 (bundle format 4, rules v4)
+Chain source: https://testnet.zec.rocks:443 (blocks 4532395..=4532429, 2 transactions)
+
+1. [PASS] Randomness beacon
+   drand quicknet round 33318608 is genuine and is the one the rules bind; it puts the treasure on tile 10.
+   - round start block 4532395 nTime 1792757687
+   - BLS signature verified against the quicknet public key; cache triggered: false
+
+2. [PASS] Digs complete and correct
+   All 1 payments the vault received in blocks 4532395..4532418 are in the bundle, with the same amounts and memos; none is missing or made up.
+   - 24 blocks trial-decrypted with the public UIVK; 200000 zatoshis in total
+
+3. [PASS] Timing rule
+   The round closed safely before the beacon was published, so nobody could know the treasure tile while digging.
+   - median time past of blocks 4532419..4532429: 1792758377; beacon published at 1792759188; clock skew allowance 300 s
+
+4. [PASS] Settlement
+   Recomputing the round from its digs gives exactly the published result: 190000 paid out to 0 winner(s), Deep Cache 20317750 → 20317750.
+   - pot 0, rake 0, fees 10000, forfeited 0, shouts 0 (reserved 0)
+   - byte-for-byte equal (655 bytes of JSON)
+
+5. [PASS] Payout transaction
+   The payout transaction is mined at block 4532469 and valid, and it pays every payable settled amount (1 output(s)).
+   - txid d2e5f2e9de0224306e58688ab979b7a2ca7ed9040ca96d986744142bb9903b3f, 2 actions; Halo2 proof, spend authorization and binding signatures verified
+   - payout 0 (190000 zatoshis) is action 1: cmx 6e1dbb9d382270b818c2a25fb81221f7e9dd6a11ad34453ab985ebfa4d10a422 recomputed
+
+Result: every available check passed

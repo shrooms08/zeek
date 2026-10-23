@@ -11,7 +11,8 @@
 # The service variable ZEEK_HOLD=1 keeps a stateful service from starting:
 # the container runs and waits, so `railway ssh` can reach it even when the
 # binary would crash, and its volume can be copied consistently
-# (scripts/railway-pull.sh). Setting or removing it redeploys the service.
+# (scripts/railway-pull.sh). Setting it redeploys the service; after
+# removing it, redeploy (`railway service redeploy`) to start the binary.
 set -eu
 umask 077
 DATA=/data
