@@ -8,3 +8,9 @@ compatibility_date = "2026-10-01"
 [[kv_namespaces]]
 binding = "ZEEK"
 id = "777fe8c57a5d4f66bab8ccca389bc39a"
+
+# Hosted on Railway (docs/deployment.md): the proxy's fixed upstreams, used
+# instead of the tunnel hostnames in KV. Remove both to go back to the Mac.
+[vars]
+ZEEK_ENGINE_ORIGIN = "https://engine-production-445c.up.railway.app"
+ZEEK_RELAY_ORIGIN = "https://relay-production-9648.up.railway.app"

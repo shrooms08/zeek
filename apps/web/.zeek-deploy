@@ -1,3 +1,5 @@
 PROJECT=playzeek
 PAGES_PROJECT=playzeek
 KV_NAMESPACE=777fe8c57a5d4f66bab8ccca389bc39a
+ENGINE_ORIGIN=https://engine-production-445c.up.railway.app
+RELAY_ORIGIN=https://relay-production-9648.up.railway.app
