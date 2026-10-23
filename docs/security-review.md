@@ -146,3 +146,15 @@ These were not part of the independent review; each is a decision.
 | Edge cache in the proxy | A poisoned or stale cached answer. | **Accepted.** Only three route shapes (share pages and cards, round proof bundles, stored proofs) are cached, only when the engine itself marks the answer `public` with a max-age, keyed by the full public URL; the engine is reached only through the secret-guarded tunnel from KV. Bundles still awaiting their payout are `no-store`. |
 | drand relays in `connect-src` | Four more hosts the page may contact. | **Accepted.** They are drand's own public relays, read only for the beacon of a saved round, and the BLS signature is verified locally regardless of what they answer. |
 | Replay snapshot | Publishing round data in the build. | **Accepted.** It is the same public data the engine serves (`/v1/rounds/{n}/proof`, `/v1/config`); `snapshot-rounds.mjs` refuses an engine that withholds its vault (mainnet before digging opens). |
+
+## Phase 9a: hosted on Railway (self-assessed)
+
+Each item is a decision for the testnet, which now runs on Railway
+(docs/deployment.md). Mainnet is not hosted.
+
+| Change | Risk | Decision |
+| --- | --- | --- |
+| Keyholders on Railway's private network instead of localhost (M5) | Signing messages travel between containers: signed and bound to their session, not encrypted by Zeek. They carry commitments and signature shares (useless alone; nonces stay inside each keyholder) and the payout transaction (per-player payout amounts and receivers). | **Accepted for testnet.** Railway encrypts private-network traffic with WireGuard, and no other project can reach it, so only Railway itself could read it — and Railway already hosts the engine, which holds the sealing key and the vault's viewing key (M6). DKG is switched off on the hosted keyholders, so round-2 packages never travel. Encrypted DKG and separate operators remain required for mainnet. |
+| Key shares on Railway volumes | Railway does not document whether volumes are encrypted at rest; one account reaches all three shares (as one operator did on the Mac). | **Accepted for testnet.** 2FA on the account; no secret in any variable; the binaries run as an unprivileged user; the Mac copies stay as the backup. |
+| Rate limits behind Railway's edge (H4) | Counting clients by `X-Forwarded-For` counted Railway's edge proxies, so it limited nothing. | **Fixed.** Measured, then switched to `X-Real-IP`, which Railway overwrites with the client's address; forged values no longer pick a bucket (docs/deployment.md). |
+| The app calls the engine and relay directly | Two more origins in `connect-src`. | **Accepted.** Exactly the two Railway origins (and the engine's WebSocket); CORS answers only the site's origin; COOP/COEP unchanged. |

@@ -52,10 +52,12 @@ and [docs/browser-wallet.md](docs/browser-wallet.md).
   result. A tampered payout is refused:
   [a recording of all three refusing](docs/video/clips/refusal.mp4).
 
-**Honest note:** today all three keyholders run on one Mac operated by the
-Zeek team, as separate processes under separate macOS users with separate
-key shares. They are not yet separate machines or separate operators
-([plan](docs/mainnet-runbook.md)).
+**Honest note:** today the engine and all three keyholders run on Railway,
+as separate services in one project operated by the Zeek team. Each
+keyholder has its own key share on its own volume and is reachable only on
+Railway's private network. They are not separate operators, and nothing
+here claims they run on separate machines ([plan](docs/mainnet-runbook.md);
+hosting: [docs/deployment.md](docs/deployment.md)). Mainnet is not hosted.
 
 ## Verify any round
 

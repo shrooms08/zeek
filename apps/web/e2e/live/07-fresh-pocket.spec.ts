@@ -25,8 +25,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { chromium } from "@playwright/test";
-import { APP, ENGINE, EXAMPLES, REPO, loadState } from "./support";
+import { ENGINE, EXAMPLES, REPO, withdrawFromPublicPocket } from "./support";
 
 const FUND = process.env.ZEEK_FUND ?? "faucet";
 
@@ -52,52 +51,6 @@ async function board(): Promise<{ round: number; status: string; blocks_remainin
     status: string;
     blocks_remaining: number;
   };
-}
-
-/** Sends `amount` from the public live suite's Pocket (its own profile). */
-async function withdrawFromPublicPocket(to: string, amount: string): Promise<string | undefined> {
-  const state = loadState();
-  if (state.passphrase === undefined) throw new Error("the public test Pocket has no passphrase");
-  const ctx = await chromium.launchPersistentContext(
-    path.join(REPO, "data", "web-e2e-public", "profile"),
-    { headless: true, viewport: { width: 1440, height: 1000 }, baseURL: APP },
-  );
-  try {
-    const p = ctx.pages()[0] ?? (await ctx.newPage());
-    p.setDefaultTimeout(120_000);
-    await p.addInitScript(() => {
-      localStorage.setItem("zeek.seenOnboarding", "1");
-    });
-    await p.goto("/wallet");
-    const home = p.getByTestId("wallet-home");
-    const form = p.getByTestId("wallet-unlock");
-    await expect(home.or(form)).toBeVisible({ timeout: 120_000 });
-    if (await form.isVisible()) {
-      await p.getByTestId("unlock-pass").fill(state.passphrase);
-      await p.getByTestId("unlock-submit").click();
-      await expect(home).toBeVisible({ timeout: 120_000 });
-    }
-    await expect(p.getByTestId("wallet-sync")).toContainText("Synced", { timeout: 300_000 });
-    // Its own coins may be confirming (change, or its own split): wait.
-    for (let i = 0; ; i += 1) {
-      const text = (await p.getByTestId("wallet-spendable").textContent()) ?? "0";
-      if (Number(text) >= Number(amount) + 0.0002) break;
-      if (i > 30) throw new Error(`the public test Pocket has only ${text} spendable`);
-      await p.waitForTimeout(20_000);
-      await p.getByRole("button", { name: "Sync" }).click();
-    }
-    await p.getByRole("button", { name: "Withdraw", exact: true }).click();
-    const card = p.getByTestId("wallet-withdraw");
-    await card.getByPlaceholder("utest1…").fill(to);
-    await card.locator("input[inputmode=decimal]").fill(amount);
-    await p.getByTestId("withdraw-passphrase").fill(state.passphrase);
-    await card.getByRole("button", { name: "Withdraw", exact: true }).click();
-    const status = card.getByRole("status");
-    await expect(status).toContainText(/[0-9a-f]{64}/, { timeout: 300_000 });
-    return /[0-9a-f]{64}/.exec((await status.textContent()) ?? "")?.[0];
-  } finally {
-    await ctx.close();
-  }
 }
 
 async function digOne(page: Page, tile: number): Promise<"done" | "change"> {
