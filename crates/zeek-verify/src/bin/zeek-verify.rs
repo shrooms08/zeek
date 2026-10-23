@@ -623,9 +623,9 @@ fn client_of(
             .ok_or((StatusCode::BAD_REQUEST, "the proxy did not name the client"));
     }
     if let Some(header) = &access.direct {
-        if given.is_some() {
-            return Err((StatusCode::FORBIDDEN, "unexpected proxy header"));
-        }
+        // Without a secret of its own a direct relay cannot tell the proxy
+        // from anyone else: a proxy header is ignored and the client is
+        // whoever the host's edge names (for the site's proxy, Cloudflare).
         return headers
             .get(header)
             .and_then(|v| v.to_str().ok())
@@ -839,10 +839,8 @@ mod tests {
             client_of(&access, &headers(&[]), PEER).map_err(|e| e.0),
             Err(StatusCode::BAD_REQUEST)
         );
-        let spoof = headers(&[("x-zeek-proxy", SECRET), ("x-forwarded-for", "203.0.113.9")]);
-        assert_eq!(
-            client_of(&access, &spoof, PEER).map_err(|e| e.0),
-            Err(StatusCode::FORBIDDEN)
-        );
+        // A proxy header proves nothing to a relay without a secret: ignored.
+        let proxied = headers(&[("x-zeek-proxy", SECRET), ("x-forwarded-for", "203.0.113.9")]);
+        assert_eq!(client_of(&access, &proxied, PEER), Ok(ip("203.0.113.9")));
     }
 }
