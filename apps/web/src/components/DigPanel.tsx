@@ -237,7 +237,7 @@ export function DigPanel(p: DigPanelProps) {
   const message = p.campfire && (!compact || showMessage) && (
     <label className="flex flex-col gap-1">
       <span className="label text-fog" style={{ fontSize: 11 }}>
-        Campfire message (optional)
+        Text on Campfire (optional)
       </span>
       <input
         className="field-input"

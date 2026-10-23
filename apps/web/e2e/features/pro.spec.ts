@@ -62,6 +62,12 @@ test("Lite digs one tile; Pro picks many; back in Lite the first is kept", async
   await expect(tile(9)).toHaveAttribute("data-selected", "true");
   await expect(tile(3)).toHaveAttribute("data-selected", "false");
   await expect(panel.getByTestId("separate")).toHaveCount(0);
+  // The optional message's label (shown in capitals).
+  await expect(panel.getByText("Text on Campfire (optional)")).toBeVisible();
+  await expect(panel.getByTestId("dig-message")).toHaveAttribute(
+    "placeholder",
+    "Say something with your dig",
+  );
   // Tapping the picked tile again clears it; Auto-pick picks one.
   await tile(9).click();
   await expect(page.getByTestId("tile-count")).toHaveText("0");
