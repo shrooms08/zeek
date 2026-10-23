@@ -11,6 +11,7 @@ import type { ChainServerStatus, KeyholderStatus } from "../api/types";
 import { Icon } from "../components/Icon";
 import { Screen } from "../components/ui";
 import { formatAgo } from "../lib/time";
+import { vaultHealth } from "../lib/vaultHealth";
 import { useNow } from "../lib/useNow";
 
 /** A keyholder check older than this is reported as unknown. */
@@ -105,6 +106,12 @@ export default function StatusScreen() {
     refetchInterval: 30_000,
     retry: false,
   });
+  const ledger = useQuery({
+    queryKey: ["ledger"],
+    queryFn: engine.ledger,
+    refetchInterval: 60_000,
+    retry: false,
+  });
   const relay = useQuery({
     queryKey: ["relay-tip"],
     queryFn: async () => {
@@ -132,9 +139,9 @@ export default function StatusScreen() {
   return (
     <Screen title="Status" kicker="Is everything working?" testId="status-screen">
       <p className="text-mist">
-        Live checks of each part of Zeek, refreshed every 30 seconds. Zeek’s engine and keyholders
-        run on one computer operated by the Zeek team; this site reaches the engine through a
-        Cloudflare tunnel.
+        Live checks of each part of Zeek, refreshed every 30 seconds. Zeek’s engine, relay and three
+        keyholders run as separate services on Railway, all operated by the Zeek team; the
+        keyholders are reachable only on Railway’s private network.
       </p>
       <section className="panel" aria-label="Services">
         <ul>
@@ -163,6 +170,13 @@ export default function StatusScreen() {
                 .filter((t) => t !== "")
                 .join(" ")}
               testId="status-engine"
+            />
+          )}
+          {ledger.data !== undefined && (
+            <Row
+              {...vaultHealth(ledger.data, s?.engine.stored_tip ?? null)}
+              title="Vault"
+              testId="status-vault"
             />
           )}
           {SECOND_SOURCE !== "" && (

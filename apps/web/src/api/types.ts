@@ -168,6 +168,8 @@ export interface Ledger {
   unclaimable: number;
   operator_float: number;
   shortfall: number;
+  /** Chain tip of the vault wallet when its balance was read. */
+  last_reconciliation_height?: number;
 }
 
 export interface KeyholderStatus {
