@@ -77,7 +77,7 @@ for svc in $SERVICES; do
 done
 
 for svc in $SERVICES; do
-  say "Deploying $svc…"
+  say "Deploying ${svc}…"
   (cd "$LINK_DIR" && railway up "$STAGE_ROOT/$svc" --path-as-root --no-gitignore \
     --service "$svc" --detach) || fail "the upload of $svc failed"
 done

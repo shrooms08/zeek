@@ -31,6 +31,14 @@ THRESHOLD=$(sed -n 's/^ZEEK_VAULT_THRESHOLD=//p' "$ZEEK_ROOT/.env")
 
 mkdir -p "$LINK_DIR"
 rw() { (cd "$LINK_DIR" && railway "$@"); }
+# A service's ID (`railway volume` takes IDs, not names).
+service_id() {
+  rw service list --json | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const hit = JSON.parse(s).find((x) => x.name === process.argv[1]);
+      if (hit) console.log(hit.id);
+    });' "$1"
+}
 
 if ! rw status >/dev/null 2>&1; then
   rw init --name "$PROJECT" >/dev/null || fail "could not create the project"
@@ -51,10 +59,12 @@ done
 volumes=$(rw volume list 2>/dev/null || true)
 for svc in keyholder-1 keyholder-2 keyholder-3 engine; do
   if ! printf '%s\n' "$volumes" | grep -q "$svc-data"; then
-    id=$(rw volume --service "$svc" add --mount-path /data --json |
+    sid=$(service_id "$svc")
+    [ -n "$sid" ] || fail "no service $svc"
+    id=$(rw volume --service "$sid" add --mount-path /data --json |
       sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -n 1)
     [ -n "$id" ] || fail "could not add the volume of $svc"
-    rw volume update --volume "$id" --name "$svc-data" >/dev/null
+    rw volume update --volume "$id" --name "$svc-data" --json >/dev/null
     say "added the volume $svc-data"
   fi
 done
@@ -69,13 +79,13 @@ for n in 1 2 3; do
 done
 set_vars relay ZEEK_SERVICE=relay \
   ZEEK_LIGHTWALLETD_URL="$TESTNET_LIGHTWALLETD" ZEEK_APP_URL="$SITE" \
-  ZEEK_CLIENT_IP_HEADER=X-Forwarded-For
+  ZEEK_CLIENT_IP_HEADER=X-Real-IP
 set_vars engine ZEEK_SERVICE=engine RUST_LOG=info \
   ZEEK_GAME_CONFIG=/app/game.json \
   ZEEK_ENGINE_DB=/data/data/zeek-engine.sqlite \
   ZEEK_ENGINE_BIND=127.0.0.1:8787 \
   ZEEK_PROXY_SECRET_FILE=/data/secrets/proxy-secret \
-  ZEEK_CLIENT_IP_HEADER=X-Forwarded-For \
+  ZEEK_CLIENT_IP_HEADER=X-Real-IP \
   ZEEK_PUBLIC_URL="$SITE" ZEEK_APP_URL="$SITE" ZEEK_ENGINE_CORS="$SITE" \
   ZEEK_LIGHTWALLETD_URL="$TESTNET_LIGHTWALLETD" \
   ZEEK_KEYHOLDERS="$KEYHOLDERS" ZEEK_VAULT_THRESHOLD="$THRESHOLD" \
