@@ -8,13 +8,15 @@
 # stale, and starting them would pay those rounds again.
 #
 # For the engine first, then each keyholder:
-#   1. writes /data/.hold and restarts the service, so its binary stops and
-#      the container waits (deploy/railway/entrypoint.sh);
+#   1. sets the service variable ZEEK_HOLD=1, which redeploys it with its
+#      binary stopped and the container waiting (deploy/railway/entrypoint.sh),
+#      reachable over `railway ssh` even if the binary was crashing;
 #   2. packs /data/secrets and /data/data with MANIFEST.sha256 into
 #      /data/export/SERVICE.tar, downloads it to data/rollback/ (yours, 600)
 #      and checks its sha256 here;
 #   3. removes the copy from the volume.
-# The services stay on hold: nothing on Railway signs or pays any more. The
+# The services stay on hold: nothing on Railway signs or pays any more (to
+# resume one: railway variable delete ZEEK_HOLD --service SERVICE). The
 # relay is stopped too. Prints hashes and counts only.
 set -eu
 umask 077
@@ -41,8 +43,7 @@ in_container() {
 
 for svc in engine keyholder-1 keyholder-2 keyholder-3; do
   say "$svc: holding…"
-  in_container "$svc" /app/ops.sh hold || fail "could not put $svc on hold"
-  rw service restart --service "$svc" --yes >/dev/null || fail "could not restart $svc"
+  rw variable set ZEEK_HOLD=1 --service "$svc" --json >/dev/null || fail "could not put $svc on hold"
   i=0
   until in_container "$svc" /app/ops.sh held 2>/dev/null; do
     [ "$i" -lt 180 ] || fail "$svc did not reach its hold"

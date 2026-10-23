@@ -2,8 +2,8 @@
 # Operator steps inside a Zeek container on Railway, run as root through
 # `railway ssh` (plain words only, so nothing depends on remote quoting):
 #
-#   ops.sh hold          keep the service from starting (/data/.hold)
-#   ops.sh held          exit 0 once the service's binary is not running
+#   ops.sh held          exit 0 when the service's binary is not running
+#                        (the service variable ZEEK_HOLD=1 keeps it stopped)
 #   ops.sh pack SERVICE  /data/export/SERVICE.tar (+ .sha256): secrets/,
 #                        data/ and MANIFEST.sha256 (scripts/railway-pull.sh)
 #   ops.sh backup STAMP  consistent copies of /data/data/*.sqlite in
@@ -14,14 +14,10 @@
 # Prints hashes and counts only, never file contents.
 set -eu
 umask 077
-cmd=${1:?usage: ops.sh hold|held|pack|backup|clean ...}
+cmd=${1:?usage: ops.sh held|pack|backup|clean ...}
 case $cmd in
-  hold)
-    touch /data/.hold
-    ;;
   held)
     if grep -qsxE "zeek-(engine|keyholder)" /proc/[0-9]*/comm; then exit 1; fi
-    [ -e /data/.hold ]
     ;;
   pack)
     svc=${2:?usage: ops.sh pack SERVICE}

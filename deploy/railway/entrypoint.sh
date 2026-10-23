@@ -8,8 +8,10 @@
 # is given to uid 10001 and the binary runs as that user with no
 # capabilities. The relay keeps no state and has no volume.
 #
-# /data/.hold keeps a stateful service from starting (for a consistent copy
-# of its volume: scripts/railway-pull.sh); remove it and the service starts.
+# The service variable ZEEK_HOLD=1 keeps a stateful service from starting:
+# the container runs and waits, so `railway ssh` can reach it even when the
+# binary would crash, and its volume can be copied consistently
+# (scripts/railway-pull.sh). Setting or removing it redeploys the service.
 set -eu
 umask 077
 DATA=/data
@@ -36,9 +38,9 @@ if [ "${RAILWAY_VOLUME_MOUNT_PATH:-}" != "$DATA" ]; then
   echo "the volume must be mounted at $DATA" >&2
   exit 1
 fi
-if [ -e "$DATA/.hold" ]; then
-  echo "on hold (/data/.hold)"
-  while [ -e "$DATA/.hold" ]; do sleep 5; done
+if [ "${ZEEK_HOLD:-}" = 1 ]; then
+  echo "on hold (ZEEK_HOLD=1): the binary does not start"
+  while :; do sleep 3600; done
 fi
 if [ ! -e "$DATA/.imported" ]; then
   echo "waiting for the import (scripts/railway-migrate.sh)"
