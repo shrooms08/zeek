@@ -198,6 +198,10 @@ const CHAIN_WORKERS: usize = 2;
 /// How often every lightwalletd server is health-checked.
 const PROBE_EVERY: Duration = Duration::from_secs(60);
 
+/// How often the vault wallet is synced between payouts, so the public
+/// ledger's vault balance is never far behind the Cache.
+const VAULT_SYNC_EVERY: Duration = Duration::from_secs(300);
+
 /// Longest an engine pass may run (a payout proof takes about a minute).
 const PASS_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -424,6 +428,8 @@ async fn chain_loop(
         }
     };
     let mut last_probe = Instant::now();
+    // The first pass syncs the vault wallet at once.
+    let mut last_vault_sync: Option<Instant> = None;
     loop {
         // Health check of every server (tips, latency) for the status page;
         // failures found by ordinary calls are recorded as they happen.
@@ -478,6 +484,17 @@ async fn chain_loop(
                 }
                 if let Err(e) = coordinator.probe_keyholders(&store).await {
                     tracing::warn!(error = %e, "keyholder health probe failed");
+                }
+                if last_vault_sync.is_none_or(|t| t.elapsed() >= VAULT_SYNC_EVERY) {
+                    match coordinator.sync_vault_wallet().await {
+                        Ok(tip) => {
+                            last_vault_sync = Some(Instant::now());
+                            tracing::debug!(tip, "vault wallet synced");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "vault wallet sync failed; retrying next pass")
+                        }
+                    }
                 }
                 if let Err(e) = coordinator
                     .record_openings(&store, &mut source, &config)

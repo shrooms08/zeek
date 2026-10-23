@@ -445,6 +445,20 @@ impl Coordinator {
         )
     }
 
+    /// Brings the vault wallet up to the chain tip, so the ledger
+    /// (`GET /v1/vault/ledger`) counts every dig the Cache counts. Payouts
+    /// sync it too; between them the engine calls this every few minutes.
+    /// Returns the wallet's chain tip after the sync.
+    pub async fn sync_vault_wallet(&self) -> Result<u32, EngineError> {
+        let (mut wallet_db, account) = self.vault_wallet()?;
+        let (index, mut client) = self.pool.client().await?;
+        if let Err(e) = wallet::sync(&mut wallet_db, &mut client).await {
+            self.pool.failed(index, &e);
+            return Err(e.into());
+        }
+        Ok(wallet::balance(&wallet_db, account)?.chain_tip)
+    }
+
     /// The vault's address.
     pub fn vault_address(&self) -> &str {
         &self.vault.address
