@@ -38,6 +38,15 @@ export default defineConfig({
     baseURL: target ?? "http://localhost:4174",
     trace: "retain-on-failure",
     actionTimeout: 60_000,
+    // Every test starts without the load screen (src/boot.ts), except the
+    // load screen's own tests, which clear this.
+    storageState: {
+      cookies: [],
+      origins: [target ?? "http://localhost:4174", "http://localhost:4175"].map((origin) => ({
+        origin,
+        localStorage: [{ name: "zeek.e2e.skipLoadScreen", value: "1" }],
+      })),
+    },
   },
   ...(target === undefined
     ? {

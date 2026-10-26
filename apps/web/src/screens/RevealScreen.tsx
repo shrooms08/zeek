@@ -34,7 +34,8 @@ import {
 } from "../machines/reveal";
 import { CountUp } from "../motion/CountUp";
 import { EASE } from "../motion/tokens";
-import { play } from "../sound/sound";
+import { useLoop } from "../sound/cues";
+import { sound } from "../sound/sound";
 import { digsInRound, loadMyDigs, markRevealSeen } from "../state/myDigs";
 
 export default function RevealScreen() {
@@ -82,10 +83,8 @@ export default function RevealScreen() {
   useEffect(() => {
     if (state.stage === "closed") waited.current = true;
     if (state.stage === "draw" && waited.current) {
-      play("pin");
       notify(`Round ${n} is revealed`, "The draw is in. Open Zeek to see where the treasure was.");
     }
-    if (state.stage === "shake") play("crack");
     if (state.stage === "burst") {
       setGlint(true);
       const id = setTimeout(() => {
@@ -95,10 +94,7 @@ export default function RevealScreen() {
         clearTimeout(id);
       };
     }
-    if (state.stage === "result") {
-      markRevealSeen(n);
-      if (state.result?.cacheTriggered === true) play("rumble");
-    }
+    if (state.stage === "result") markRevealSeen(n);
     return undefined;
   }, [state.stage, state.result, n]);
   const delay = config.data?.params.reveal_delay_secs ?? 900;
@@ -107,9 +103,42 @@ export default function RevealScreen() {
   const myTiles = useMemo(() => [...mine.keys()].sort((a, b) => a - b), [mine]);
   const result = state.result;
   const outcome = result === null ? null : outcomeFor(result, myTiles);
+  // Sound, for the player's own reveal only (a round watched plays none):
+  // waiting for the draw, then the draw, the rays and the result.
+  const own = myTiles.length > 0;
+  useLoop("waiting-loop", own && state.stage === "closed");
   useEffect(() => {
-    if (state.stage === "burst" && (outcome === "win" || outcome === "cache-win")) play("chime");
-  }, [state.stage, outcome]);
+    if (!own) return;
+    if (state.stage === "draw") {
+      // "The draw arrives": the waiting stops at once; the rumble ducks the music.
+      sound.stopLoop("waiting-loop", 0);
+      sound.play("rumble");
+      sound.play("crack");
+    }
+    // "Light from tile N": the rays.
+    if (state.stage === "burst") sound.play("draw");
+    if (state.stage === "result") {
+      sound.releaseDuck();
+      if (outcome === "win" || outcome === "cache-win") {
+        sound.play("coin");
+        const id = setTimeout(() => {
+          sound.play("win");
+        }, 400);
+        return () => {
+          clearTimeout(id);
+        };
+      }
+      if (outcome === "not-this-time") sound.play("miss");
+    }
+    return undefined;
+  }, [own, state.stage, outcome]);
+  // Leaving mid-reveal: the music comes back.
+  useEffect(
+    () => () => {
+      sound.releaseDuck();
+    },
+    [],
+  );
 
   if (!Number.isInteger(n) || n < 0) return <Offline text="No such round" />;
   if (round.isPending) return <Loading text="Finding the round…" />;

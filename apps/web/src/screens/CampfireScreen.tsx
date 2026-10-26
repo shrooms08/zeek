@@ -15,7 +15,7 @@ import { Icon } from "../components/Icon";
 import { Empty, Loading, Offline, QrCard } from "../components/ui";
 import { CountUp } from "../motion/CountUp";
 import { EASE } from "../motion/tokens";
-import { play } from "../sound/sound";
+import { useLoop } from "../sound/cues";
 import { formatZec, toNumber, zat } from "../lib/money";
 import { formatTimeOfDay } from "../lib/time";
 import { useDraft } from "../state/draft";
@@ -79,6 +79,8 @@ interface Pending {
 }
 
 export default function CampfireScreen() {
+  // The campfire crackles while this panel is open.
+  useLoop("campfire-loop", true);
   const feed = useCampfire(false);
   const config = useConfig();
   const navigate = useNavigate();
@@ -272,7 +274,6 @@ export default function CampfireScreen() {
             sparks={poked}
             onPoke={() => {
               setPoked((n) => n + 1);
-              play("crackle");
             }}
           />
         </div>

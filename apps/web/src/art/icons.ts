@@ -5,6 +5,12 @@
  */
 
 export const ICONS = {
+  // Sound controls (drawn for the intro-sound work in the same 24 grid).
+  speaker: "M3 9h4l5-4v14l-5-4H3z M16 9c1.3 1.6 1.3 4.4 0 6 M19 6c2.7 3.4 2.7 8.6 0 12",
+  speakeroff: "M3 9h4l5-4v14l-5-4H3z M16 9l6 6 M22 9l-6 6",
+  note: "M9 18V5l11-2v13 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M17 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  noteoff:
+    "M9 18V5l11-2v13 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M17 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M2 2l20 20",
   chest: "M3 10h18v10H3z M3 10c0-4 3-6 9-6s9 2 9 6 M10 11h4v4h-4z M3 14h7 M14 14h7",
   hourglass: "M6 3h12 M6 21h12 M7 3v3l5 6-5 6v3 M17 3v3l-5 6 5 6v3 M9.5 18.5h5",
   shovel: "M14.5 2.5l7 7 M18 6L9.5 14.5 M5.5 12.5l6 6-3.5 3.5-6-6z",

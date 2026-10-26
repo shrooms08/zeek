@@ -2,7 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { startBoot } from "./boot";
+import { unlockOnFirstGesture } from "./sound/cues";
 import "./styles/index.css";
+
+startBoot();
+unlockOnFirstGesture();
 
 const client = new QueryClient({
   // No refetch on focus: the live stream keeps engine data fresh, and on the

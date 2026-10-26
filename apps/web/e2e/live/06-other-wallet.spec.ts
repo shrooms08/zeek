@@ -12,6 +12,7 @@ const test = base.extend({});
 test("other wallet: bob pays the QR request and the dig confirms", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("zeek.seenOnboarding", "1");
+    localStorage.setItem("zeek.e2e.skipLoadScreen", "1");
   });
   // Leave time for the payment to be mined inside the round.
   await until(
