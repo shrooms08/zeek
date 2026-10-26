@@ -81,6 +81,7 @@ test("a fresh Pocket: faucet, confirming, split, several digs in one round", asy
   test.setTimeout(90 * 60_000);
   await page.addInitScript(() => {
     localStorage.setItem("zeek.seenOnboarding", "1");
+    localStorage.setItem("zeek.e2e.skipLoadScreen", "1");
   });
   page.setDefaultTimeout(60_000);
 

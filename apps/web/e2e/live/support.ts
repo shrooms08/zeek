@@ -139,6 +139,7 @@ export const test = base.extend<{ context: BrowserContext; page: Page }>({
     // Mark the explainer seen so it doesn't cover the flows (smoke tests it).
     await page.addInitScript(() => {
       localStorage.setItem("zeek.seenOnboarding", "1");
+      localStorage.setItem("zeek.e2e.skipLoadScreen", "1");
     });
     await use(page);
   },
@@ -203,6 +204,7 @@ export async function withdrawFromPublicPocket(
     p.setDefaultTimeout(120_000);
     await p.addInitScript(() => {
       localStorage.setItem("zeek.seenOnboarding", "1");
+      localStorage.setItem("zeek.e2e.skipLoadScreen", "1");
     });
     await p.goto("/wallet");
     const home = p.getByTestId("wallet-home");

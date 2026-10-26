@@ -116,6 +116,13 @@ const MY_WIN = JSON.stringify([
 ]);
 
 const STATES: State[] = [
+  // The load screen over the field (the global skip in playwright.config.ts off).
+  {
+    name: "load-screen",
+    path: "/",
+    ready: "load-screen",
+    storage: { "zeek.e2e.skipLoadScreen": "0" },
+  },
   { name: "field-lite", path: "/", ready: "field" },
   {
     name: "field-lite-picked",
