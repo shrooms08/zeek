@@ -13,6 +13,11 @@ import { formatZec } from "../../src/lib/money";
 import { prizeOfPot } from "../../src/lib/prize";
 import { engineRequests } from "../engine";
 
+// A response still being rewritten when a test ends is not a failure.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 const ENGINE = engineRequests("/v1/board");
 const FEE = 5_000;
 const VALUE = 1_000_000;

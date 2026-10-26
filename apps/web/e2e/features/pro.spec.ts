@@ -9,6 +9,11 @@
 import { randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
+// A response still being rewritten when a test ends is not a failure.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test.use({ viewport: { width: 1440, height: 1000 } });
 
 test.beforeEach(async ({ page }) => {

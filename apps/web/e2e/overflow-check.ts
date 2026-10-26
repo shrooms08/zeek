@@ -24,8 +24,12 @@ export interface Overflow {
   detail: string;
 }
 
-export async function findOverflows(page: Page): Promise<Overflow[]> {
-  return page.evaluate(() => {
+/**
+ * `within`: a selector for the only part of the page on screen (an overlay
+ * covering the rest); elements outside it are not checked, page scroll is.
+ */
+export async function findOverflows(page: Page, within?: string): Promise<Overflow[]> {
+  return page.evaluate((within) => {
     const TOL = 1.5;
     const out: {
       kind: "content" | "outside-parent" | "outside-box" | "outside-viewport" | "page-scroll";
@@ -97,7 +101,8 @@ export async function findOverflows(page: Page): Promise<Overflow[]> {
         .map((n) => n.textContent ?? "")
         .join("")
         .trim();
-    const candidates = [...document.body.querySelectorAll("*")].filter(
+    const scope = within === undefined ? document.body : document.querySelector(within);
+    const candidates = [...(scope ?? document.body).querySelectorAll("*")].filter(
       (el) =>
         !(el instanceof SVGElement) &&
         (ownText(el) !== "" || el.tagName === "BUTTON" || el.classList.contains("numeral")),
@@ -161,5 +166,5 @@ export async function findOverflows(page: Page): Promise<Overflow[]> {
       }
     }
     return out;
-  });
+  }, within);
 }

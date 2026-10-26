@@ -17,6 +17,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { engineRequests } from "./engine";
 import { findOverflows } from "./overflow-check";
 
+// A response still being rewritten when a test ends is not a failure.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 const WIDTHS = [360, 390, 768, 1024, 1440, 1920];
 const APP = process.env.ZEEK_E2E_APP;
 const ENGINE = engineRequests();
@@ -104,6 +109,8 @@ interface State {
   act?: (page: Page) => Promise<void>;
   /** What must be visible before checking. */
   ready: string;
+  /** Only this part is on screen (an overlay): the check stays inside it. */
+  within?: string;
   /** Not served by the local preview (engine HTML). */
   publicOnly?: boolean;
   /** The test-only fixtures page (local runs only). */
@@ -122,6 +129,7 @@ const STATES: State[] = [
     path: "/",
     ready: "load-screen",
     storage: { "zeek.e2e.skipLoadScreen": "0" },
+    within: "#zeek-boot",
   },
   { name: "field-lite", path: "/", ready: "field" },
   {
@@ -220,9 +228,15 @@ const STATES: State[] = [
   })),
 ];
 
-async function check(page: Page, name: string, width: number, browserName: string) {
+async function check(
+  page: Page,
+  name: string,
+  width: number,
+  browserName: string,
+  within?: string,
+) {
   await page.waitForTimeout(400);
-  const found = await findOverflows(page);
+  const found = await findOverflows(page, within);
   const key = `${name}-${width}`;
   const report = process.env.ZEEK_OVERFLOW_REPORT;
   if (report !== undefined && found.length > 0) {
@@ -260,7 +274,7 @@ test.describe("no text overflows its box", () => {
         await page.goto(state.path);
         await expect(page.getByTestId(state.ready).first()).toBeVisible({ timeout: 60_000 });
         if (state.act !== undefined) await state.act(page);
-        const found = await check(page, state.name, width, browserName);
+        const found = await check(page, state.name, width, browserName, state.within);
         for (const f of found)
           problems.push(`${width}px ${f.kind} ${f.what} "${f.text}" (${f.detail})`);
       }

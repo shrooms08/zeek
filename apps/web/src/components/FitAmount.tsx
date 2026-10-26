@@ -118,8 +118,13 @@ export function useFitInput(
     const ro = new ResizeObserver(fit);
     ro.observe(field);
     ro.observe(copy);
+    // A web font arriving late changes the text's width: fit again then
+    // (WebKit does not always report it as a resize of the hidden copy).
+    document.fonts.addEventListener("loadingdone", fit);
+    void document.fonts.ready.then(fit);
     return () => {
       ro.disconnect();
+      document.fonts.removeEventListener("loadingdone", fit);
     };
   }, [input, mirror, text, size, min]);
   return px;
