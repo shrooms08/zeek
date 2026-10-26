@@ -3,7 +3,7 @@
 import { toPocketError, type AnyWalletShout } from "@zeek/pocket";
 import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "framer-motion";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { engine } from "../api/engine";
 import { usePocket } from "../api/PocketProvider";
@@ -16,6 +16,7 @@ import { Empty, Loading, Offline, QrCard } from "../components/ui";
 import { CountUp } from "../motion/CountUp";
 import { EASE } from "../motion/tokens";
 import { useLoop } from "../sound/cues";
+import { sound } from "../sound/sound";
 import { formatZec, toNumber, zat } from "../lib/money";
 import { formatTimeOfDay } from "../lib/time";
 import { useDraft } from "../state/draft";
@@ -79,8 +80,14 @@ interface Pending {
 }
 
 export default function CampfireScreen() {
-  // The campfire crackles while this panel is open.
+  // The campfire crackles while this panel is open, over quieter music.
   useLoop("campfire-loop", true);
+  useEffect(() => {
+    sound.duckMusic("campfire", 400);
+    return () => {
+      sound.releaseMusic("campfire", 600);
+    };
+  }, []);
   const feed = useCampfire(false);
   const config = useConfig();
   const navigate = useNavigate();
