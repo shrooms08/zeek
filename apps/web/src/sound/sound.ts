@@ -6,8 +6,8 @@
  *
  * Nothing plays before `unlock()` (the first gesture), which also preloads
  * the effects and the waiting loop. On the field that gesture is the load
- * screen's tap, which plays the enter sound (`playIntro`) and the music
- * after it. Music loads when it is first started and
+ * screen's tap, which plays the enter sound (`playIntro`) and fades the
+ * music in after it. Music loads when it is first started and
  * the campfire loop the first time the campfire opens. Every `play()`
  * swallows a rejected promise: a browser that refuses to play is never an
  * error. Effects (loops other than music included) and music are muted
@@ -43,6 +43,8 @@ const VOLUME: Record<Name, number> = {
 export type Duck = "reveal" | "campfire";
 const DUCK_LEVEL: Record<Duck, number> = { reveal: 0.05, campfire: 0.06 };
 const UNDUCK_MS = 600;
+/** The music's fade-in after the load screen's enter sound. */
+const MUSIC_IN_MS = 1500;
 /** Copies per effect (tile picks come quickly). */
 const POOL: Record<Effect, number> = {
   "tile-pick": 4,
@@ -160,6 +162,8 @@ class Sound {
 
   /** Starts a loop (a second call while it plays does nothing). */
   startLoop(name: Loop): void {
+    // Playing already (and not fading out): leave its level alone.
+    if (this.wanted.has(name) && this.loops.get(name)?.paused === false) return;
     this.wanted.add(name);
     this.resume(name);
   }
@@ -183,31 +187,38 @@ class Sound {
 
   /**
    * The load screen's tap (call after `unlock()`, in the same gesture):
-   * plays `name`, and the music once it ends. With effects muted, or if the
-   * browser refuses it, the music starts at once.
+   * plays `name`, then fades the music in when it ends. With effects muted,
+   * or if the browser refuses it, the music fades in `fallbackMs` after the
+   * tap instead (as the load screen leaves).
    */
-  playIntro(name: Effect): void {
-    if (!this.unlocked) return;
+  playIntro(name: Effect, fallbackMs: number): void {
+    if (!this.unlocked || this.introPlaying) return;
     this.wanted.add("music");
+    this.introPlaying = true;
+    const tapped = performance.now();
+    let started = false;
+    const start = () => {
+      if (started) return;
+      started = true;
+      this.introPlaying = false;
+      this.fadeInMusic();
+    };
+    const fallback = () => {
+      window.setTimeout(start, Math.max(0, tapped + fallbackMs - performance.now()));
+    };
     const audio = this.pools.get(name)?.[0];
     if (this.sfxOff || audio === undefined) {
-      this.resume("music");
+      fallback();
       return;
     }
-    this.introPlaying = true;
-    const done = () => {
-      if (!this.introPlaying) return;
-      this.introPlaying = false;
-      this.resume("music");
-    };
-    audio.addEventListener("ended", done, { once: true });
-    audio.addEventListener("error", done, { once: true });
+    audio.addEventListener("ended", start, { once: true });
+    audio.addEventListener("error", fallback, { once: true });
     audio.currentTime = 0;
     audio.volume = VOLUME[name];
     try {
-      void audio.play().catch(done);
+      void audio.play().catch(fallback);
     } catch {
-      done();
+      fallback();
     }
   }
 
@@ -298,6 +309,22 @@ class Sound {
     this.fades.delete(name);
     audio.volume = this.loopVolume(name);
     if (audio.paused) attempt(audio);
+  }
+
+  /** Starts the music (wanted, unmuted) from silence, up to its level over MUSIC_IN_MS. */
+  private fadeInMusic(): void {
+    if (!this.unlocked || !this.wanted.has("music") || this.musicOff) return;
+    const audio = this.loop("music");
+    if (!audio.paused) return;
+    this.fades.get("music")?.();
+    audio.volume = 0;
+    attempt(audio);
+    this.fades.set(
+      "music",
+      fade(audio, this.loopVolume("music"), MUSIC_IN_MS, () => {
+        this.fades.delete("music");
+      }),
+    );
   }
 
   /** Moves the music to its current level over `fadeMs`. */

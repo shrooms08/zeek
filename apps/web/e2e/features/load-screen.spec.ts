@@ -1,7 +1,7 @@
 /**
  * The load screen (index.html + src/boot.ts): on screen at once; once the
  * field is ready, "Tap to dig in", and the tap plays the enter sound once
- * and reveals the field; a deep link skips the tap; never wider than the
+ * and, in time with it, fades to black and then to the field; a deep link skips the tap; never wider than the
  * viewport with the prompt showing. Also the sound and music toggles
  * (header, Menu, the M key), which persist. These tests start without the
  * global skip (playwright.config.ts). Every audio play() is recorded.
@@ -57,7 +57,12 @@ test("the load screen waits for a tap, which plays enter once and shows the fiel
   expect(await plays(page)).toEqual([]);
 
   await page.mouse.click(720, 500);
-  await expect(screen).toHaveCount(0, { timeout: 3_000 });
+  // The exit runs in time with the enter sound: black first, then the field.
+  await expect(screen).toHaveClass(/zb-exit/);
+  await page.waitForTimeout(1_000);
+  await expect(screen).toHaveCSS("pointer-events", "auto");
+  await expect(screen.locator(".zb-content")).toHaveCSS("opacity", "0");
+  await expect(screen).toHaveCount(0, { timeout: 4_000 });
   await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(300);
   expect((await plays(page)).filter((p) => p === "enter.mp3")).toHaveLength(1);
@@ -70,8 +75,20 @@ test("a key works as the tap; with sound effects muted it is silent", async ({ p
   await page.goto("/");
   const screen = await prompted(page);
   await page.keyboard.press("Enter");
-  await expect(screen).toHaveCount(0, { timeout: 3_000 });
+  await expect(screen).toHaveCount(0, { timeout: 4_000 });
   expect(await plays(page)).not.toContain("enter.mp3");
+});
+
+test("under reduced motion the tap fades it out at once, without the sequence", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const screen = await prompted(page);
+  await page.keyboard.press("Space");
+  await expect(screen).not.toHaveClass(/zb-exit/);
+  await expect(screen).toHaveCount(0, { timeout: 1_000 });
+  await expect(page.getByTestId("field")).toBeVisible({ timeout: 60_000 });
 });
 
 test("a deep link skips the tap and plays nothing", async ({ page }) => {
@@ -104,7 +121,7 @@ test("both toggles flip and persist after a reload; M toggles sound effects", as
   const enter = async () => {
     const screen = await prompted(page);
     await page.mouse.click(10, 10);
-    await expect(screen).toHaveCount(0, { timeout: 3_000 });
+    await expect(screen).toHaveCount(0, { timeout: 4_000 });
   };
   await page.goto("/");
   await enter();

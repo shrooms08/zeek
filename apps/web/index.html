@@ -39,6 +39,25 @@
       #zeek-boot.zb-tap {
         cursor: pointer;
       }
+      #zeek-boot .zb-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      }
+      /* The exit after the tap (src/boot.ts): logo and text fade out from
+         400 ms, black holds, the black fades off the field from 1600 ms. */
+      #zeek-boot.zb-exit {
+        opacity: 0;
+        transition: opacity 1600ms cubic-bezier(0.4, 0, 0.2, 1) 1600ms;
+      }
+      #zeek-boot.zb-exit .zb-content {
+        opacity: 0;
+        transition: opacity 800ms ease-out 400ms;
+      }
+      #zeek-boot.zb-pass {
+        pointer-events: none;
+      }
       #zeek-boot.zb-out {
         opacity: 0;
         pointer-events: none;
@@ -105,7 +124,7 @@
           zb-fade 300ms ease-out forwards,
           zb-pulse 1.6s ease-in-out 300ms infinite;
       }
-      #zeek-boot.zb-flash .zb-outer {
+      #zeek-boot.zb-exit .zb-outer {
         stroke-dashoffset: 0;
         fill-opacity: 1;
         animation: zb-flash 420ms forwards;
@@ -175,30 +194,32 @@
   </head>
   <body>
     <div id="zeek-boot" role="status" aria-label="Loading Zeek" data-testid="load-screen">
-      <svg viewBox="128 282 483 358" aria-hidden="true">
-        <path
-          class="zb-outer"
-          d="M220 297L512 297L596 380L530 460L596 527L516 625L220 625L143 527L205 460L143 378Z"
-          fill="#ECEBE6"
-          stroke="#ECEBE6"
-          stroke-width="14"
-          stroke-linejoin="round"
-        />
-        <g class="zb-inner">
+      <div class="zb-content">
+        <svg viewBox="128 282 483 358" aria-hidden="true">
           <path
-            d="M176 371L231 316L488 316L222 595L163 537L303 392Q309 371 290 371Z M468 525L517 476L562 525Z"
-            fill="#0A0A0A"
-            stroke="#0A0A0A"
-            stroke-width="3"
+            class="zb-outer"
+            d="M220 297L512 297L596 380L530 460L596 527L516 625L220 625L143 527L205 460L143 378Z"
+            fill="#ECEBE6"
+            stroke="#ECEBE6"
+            stroke-width="14"
             stroke-linejoin="round"
           />
-          <!-- prettier-ignore -->
-          <text transform="translate(517.6 606) skewX(-43.63)" text-anchor="end" font-family="Archivo Black, Archivo Variable, Archivo, sans-serif" font-weight="900" font-size="60" letter-spacing="-2" fill="#0A0A0A">eek</text>
-        </g>
-      </svg>
-      <div class="zb-foot" aria-hidden="true">
-        <div class="zb-track"><div class="zb-bar"></div></div>
-        <div class="zb-text">Tap to dig in</div>
+          <g class="zb-inner">
+            <path
+              d="M176 371L231 316L488 316L222 595L163 537L303 392Q309 371 290 371Z M468 525L517 476L562 525Z"
+              fill="#0A0A0A"
+              stroke="#0A0A0A"
+              stroke-width="3"
+              stroke-linejoin="round"
+            />
+            <!-- prettier-ignore -->
+            <text transform="translate(517.6 606) skewX(-43.63)" text-anchor="end" font-family="Archivo Black, Archivo Variable, Archivo, sans-serif" font-weight="900" font-size="60" letter-spacing="-2" fill="#0A0A0A">eek</text>
+          </g>
+        </svg>
+        <div class="zb-foot" aria-hidden="true">
+          <div class="zb-track"><div class="zb-bar"></div></div>
+          <div class="zb-text">Tap to dig in</div>
+        </div>
       </div>
     </div>
     <div id="root"></div>

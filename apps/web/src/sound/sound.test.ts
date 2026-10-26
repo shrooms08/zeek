@@ -135,51 +135,72 @@ describe("the load screen's tap", () => {
     FakeAudio.allow = true;
   });
   afterEach(() => {
+    vi.useRealTimers();
     document.getElementById("zeek-boot")?.remove();
   });
 
   const plays = (name: string) => named(name).reduce((n, a) => n + a.plays, 0);
 
-  it("plays enter once, and the music when it ends, not before", async () => {
+  it("plays enter once, then fades the music in from silence when it ends", async () => {
     const { sound, cues } = await freshSound();
     cues.unlockOnFirstGesture();
     sound.unlock();
-    sound.playIntro("enter");
-    await settle();
+    vi.useFakeTimers();
+    sound.playIntro("enter", 3200);
+    await vi.advanceTimersByTimeAsync(4000);
     expect(plays("enter")).toBe(1);
-    expect(plays("music")).toBe(0);
     // Another gesture during the intro does not start the music early.
     window.dispatchEvent(new Event("pointerdown"));
     expect(plays("music")).toBe(0);
     named("enter")[0]?.end();
-    expect(named("music")[0]?.paused).toBe(false);
-    expect(plays("enter")).toBe(1);
-  });
-
-  it("a refused enter still lets the music start", async () => {
-    FakeAudio.allow = false;
-    const { sound } = await freshSound();
-    sound.unlock();
-    sound.playIntro("enter");
-    await settle();
+    const music = named("music")[0];
+    expect(music?.paused).toBe(false);
+    expect(music?.volume).toBe(0);
+    vi.advanceTimersByTime(750);
+    expect(music?.volume).toBeGreaterThan(0.05);
+    expect(music?.volume).toBeLessThan(0.1);
+    // A gesture during the fade-in does not jump it to full.
+    window.dispatchEvent(new Event("keydown"));
+    expect(music?.volume).toBeLessThan(0.1);
+    vi.advanceTimersByTime(800);
+    expect(music?.volume).toBeCloseTo(0.15, 5);
     expect(plays("enter")).toBe(1);
     expect(plays("music")).toBe(1);
   });
 
-  it("respects the mutes: effects muted, the music at once; music muted, none after", async () => {
+  it("a refused enter: the music fades in at the fallback time", async () => {
+    FakeAudio.allow = false;
+    const { sound } = await freshSound();
+    sound.unlock();
+    vi.useFakeTimers();
+    sound.playIntro("enter", 3200);
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(plays("enter")).toBe(1);
+    expect(plays("music")).toBe(0);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(plays("music")).toBe(1);
+    expect(named("music")[0]?.volume).toBeLessThan(0.15);
+  });
+
+  it("respects the mutes: effects muted, music at the fallback time; music muted, none", async () => {
     localStorage.setItem("zeek.sfxMuted", "1");
     let { sound } = await freshSound();
     sound.unlock();
-    sound.playIntro("enter");
-    await settle();
+    vi.useFakeTimers();
+    sound.playIntro("enter", 3200);
+    vi.advanceTimersByTime(3100);
+    expect(plays("music")).toBe(0);
+    vi.advanceTimersByTime(1700);
     expect(plays("enter")).toBe(0);
     expect(named("music")[0]?.paused).toBe(false);
+    expect(named("music")[0]?.volume).toBeCloseTo(0.15, 5);
+    vi.useRealTimers();
 
     localStorage.clear();
     localStorage.setItem("zeek.musicMuted", "1");
     ({ sound } = await freshSound());
     sound.unlock();
-    sound.playIntro("enter");
+    sound.playIntro("enter", 3200);
     await settle();
     expect(plays("enter")).toBe(1);
     named("enter")[0]?.end();
