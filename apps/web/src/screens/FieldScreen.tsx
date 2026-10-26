@@ -19,7 +19,6 @@ import { useBlockSpacing, useBoard, useConfig, usePending } from "../api/queries
 import { DigPanel } from "../components/DigPanel";
 import { Field } from "../components/field/Field";
 import { FitAmount } from "../components/FitAmount";
-import type { PropReaction } from "../components/field/World";
 import { Icon } from "../components/Icon";
 import { hasSeenOnboarding, Onboarding } from "../components/Onboarding";
 import { PictoBubble } from "../components/PictoBubble";
@@ -35,7 +34,9 @@ import { roundAcceptsDigs } from "../lib/readiness";
 import { useMedia } from "../lib/useMedia";
 import { prefersReducedMotion, useNow } from "../lib/useNow";
 import { CountUp, PULSE } from "../motion/CountUp";
-import { play } from "../sound/sound";
+import { bootProgress, bootReady } from "../boot";
+import { takeOwnDig, useLoop } from "../sound/cues";
+import { sound } from "../sound/sound";
 import { useDraft } from "../state/draft";
 import { useFieldFx } from "../state/fieldFx";
 import { lastSeenReveal, loadMyDigs, markRevealSeen } from "../state/myDigs";
@@ -45,12 +46,6 @@ function cryptoRandom(): number {
   crypto.getRandomValues(b);
   return (b[0] ?? 0) / 0x1_0000_0000;
 }
-
-const REACTION_SOUND: Partial<Record<PropReaction, Parameters<typeof play>[0]>> = {
-  rumble: "rumble",
-  poke: "crackle",
-  egg: "thunk",
-};
 
 export function FieldScreen() {
   const board = useBoard();
@@ -85,24 +80,26 @@ export function FieldScreen() {
     }
   }, [board.data, navigate, pathname]);
 
-  // Someone else's dig landed (depth grew without a pick of ours): a soft thunk.
-  const stagesKey = board.data?.stages.join(",") ?? "";
-  const [lastStages, setLastStages] = useState(stagesKey);
+  // The load screen: the round has loaded, and with it the field renders
+  // (or Replay, or the offline message, when the engine does not answer).
+  const roundLoaded = board.data !== undefined;
   useEffect(() => {
-    if (stagesKey === lastStages) return;
-    if (lastStages !== "") play("thunk", true);
-    setLastStages(stagesKey);
-  }, [stagesKey, lastStages]);
+    if (roundLoaded) bootProgress(60);
+    if (roundLoaded || board.isError) bootReady();
+  }, [roundLoaded, board.isError]);
 
+  // Waiting for a reveal: a round this browser dug in has closed and its
+  // result is not in yet ("Round N reveals in m:ss").
+  const myRounds = new Set(loadMyDigs().map((d) => d.round));
+  useLoop(
+    "waiting-loop",
+    (pending.data ?? []).some((p) => myRounds.has(p.round)),
+  );
+
+  // The prize grew: if it is this player's dig landing, the dig sound.
   const onGrow = useCallback(() => {
     setPrizePulse((n) => n + 1);
-  }, []);
-  const onReact = useCallback((r: PropReaction) => {
-    const cue = REACTION_SOUND[r];
-    if (cue !== undefined) play(cue);
-  }, []);
-  const onTick = useCallback(() => {
-    play("tick");
+    if (takeOwnDig()) sound.play("dig");
   }, []);
 
   if (board.isPending) return <Loading />;
@@ -156,7 +153,7 @@ export function FieldScreen() {
     setLiteTrimmed(false);
   };
   const toggle = (i: number) => {
-    if (!draft.tiles.includes(i)) play("pin");
+    sound.play("tile-pick");
     draft.setTiles(tapTile(mode, draft.tiles, i));
     setLiteTrimmed(false);
   };
@@ -217,7 +214,6 @@ export function FieldScreen() {
       open={open}
       stale={stale}
       compact={!desktop}
-      onTick={onTick}
       note={
         open
           ? `${b.blocks_remaining} blocks left in round ${b.round}`
@@ -258,7 +254,6 @@ export function FieldScreen() {
       interactive={!fx.sealing && !modal}
       landing={landing}
       flight={fx.flight}
-      onReact={onReact}
       onCampfire={() => void navigate("/campfire")}
     />
   );
