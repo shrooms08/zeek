@@ -4,14 +4,17 @@
  * HTMLAudioElement, with a small pool per effect so rapid tile picks
  * overlap cleanly.
  *
- * Nothing plays before `unlock()` (the intro's Enter, a user gesture), which
- * also preloads the effects and the waiting loop. Music loads when it is
- * first started (Enter) and the campfire loop the first time the campfire
- * opens. Every `play()` swallows a rejected promise: a browser that refuses
- * to play is never an error. Effects (loops other than music included) and
- * music are muted separately, remembered in this browser ("zeek.sfxMuted",
- * "zeek.musicMuted"). During a reveal the music ducks from the rumble until
- * the result card shows. Sound is never needed to understand anything.
+ * The load screen tries the enter sound before any gesture
+ * (`tryAutoplay`); if the browser allows it, the music follows it. Otherwise
+ * nothing plays before `unlock()` (the first gesture), which also preloads
+ * the effects and the waiting loop. Music loads when it is first started and
+ * the campfire loop the first time the campfire opens. Every `play()`
+ * swallows a rejected promise: a browser that refuses to play is never an
+ * error. Effects (loops other than music included) and music are muted
+ * separately, remembered in this browser ("zeek.sfxMuted",
+ * "zeek.musicMuted"). The music ducks during a reveal (from the rumble
+ * until the result card) and while the campfire is open; the lower duck
+ * wins. Sound is never needed to understand anything.
  */
 
 export type Effect =
@@ -33,8 +36,12 @@ const VOLUME: Record<Name, number> = {
   "campfire-loop": 0.25,
   music: 0.15,
 };
-/** Music's volume from the rumble until the reveal's result card. */
-const DUCKED = 0.05;
+/**
+ * Music under something else: the reveal (from the rumble until the result
+ * card) and the open campfire. With both, the lower wins.
+ */
+export type Duck = "reveal" | "campfire";
+const DUCK_LEVEL: Record<Duck, number> = { reveal: 0.05, campfire: 0.06 };
 const UNDUCK_MS = 600;
 /** Copies per effect (tile picks come quickly). */
 const POOL: Record<Effect, number> = {
@@ -118,8 +125,12 @@ class Sound {
   /** Loops asked for; a muted one resumes when unmuted. */
   private wanted = new Set<Loop>();
   private fades = new Map<Loop, () => void>();
-  private ducked = false;
+  private ducks = new Set<Duck>();
   private listeners = new Set<() => void>();
+  /** The load screen's intro: playing (the music waits), or cancelled. */
+  private intro: HTMLAudioElement | null = null;
+  private introPlaying = false;
+  private introCancelled = false;
 
   /** Allows sound and preloads the effects; call from a user gesture. */
   unlock(): void {
@@ -143,7 +154,7 @@ class Sound {
     this.next.set(name, i + 1);
     const audio = pool[i];
     if (audio === undefined) return;
-    if (name === "rumble") this.duck();
+    if (name === "rumble") this.duckMusic("reveal", 0);
     audio.currentTime = 0;
     audio.volume = VOLUME[name];
     attempt(audio);
@@ -172,19 +183,63 @@ class Sound {
     );
   }
 
+  /**
+   * Best effort before any gesture (the load screen): plays `name` if the
+   * browser allows it, and if it does, the music follows when it ends. A
+   * refused play does nothing; sound then waits for the first gesture.
+   */
+  tryAutoplay(name: Effect): void {
+    if (this.sfxOff || this.intro !== null) return;
+    const audio = element(name);
+    this.intro = audio;
+    let started: Promise<void>;
+    try {
+      started = audio.play();
+    } catch {
+      return;
+    }
+    started.then(
+      () => {
+        if (this.introCancelled) {
+          audio.pause();
+          return;
+        }
+        // The browser allows sound: as good as a gesture.
+        this.introPlaying = true;
+        this.unlock();
+        audio.addEventListener(
+          "ended",
+          () => {
+            this.introPlaying = false;
+            this.startLoop("music");
+          },
+          { once: true },
+        );
+      },
+      () => undefined,
+    );
+  }
+
+  /** The load screen has gone: an intro that has not started never will. */
+  cancelAutoplay(): void {
+    this.introCancelled = true;
+  }
+
+  /** Lowers the music for `source` over `fadeMs` (the lowest duck wins). */
+  duckMusic(source: Duck, fadeMs: number): void {
+    this.ducks.add(source);
+    this.levelMusic(fadeMs);
+  }
+
+  /** Ends `source`'s duck: back to the duck still active, or full. */
+  releaseMusic(source: Duck, fadeMs = UNDUCK_MS): void {
+    if (!this.ducks.delete(source)) return;
+    this.levelMusic(fadeMs);
+  }
+
   /** Brings the music back from the reveal's duck (the result card shows). */
   releaseDuck(): void {
-    if (!this.ducked) return;
-    this.ducked = false;
-    const music = this.loops.get("music");
-    if (music === undefined) return;
-    this.fades.get("music")?.();
-    this.fades.set(
-      "music",
-      fade(music, VOLUME.music, UNDUCK_MS, () => {
-        this.fades.delete("music");
-      }),
-    );
+    this.releaseMusic("reveal");
   }
 
   get sfxMuted(): boolean {
@@ -241,12 +296,17 @@ class Sound {
   }
 
   private loopVolume(name: Loop): number {
-    return name === "music" && this.ducked ? DUCKED : VOLUME[name];
+    if (name !== "music") return VOLUME[name];
+    let level = VOLUME.music;
+    for (const d of this.ducks) level = Math.min(level, DUCK_LEVEL[d]);
+    return level;
   }
 
   /** Plays a wanted, unmuted loop that is not playing yet. */
   private resume(name: Loop): void {
     if (!this.unlocked || !this.wanted.has(name) || this.muted(name)) return;
+    // The intro is playing: the music starts when it ends.
+    if (name === "music" && this.introPlaying) return;
     const audio = this.loop(name);
     this.fades.get(name)?.();
     this.fades.delete(name);
@@ -254,13 +314,17 @@ class Sound {
     if (audio.paused) attempt(audio);
   }
 
-  private duck(): void {
-    this.ducked = true;
+  /** Moves the music to its current level over `fadeMs`. */
+  private levelMusic(fadeMs: number): void {
     const music = this.loops.get("music");
     if (music === undefined) return;
     this.fades.get("music")?.();
-    this.fades.delete("music");
-    music.volume = DUCKED;
+    this.fades.set(
+      "music",
+      fade(music, this.loopVolume("music"), fadeMs, () => {
+        this.fades.delete("music");
+      }),
+    );
   }
 }
 

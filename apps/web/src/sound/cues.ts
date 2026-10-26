@@ -1,30 +1,7 @@
-/**
- * When the app's sounds play (the files and volumes are in ./sound.ts).
- *
- * The dig sound marks the moment a dig of yours counts: the prize number
- * updates as it lands. A dig from the Pocket (or one auto-dig) marks itself
- * here when it is sent; the next time the prize grows, the field plays the
- * dig sound once. A mark not used within two minutes is dropped, so a later
- * dig by someone else never plays it.
- */
+/** When the app's sounds play (the files and volumes are in ./sound.ts). */
 
 import { useEffect, useSyncExternalStore } from "react";
 import { sound, type Loop } from "./sound";
-
-const DIG_MARK_MS = 2 * 60_000;
-let digMarkedAt: number | null = null;
-
-/** A dig of this player's was just sent. */
-export function markOwnDig(): void {
-  digMarkedAt = Date.now();
-}
-
-/** Whether the prize growing now is this player's dig (once per mark). */
-export function takeOwnDig(): boolean {
-  const at = digMarkedAt;
-  digMarkedAt = null;
-  return at !== null && Date.now() - at <= DIG_MARK_MS;
-}
 
 /** Plays `name` while `active` (and this component is mounted). */
 export function useLoop(name: Loop, active: boolean): void {
@@ -49,17 +26,17 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * Sound needs a user gesture: the player's first pointerdown or keydown
- * anywhere unlocks it, plays the enter sound and starts the music (unless
- * muted). A tile picked by that first tap still plays its own sound (the
- * pick's click comes after the pointerdown).
+ * Sound needs a user gesture (unless the load screen's intro was allowed to
+ * autoplay): the player's first pointerdown or keydown anywhere unlocks it
+ * and starts the music (unless muted). It never plays the enter sound: that
+ * belongs to the load screen. A tile picked or a DIG pressed by that first
+ * tap still plays its own sound (their handlers run after this one).
  */
 export function unlockOnFirstGesture(): void {
   const first = () => {
     window.removeEventListener("pointerdown", first, true);
     window.removeEventListener("keydown", first, true);
     sound.unlock();
-    sound.play("enter");
     sound.startLoop("music");
   };
   window.addEventListener("pointerdown", first, true);

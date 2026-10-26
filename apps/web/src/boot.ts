@@ -15,6 +15,8 @@ const MIN_MS = 1200;
 /** Longest, from first paint: it leaves even if loading goes on. */
 const CAP_MS = 4000;
 const OUT_MS = 350;
+import { sound } from "./sound/sound";
+
 /** Test-only: end-to-end tests of other screens start without it. */
 const SKIP_KEY = "zeek.e2e.skipLoadScreen";
 
@@ -40,6 +42,8 @@ function leave(): void {
   const el = node();
   if (leaving || el === null) return;
   leaving = true;
+  // An intro the browser has not started by now never plays.
+  sound.cancelAutoplay();
   el.classList.add("zb-out");
   window.setTimeout(
     () => {
@@ -84,5 +88,7 @@ export function startBoot(): void {
     return;
   }
   bootProgress(30);
+  // The intro with the logo, if the browser allows sound before a gesture.
+  sound.tryAutoplay("enter");
   window.setTimeout(leave, Math.max(0, CAP_MS - sinceFirstPaint()));
 }
