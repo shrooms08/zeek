@@ -25,7 +25,7 @@ import {
 import { toNumber, zat, type Zat } from "../lib/money";
 import { hiddenSince } from "../lib/visibility";
 import { setAutoDigRunning } from "./autoDigFlag";
-import { markOwnDig } from "../sound/cues";
+import { sound } from "../sound/sound";
 import { armResplit } from "./pocketActivity";
 import { recordMyDig } from "./myDigs";
 
@@ -104,8 +104,8 @@ export function AutoDigProvider({ children }: { children: ReactNode }) {
               });
               void client.invalidateQueries({ queryKey: ["pocket"] });
               armResplit();
-              // One dig sound per auto dig, when the prize counts it.
-              markOwnDig();
+              // One dig sound per auto dig (there is no DIG press).
+              sound.play("dig");
               return { round: result.round, txids: result.batches.map((b) => b.txid) };
             } catch (error) {
               const e = toPocketError(error);

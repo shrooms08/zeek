@@ -24,7 +24,6 @@ import {
   type PaymentStatus,
 } from "../machines/otherWallet";
 import { useDraft } from "../state/draft";
-import { sound } from "../sound/sound";
 import { recordMyDig } from "../state/myDigs";
 
 export default function DigWalletScreen() {
@@ -117,18 +116,6 @@ export default function DigWalletScreen() {
   };
 
   const landingDigests = new Set((board.data?.landing ?? []).map((d) => d.memo_sha256));
-  // The dig sound, once: when a payment of this dig first reaches the
-  // network (landing, or already mined), the moment the prize counts it.
-  const landed =
-    state.kind === "waiting" &&
-    withLanding(state.payments, state.status, landingDigests).some((st) => st !== "not-sent");
-  const dug = useRef(false);
-  useEffect(() => {
-    if (landed && !dug.current) {
-      dug.current = true;
-      sound.play("dig");
-    }
-  }, [landed]);
   const closesIn =
     board.data === undefined ? null : Math.max(0, board.data.estimated_close_time - now);
 

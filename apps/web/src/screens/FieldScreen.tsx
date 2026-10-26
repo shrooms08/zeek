@@ -35,7 +35,7 @@ import { useMedia } from "../lib/useMedia";
 import { prefersReducedMotion, useNow } from "../lib/useNow";
 import { CountUp, PULSE } from "../motion/CountUp";
 import { bootProgress, bootReady } from "../boot";
-import { takeOwnDig, useLoop } from "../sound/cues";
+import { useLoop } from "../sound/cues";
 import { sound } from "../sound/sound";
 import { useDraft } from "../state/draft";
 import { useFieldFx } from "../state/fieldFx";
@@ -96,10 +96,8 @@ export function FieldScreen() {
     (pending.data ?? []).some((p) => myRounds.has(p.round)),
   );
 
-  // The prize grew: if it is this player's dig landing, the dig sound.
   const onGrow = useCallback(() => {
     setPrizePulse((n) => n + 1);
-    if (takeOwnDig()) sound.play("dig");
   }, []);
 
   if (board.isPending) return <Loading />;

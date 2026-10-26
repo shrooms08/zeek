@@ -10,6 +10,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Zeb } from "../art/Characters";
 import { EASE } from "../motion/tokens";
+import { sound } from "../sound/sound";
 import { Icon, type IconName } from "./Icon";
 
 /** <NetBadge net />: Testnet dashed with a flask, Mainnet solid with a globe. */
@@ -49,6 +50,16 @@ export function DigButton(props: {
   closed?: ClosedReason | undefined;
 }) {
   const reduce = useReducedMotion() === true;
+  // The dig sound the instant DIG is pressed, once per press: a key press
+  // can arrive both as keydown and as the pointerdown framer-motion fires
+  // for keyboard taps, so a second one within 300 ms is the same press.
+  const lastDig = useRef(0);
+  const digSound = () => {
+    const now = performance.now();
+    if (props.state !== "idle" || now - lastDig.current < 300) return;
+    lastDig.current = now;
+    sound.play("dig");
+  };
   if (props.state === "empty") {
     return (
       <button
@@ -77,6 +88,10 @@ export function DigButton(props: {
       style={{ justifyContent: props.total === undefined ? "center" : "space-between" }}
       disabled={props.state !== "idle"}
       onClick={props.onClick}
+      onPointerDown={digSound}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && !e.repeat) digSound();
+      }}
       {...(reduce || props.state !== "idle" ? {} : { whileTap: { x: 3, y: 3 } })}
       transition={{ duration: 0.09 }}
       data-testid={props.testId ?? "dig-button"}

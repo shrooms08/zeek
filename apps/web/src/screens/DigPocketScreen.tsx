@@ -21,7 +21,6 @@ import { recordMyDig } from "../state/myDigs";
 import { useBlockSpacing } from "../api/queries";
 import { fitsInRound, readyIn, readySecs, roundAcceptsDigs, shortfall } from "../lib/readiness";
 import { formatClock } from "../lib/time";
-import { markOwnDig } from "../sound/cues";
 import { armResplit } from "../state/pocketActivity";
 
 /** Most tiles affordable from `spendable` at `amountEach`. */
@@ -66,8 +65,6 @@ export default function DigPocketScreen() {
   useEffect(() => {
     if (doneKey === "") return;
     launch(doneKey.split(",").map(Number));
-    // The dig sound plays when the prize counts it (the field).
-    markOwnDig();
   }, [doneKey, launch]);
   // Opened directly (or after a reload): ask the Pocket where it stands.
   useEffect(() => {
