@@ -21,7 +21,8 @@ export function NetBadge({ net }: { net: "test" | "main" }) {
       data-testid="net-badge"
     >
       <Icon name={test ? "flask" : "globe"} size={14} strokeWidth={2.5} />
-      {test ? "Testnet" : "Mainnet"}
+      {/* On a phone the header also holds the sound toggles: icon only. */}
+      <span className="sr-only sm:not-sr-only">{test ? "Testnet" : "Mainnet"}</span>
     </span>
   );
 }

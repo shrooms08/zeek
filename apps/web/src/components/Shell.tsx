@@ -1,7 +1,7 @@
 /** App shell: <TopBar> (logo, <NetBadge>, round, Menu) and the menu sheet. */
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useContext, useEffect, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { LiveContext } from "../api/LiveProvider";
 import { useBoard, useConfig } from "../api/queries";
@@ -9,7 +9,9 @@ import { Logo } from "../art/Logo";
 import { Icon, type IconName } from "./Icon";
 import { MenuRow, NetBadge } from "./ui";
 import { EASE } from "../motion/tokens";
-import { setSoundOn, soundOn } from "../sound/sound";
+import { bootReady } from "../boot";
+import { useSoundSettings } from "../sound/cues";
+import { sound } from "../sound/sound";
 
 export function HomeLogo() {
   return (
@@ -29,6 +31,55 @@ const MENU: { to: string; icon: IconName; label: string }[] = [
   { to: "/how", icon: "book", label: "How to play" },
 ];
 
+/** Routes that show the field (it and its modals, src/App.tsx). */
+const FIELD_PATHS = ["/", "/dig/pocket", "/dig/wallet", "/how"];
+
+/** Whether a key press is typing (in a field), not a shortcut. */
+function typing(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
+}
+
+/** The two sound toggles: sound effects (speaker) and music (note). */
+function SoundToggles() {
+  const { sfxMuted, musicMuted } = useSoundSettings();
+  return (
+    <>
+      <button
+        type="button"
+        className="btn flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center px-2"
+        onClick={() => {
+          sound.sfxMuted = !sfxMuted;
+        }}
+        aria-pressed={!sfxMuted}
+        aria-label="Sound effects"
+        title={`Sound effects ${sfxMuted ? "off" : "on"} (M)`}
+        data-testid="sfx-toggle"
+      >
+        <Icon name={sfxMuted ? "speakeroff" : "speaker"} size={20} />
+      </button>
+      <button
+        type="button"
+        className="btn flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center px-2"
+        onClick={() => {
+          sound.musicMuted = !musicMuted;
+        }}
+        aria-pressed={!musicMuted}
+        aria-label="Music"
+        title={`Music ${musicMuted ? "off" : "on"}`}
+        data-testid="music-toggle"
+      >
+        <Icon name={musicMuted ? "noteoff" : "note"} size={20} />
+      </button>
+    </>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   // Any navigation (a menu row, a link, back/forward) closes the menu.
@@ -40,13 +91,31 @@ export function Shell({ children }: { children: ReactNode }) {
   const config = useConfig();
   const live = useContext(LiveContext);
   const reduce = useReducedMotion() === true;
-  const [sound, setSound] = useState(soundOn);
+  const { sfxMuted, musicMuted } = useSoundSettings();
+  // Opened on a screen other than the field: it is ready once rendered (the
+  // field tells the load screen itself, src/screens/FieldScreen.tsx).
+  const firstPath = useRef(pathname);
+  useEffect(() => {
+    if (!FIELD_PATHS.includes(firstPath.current)) bootReady();
+  }, []);
+  // M toggles sound effects (not while typing).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "m" && e.key !== "M") return;
+      if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      sound.sfxMuted = !sound.sfxMuted;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
   return (
     <div className="min-h-dvh flex flex-col">
       <a href="#main" className="sr-only focus:not-sr-only">
         Skip to content
       </a>
-      <header className="zk-header flex items-center gap-4 px-4 sm:px-10">
+      <header className="zk-header flex items-center gap-2 px-4 sm:gap-4 sm:px-10">
         <HomeLogo />
         {config.data !== undefined && <NetBadge net={config.data.params.network} />}
         <div className="flex-1" />
@@ -72,6 +141,7 @@ export function Shell({ children }: { children: ReactNode }) {
             Round {board.data.round}
           </span>
         )}
+        <SoundToggles />
         <button
           type="button"
           className="btn flex min-h-[52px] min-w-[52px] shrink-0 items-center justify-center gap-2.5 px-3 sm:px-5"
@@ -150,21 +220,32 @@ export function Shell({ children }: { children: ReactNode }) {
                   />
                 ))}
               </div>
-              <label className="mx-5 mt-4 flex items-center gap-3 text-white font-bold cursor-pointer">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  className="zk-switch"
-                  checked={sound}
-                  onChange={(e) => {
-                    setSound(e.target.checked);
-                    setSoundOn(e.target.checked);
+              <div className="mx-5 mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  className="flex items-center gap-3 text-white font-bold text-left"
+                  onClick={() => {
+                    sound.sfxMuted = !sfxMuted;
                   }}
-                  data-testid="sound-toggle"
-                />
-                Sound
-                <span className="text-fog font-normal text-sm">{sound ? "on" : "off"}</span>
-              </label>
+                  aria-pressed={!sfxMuted}
+                  data-testid="menu-sfx-toggle"
+                >
+                  <Icon name={sfxMuted ? "speakeroff" : "speaker"} size={20} />
+                  Sounds: {sfxMuted ? "off" : "on"}
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-3 text-white font-bold text-left"
+                  onClick={() => {
+                    sound.musicMuted = !musicMuted;
+                  }}
+                  aria-pressed={!musicMuted}
+                  data-testid="menu-music-toggle"
+                >
+                  <Icon name={musicMuted ? "noteoff" : "note"} size={20} />
+                  Music: {musicMuted ? "off" : "on"}
+                </button>
+              </div>
               <div className="mt-auto flex items-center justify-between gap-3 p-5 text-fog text-sm">
                 <span>Everyone sees the field. No one sees you.</span>
                 {config.data !== undefined && <NetBadge net={config.data.params.network} />}
