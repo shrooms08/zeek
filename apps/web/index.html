@@ -14,9 +14,9 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <!--
-      Load screen: painted before the JS bundle (src/boot.ts moves its bar and
-      removes it). Inline CSS only: the site's CSP allows no inline script, so
-      a CSS animation also hides it at 4 s if the bundle never runs.
+      Load screen: painted before the JS bundle (src/boot.ts moves its bar,
+      shows "Tap to dig in" and removes it). Inline CSS only: the site's CSP
+      allows no inline script.
     -->
     <style>
       #zeek-boot {
@@ -29,7 +29,15 @@
         justify-content: center;
         gap: 24px;
         background: #0a0a0a;
-        animation: zb-cap 350ms ease-out 4000ms forwards;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      #zeek-boot:focus {
+        outline: none;
+      }
+      #zeek-boot.zb-tap {
+        cursor: pointer;
       }
       #zeek-boot.zb-out {
         opacity: 0;
@@ -59,6 +67,9 @@
         opacity: 0;
         animation: zb-fade 250ms ease-out 650ms forwards;
       }
+      #zeek-boot .zb-foot {
+        position: relative;
+      }
       #zeek-boot .zb-track {
         width: 160px;
         height: 2px;
@@ -70,6 +81,34 @@
         height: 100%;
         background: #e8b54a;
         transition: width 400ms cubic-bezier(0.3, 0.7, 0.3, 1);
+      }
+      #zeek-boot .zb-text {
+        position: absolute;
+        top: 26px;
+        left: 50%;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.4;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: #a6a6a6;
+        opacity: 0;
+      }
+      #zeek-boot.zb-tap .zb-track {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+      }
+      #zeek-boot.zb-tap .zb-text {
+        animation:
+          zb-fade 300ms ease-out forwards,
+          zb-pulse 1.6s ease-in-out 300ms infinite;
+      }
+      #zeek-boot.zb-flash .zb-outer {
+        stroke-dashoffset: 0;
+        fill-opacity: 1;
+        animation: zb-flash 420ms forwards;
       }
       @keyframes zb-draw {
         to {
@@ -86,10 +125,30 @@
           opacity: 1;
         }
       }
-      @keyframes zb-cap {
-        to {
-          opacity: 0;
-          visibility: hidden;
+      @keyframes zb-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      /* Gold over 120 ms, back over 300 ms (the outline is the fill's edge). */
+      @keyframes zb-flash {
+        0% {
+          fill: #ecebe6;
+          stroke: #ecebe6;
+          animation-timing-function: ease-out;
+        }
+        28.57% {
+          fill: #e8b54a;
+          stroke: #e8b54a;
+          animation-timing-function: ease-in-out;
+        }
+        100% {
+          fill: #ecebe6;
+          stroke: #ecebe6;
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -102,7 +161,12 @@
           animation: none;
           opacity: 1;
         }
+        #zeek-boot.zb-tap .zb-text {
+          animation: none;
+          opacity: 1;
+        }
         #zeek-boot .zb-bar,
+        #zeek-boot.zb-tap .zb-track,
         #zeek-boot.zb-out {
           transition: none;
         }
@@ -132,7 +196,10 @@
           <text transform="translate(517.6 606) skewX(-43.63)" text-anchor="end" font-family="Archivo Black, Archivo Variable, Archivo, sans-serif" font-weight="900" font-size="60" letter-spacing="-2" fill="#0A0A0A">eek</text>
         </g>
       </svg>
-      <div class="zb-track" aria-hidden="true"><div class="zb-bar"></div></div>
+      <div class="zb-foot" aria-hidden="true">
+        <div class="zb-track"><div class="zb-bar"></div></div>
+        <div class="zb-text">Tap to dig in</div>
+      </div>
     </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

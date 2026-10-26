@@ -4,10 +4,10 @@
  * HTMLAudioElement, with a small pool per effect so rapid tile picks
  * overlap cleanly.
  *
- * The load screen tries the enter sound before any gesture
- * (`tryAutoplay`); if the browser allows it, the music follows it. Otherwise
- * nothing plays before `unlock()` (the first gesture), which also preloads
- * the effects and the waiting loop. Music loads when it is first started and
+ * Nothing plays before `unlock()` (the first gesture), which also preloads
+ * the effects and the waiting loop. On the field that gesture is the load
+ * screen's tap, which plays the enter sound (`playIntro`) and the music
+ * after it. Music loads when it is first started and
  * the campfire loop the first time the campfire opens. Every `play()`
  * swallows a rejected promise: a browser that refuses to play is never an
  * error. Effects (loops other than music included) and music are muted
@@ -127,10 +127,8 @@ class Sound {
   private fades = new Map<Loop, () => void>();
   private ducks = new Set<Duck>();
   private listeners = new Set<() => void>();
-  /** The load screen's intro: playing (the music waits), or cancelled. */
-  private intro: HTMLAudioElement | null = null;
+  /** The load screen's enter sound is playing: the music waits for it. */
   private introPlaying = false;
-  private introCancelled = false;
 
   /** Allows sound and preloads the effects; call from a user gesture. */
   unlock(): void {
@@ -184,45 +182,33 @@ class Sound {
   }
 
   /**
-   * Best effort before any gesture (the load screen): plays `name` if the
-   * browser allows it, and if it does, the music follows when it ends. A
-   * refused play does nothing; sound then waits for the first gesture.
+   * The load screen's tap (call after `unlock()`, in the same gesture):
+   * plays `name`, and the music once it ends. With effects muted, or if the
+   * browser refuses it, the music starts at once.
    */
-  tryAutoplay(name: Effect): void {
-    if (this.sfxOff || this.intro !== null) return;
-    const audio = element(name);
-    this.intro = audio;
-    let started: Promise<void>;
-    try {
-      started = audio.play();
-    } catch {
+  playIntro(name: Effect): void {
+    if (!this.unlocked) return;
+    this.wanted.add("music");
+    const audio = this.pools.get(name)?.[0];
+    if (this.sfxOff || audio === undefined) {
+      this.resume("music");
       return;
     }
-    started.then(
-      () => {
-        if (this.introCancelled) {
-          audio.pause();
-          return;
-        }
-        // The browser allows sound: as good as a gesture.
-        this.introPlaying = true;
-        this.unlock();
-        audio.addEventListener(
-          "ended",
-          () => {
-            this.introPlaying = false;
-            this.startLoop("music");
-          },
-          { once: true },
-        );
-      },
-      () => undefined,
-    );
-  }
-
-  /** The load screen has gone: an intro that has not started never will. */
-  cancelAutoplay(): void {
-    this.introCancelled = true;
+    this.introPlaying = true;
+    const done = () => {
+      if (!this.introPlaying) return;
+      this.introPlaying = false;
+      this.resume("music");
+    };
+    audio.addEventListener("ended", done, { once: true });
+    audio.addEventListener("error", done, { once: true });
+    audio.currentTime = 0;
+    audio.volume = VOLUME[name];
+    try {
+      void audio.play().catch(done);
+    } catch {
+      done();
+    }
   }
 
   /** Lowers the music for `source` over `fadeMs` (the lowest duck wins). */

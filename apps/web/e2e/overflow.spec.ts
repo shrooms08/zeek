@@ -130,6 +130,10 @@ const STATES: State[] = [
     ready: "load-screen",
     storage: { "zeek.e2e.skipLoadScreen": "0" },
     within: "#zeek-boot",
+    // Checked with "Tap to dig in" showing.
+    act: async (p) => {
+      await p.locator("#zeek-boot.zb-tap .zb-text").waitFor({ timeout: 10_000 });
+    },
   },
   { name: "field-lite", path: "/", ready: "field" },
   {

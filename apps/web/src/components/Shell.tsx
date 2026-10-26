@@ -92,11 +92,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const live = useContext(LiveContext);
   const reduce = useReducedMotion() === true;
   const { sfxMuted, musicMuted } = useSoundSettings();
-  // Opened on a screen other than the field: it is ready once rendered (the
-  // field tells the load screen itself, src/screens/FieldScreen.tsx).
+  // Opened on a screen other than the field: the load screen leaves once
+  // this renders, without a tap (the field tells it itself,
+  // src/screens/FieldScreen.tsx).
   const firstPath = useRef(pathname);
   useEffect(() => {
-    if (!FIELD_PATHS.includes(firstPath.current)) bootReady();
+    if (!FIELD_PATHS.includes(firstPath.current)) bootReady({ silent: true });
   }, []);
   // M toggles sound effects (not while typing).
   useEffect(() => {

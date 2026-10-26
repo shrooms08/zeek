@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /** A stand-in for HTMLAudioElement that records what the module asks of it. */
 class FakeAudio {
   static made: FakeAudio[] = [];
-  /** Whether the browser allows play() (autoplay policy). */
+  /** Whether the browser allows play(). */
   static allow = false;
   src: string;
   preload = "";
@@ -129,67 +129,76 @@ describe("sound", () => {
   });
 });
 
-describe("the load screen's intro", () => {
+describe("the load screen's tap", () => {
   beforeEach(() => {
     localStorage.clear();
+    FakeAudio.allow = true;
+  });
+  afterEach(() => {
+    document.getElementById("zeek-boot")?.remove();
   });
 
-  it("allowed: enter plays with the logo and the music follows when it ends", async () => {
-    FakeAudio.allow = true;
+  const plays = (name: string) => named(name).reduce((n, a) => n + a.plays, 0);
+
+  it("plays enter once, and the music when it ends, not before", async () => {
     const { sound, cues } = await freshSound();
     cues.unlockOnFirstGesture();
-    sound.tryAutoplay("enter");
+    sound.unlock();
+    sound.playIntro("enter");
     await settle();
-    const enter = named("enter")[0];
-    expect(enter?.plays).toBe(1);
-    expect(named("music")).toHaveLength(0);
-    // A gesture during the intro does not start the music early.
+    expect(plays("enter")).toBe(1);
+    expect(plays("music")).toBe(0);
+    // Another gesture during the intro does not start the music early.
     window.dispatchEvent(new Event("pointerdown"));
-    expect(named("music").every((a) => a.paused)).toBe(true);
-    enter?.end();
+    expect(plays("music")).toBe(0);
+    named("enter")[0]?.end();
     expect(named("music")[0]?.paused).toBe(false);
-    // Enter never plays again.
-    expect(named("enter").reduce((n, a) => n + a.plays, 0)).toBe(1);
+    expect(plays("enter")).toBe(1);
   });
 
-  it("blocked: nothing plays until the first gesture, which starts music but not enter", async () => {
+  it("a refused enter still lets the music start", async () => {
     FakeAudio.allow = false;
-    const { sound, cues } = await freshSound();
-    cues.unlockOnFirstGesture();
-    sound.tryAutoplay("enter");
+    const { sound } = await freshSound();
+    sound.unlock();
+    sound.playIntro("enter");
     await settle();
-    expect(named("music")).toHaveLength(0);
-    FakeAudio.allow = true;
-    window.dispatchEvent(new Event("pointerdown"));
-    expect(named("music")[0]?.paused).toBe(false);
-    // Only the refused attempt: enter is not replayed by the gesture.
-    expect(named("enter").reduce((n, a) => n + a.plays, 0)).toBe(1);
+    expect(plays("enter")).toBe(1);
+    expect(plays("music")).toBe(1);
   });
 
-  it("respects the mutes: no attempt with effects muted, no music after it with music muted", async () => {
-    FakeAudio.allow = true;
+  it("respects the mutes: effects muted, the music at once; music muted, none after", async () => {
     localStorage.setItem("zeek.sfxMuted", "1");
     let { sound } = await freshSound();
-    sound.tryAutoplay("enter");
+    sound.unlock();
+    sound.playIntro("enter");
     await settle();
-    expect(named("enter")).toHaveLength(0);
+    expect(plays("enter")).toBe(0);
+    expect(named("music")[0]?.paused).toBe(false);
 
     localStorage.clear();
     localStorage.setItem("zeek.musicMuted", "1");
     ({ sound } = await freshSound());
-    sound.tryAutoplay("enter");
+    sound.unlock();
+    sound.playIntro("enter");
     await settle();
+    expect(plays("enter")).toBe(1);
     named("enter")[0]?.end();
-    expect(named("music").every((a) => a.paused)).toBe(true);
+    expect(plays("music")).toBe(0);
   });
 
-  it("an intro that starts only after the load screen has gone is stopped", async () => {
-    FakeAudio.allow = true;
-    const { sound } = await freshSound();
-    sound.tryAutoplay("enter");
-    sound.cancelAutoplay();
-    await settle();
-    expect(named("enter")[0]?.paused).toBe(true);
+  it("while the load screen waits for its tap, other gestures leave sound to it", async () => {
+    const boot = document.createElement("div");
+    boot.id = "zeek-boot";
+    document.body.append(boot);
+    const { cues } = await freshSound();
+    cues.unlockOnFirstGesture();
+    window.dispatchEvent(new Event("pointerdown"));
+    expect(FakeAudio.made).toHaveLength(0);
+    // Gone (a deep link, or after the tap): the next gesture starts the music.
+    boot.remove();
+    window.dispatchEvent(new Event("keydown"));
+    expect(named("music")[0]?.paused).toBe(false);
+    expect(plays("enter")).toBe(0);
   });
 });
 

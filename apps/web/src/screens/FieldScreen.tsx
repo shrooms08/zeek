@@ -81,11 +81,13 @@ export function FieldScreen() {
   }, [board.data, navigate, pathname]);
 
   // The load screen: the round has loaded, and with it the field renders
-  // (or Replay, or the offline message, when the engine does not answer).
+  // (its prompt shows), or the engine does not answer and Replay or the
+  // offline message renders (it leaves by itself, without a tap).
   const roundLoaded = board.data !== undefined;
   useEffect(() => {
     if (roundLoaded) bootProgress(60);
-    if (roundLoaded || board.isError) bootReady();
+    if (roundLoaded) bootReady();
+    else if (board.isError) bootReady({ silent: true });
   }, [roundLoaded, board.isError]);
 
   // Waiting for a reveal: a round this browser dug in has closed and its

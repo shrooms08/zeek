@@ -23,7 +23,6 @@ test.beforeEach(async ({ page }) => {
     ) => Promise<void>;
     proto.play = function (this: HTMLMediaElement) {
       w.__plays.push(this.src.split("/").pop() ?? "");
-      if (this.src.endsWith("dig.mp3")) console.log("DIGPLAY", new Error().stack);
       return original.call(this).catch(() => undefined);
     };
   });

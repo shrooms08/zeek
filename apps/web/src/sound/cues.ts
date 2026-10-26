@@ -1,6 +1,7 @@
 /** When the app's sounds play (the files and volumes are in ./sound.ts). */
 
 import { useEffect, useSyncExternalStore } from "react";
+import { bootHoldsSound } from "../boot";
 import { sound, type Loop } from "./sound";
 
 /** Plays `name` while `active` (and this component is mounted). */
@@ -26,14 +27,16 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * Sound needs a user gesture (unless the load screen's intro was allowed to
- * autoplay): the player's first pointerdown or keydown anywhere unlocks it
- * and starts the music (unless muted). It never plays the enter sound: that
- * belongs to the load screen. A tile picked or a DIG pressed by that first
- * tap still plays its own sound (their handlers run after this one).
+ * Sound needs a user gesture. While the load screen waits for its tap, that
+ * tap is the gesture (src/boot.ts: it plays the enter sound, then the
+ * music) and this does nothing. Otherwise (a deep link, Replay) the player's
+ * first pointerdown or keydown anywhere unlocks sound and starts the music
+ * (unless muted), without the enter sound. A tile picked or a DIG pressed by
+ * that first tap still plays its own sound (their handlers run after this).
  */
 export function unlockOnFirstGesture(): void {
   const first = () => {
+    if (bootHoldsSound()) return;
     window.removeEventListener("pointerdown", first, true);
     window.removeEventListener("keydown", first, true);
     sound.unlock();
