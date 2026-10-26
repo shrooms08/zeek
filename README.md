@@ -2,9 +2,9 @@
 
 Zeek is a treasure hunt on shielded Zcash. Every round, 25 tiles, one hides
 the treasure. Pick your tiles, dig, and whoever found it splits the pot.
-Nobody can see who dug, what they bet, or who won.
+Nobody can see who dug, which digs are whose, or who won.
 
-**Play (testnet):** https://playzeek.pages.dev · **Demo video:** [DEMO_LINK] · **Track:** Wildcard
+**Play (testnet):** https://playzeek.pages.dev · [Demo video](https://x.com/shroomsgotsol/status/2113639248524091881?s=20) · **Track:** Wildcard
 
 ## How to play
 

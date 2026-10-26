@@ -8,6 +8,8 @@
 /data/
 # A stray copy of apps/web/public/sfx/campfire-loop.mp3
 /web/
+# Local video art (16 MB), not needed in the repo
+/docs/video/paper/
 .env
 .env.*
 !.env.example
