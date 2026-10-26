@@ -6,6 +6,8 @@
 # Secrets and local data (never commit)
 /.secrets/
 /data/
+# A stray copy of apps/web/public/sfx/campfire-loop.mp3
+/web/
 .env
 .env.*
 !.env.example

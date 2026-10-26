@@ -1,30 +1,68 @@
 # Zeek
 
-**A treasure-digging game on Zcash: everyone sees the field, no one sees
-you.**
+Zeek is a treasure hunt on shielded Zcash. Every round, 25 tiles, one hides
+the treasure. Pick your tiles, dig, and whoever found it splits the pot.
+Nobody can see who dug, what they bet, or who won.
 
-Play on testnet (free coins): **https://playzeek.pages.dev**
+**Play (testnet):** https://playzeek.pages.dev · **Demo video:** [DEMO_LINK] · **Track:** Wildcard
 
 ## How to play
 
-1. Pick tiles on the 5×5 field and dig. A dig is a shielded Zcash payment
-   (from the in-browser Zeek Pocket, or any Zcash wallet).
-2. When the round closes (about 10 minutes), a public random beacon picks
-   the treasure tile.
-3. Everyone who dug that tile splits the prize. The game pays them
-   automatically and privately.
+1. Open https://playzeek.pages.dev and tap to start.
+2. Create a Zeek Pocket, the wallet that lives in your browser: choose a
+   passphrase and write down its 24 words.
+3. Get free testnet ZEC from the
+   [testnet faucet](https://faucet.testnet.valargroup.dev/) (linked from the
+   Pocket's wallet screen) and send it to your Pocket's address.
+4. Pick tiles on the 5×5 field and press DIG. Each dig is a shielded payment
+   of at least 0.001 ZEC.
+5. Wait for the reveal. The round closes after about 10 minutes, and about
+   15 minutes later a public beacon picks the treasure tile. If you dug it,
+   your share arrives in your Pocket by itself.
+
+## How it works
+
+- **Shielded digs.** A dig is a shielded payment to the game's vault, with
+  the round and tile in its memo. The sender is never on chain: the field
+  shows how deep each tile is dug, never who dug it
+  ([who can learn what](docs/developer.md#privacy-who-can-learn-what)).
+- **A draw nobody controls.** The treasure tile comes from drand, the League
+  of Entropy's public beacon, from a beacon round published after the round
+  closes. Block timestamps prove the round closed first; if they can't, the
+  round is voided and refunded ([details](#how-fairness-works)).
+- **A 2-of-3 FROST vault.** The pot is held by a key split three ways by a
+  distributed key generation. A payout needs two keyholders, and each one
+  recomputes the round from the chain and refuses any payout that doesn't
+  match it ([details](#the-2-of-3-vault)).
+- **Sealed payout addresses.** Each dig carries a fresh address of the
+  player's wallet, sealed so only the vault's side can open it, and only a
+  round's winning addresses are ever opened, in memory. No two digs share an
+  address, so wins can't be linked to each other or to a player.
+- **The Deep Cache.** A 5% rake from every pot, plus every pot nobody wins,
+  goes into the Deep Cache. Each round it breaks open with 1-in-625 odds and
+  goes to that round's winners.
+- **Lite and Pro.** Lite digs one tile, quickly. Pro digs many tiles, adds
+  auto-dig and keeps your own history in your browser
+  ([Lite and Pro](docs/web-app.md#lite-and-pro)).
+- **The Campfire.** A dig can carry a short public message, and anyone can
+  shout (a message alone, at least 0.0005 ZEC, which feeds the Deep Cache).
+  Messages show the round, tile and time, never the sender
+  ([rules](docs/developer.md#game-rules-zeek-core)).
+- **Anyone can check a round,** in the browser or from the command line
+  ([verify any round](#verify-any-round); [prove a win](docs/prove-a-win.md)).
 
 ## What is private, and how
 
 | Everyone can see | Nobody can see |
 | --- | --- |
-| How deep each tile is dug, the prize, the Deep Cache, every round's result | Who dug, which wallet dug which tile, who won, where winnings go |
+| How deep each tile is dug, the prize, the Deep Cache, every round's result, and each dig's amount, round and tile (the testnet vault's viewing key is public, so anyone can check the board) | Who dug, which wallet dug which tile, which digs belong to the same player, who won |
 
 - **Digs are shielded payments.** The sender is never on chain.
 - **Payout addresses are sealed.** Each dig carries a fresh diversified
-  address of the player's wallet, sealed to the vault's key, so no two digs
-  share an address. Only a round's winning addresses are opened, in memory,
-  to pay them.
+  address of the player's wallet, sealed (HPKE) to the vault's sealing key,
+  so no two digs share an address. Only a round's winning addresses are
+  opened, in memory, by the engine and the keyholders that pay them: they
+  see those fresh addresses and amounts, never whose they are.
 - **The wallet stays in the browser.** Zeek Pocket keeps its keys there
   (WebAssembly, passphrase-sealed) and asks the chain for decoy
   transactions alongside its own.
@@ -106,6 +144,15 @@ Running the engine, the keyholders and the public site:
 | `apps/web` | The web app (and its Pages Functions proxy) |
 | `scripts/` | Run, deploy, snapshot and measurement scripts |
 | `docs/` | Design notes, runbooks, measured results (`docs/examples/`) |
+
+## Roadmap
+
+- zkSNARKs holder badge and holders-only rounds, once holders can prove
+  membership without revealing which NFT they hold.
+- Open mainnet. The code is mainnet-ready but digging is off and the vault
+  is not hosted; the steps are in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
+- Keyholders run by separate, independent operators. Today all three run in
+  one Railway project operated by the Zeek team (see the note above).
 
 ## Security
 

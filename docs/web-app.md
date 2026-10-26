@@ -290,9 +290,41 @@ chain.
 
 ### Sound
 
-Cues are synthesized with Web Audio: thunk, pin, tick, crack, chime, rumble
-and crackle. Sound is muted by default, with one toggle in the menu,
-remembered in this browser.
+Twelve recorded files in `public/sfx/`, played with plain `HTMLAudioElement`
+(`src/sound/sound.ts`; the cues are wired in `src/sound/cues.ts` and the
+screens). Sound is never needed to understand anything.
+
+- **Tap to start.** On the field, the load screen (`index.html`,
+  `src/boot.ts`) waits for "Tap to dig in". That tap is the gesture
+  browsers require: it unlocks sound and plays `enter`, and the screen leaves
+  in time with it. The music fades in over 1.5 s when `enter` ends, or 3.2 s
+  after the tap if effects are muted or `enter` cannot play.
+- **First gesture.** A deep link, Replay or the offline message skips the
+  tap; the player's first tap or key anywhere then unlocks sound and starts
+  the music, without `enter`.
+
+| Sound | When |
+| --- | --- |
+| `enter` | The load screen's tap |
+| `music` | After `enter` (or the first gesture), looping |
+| `tile-pick` | Picking or unpicking a tile |
+| `dig` | Pressing DIG (once per press), and each auto-dig |
+| `waiting-loop` | While a round you dug in waits for its reveal |
+| `rumble`, `crack` | Your own reveal's draw begins |
+| `draw` | The treasure bursts open |
+| `coin`, then `win` | You won (or won from the Deep Cache) |
+| `miss` | Not this time |
+| `campfire-loop` | While the Campfire is open |
+
+The reveal sounds (`rumble` to `miss`) play only on the player's own
+reveal; a round watched plays none.
+
+- **Ducking.** The music drops to 0.05 from the reveal's rumble until the
+  result card, and to 0.06 while the Campfire is open; with both, the lower
+  wins.
+- **Mutes.** Two toggles, sound effects and music, in the header and the
+  Menu, both on by default and each remembered in this browser (`zeek.sfxMuted`,
+  `zeek.musicMuted`). The M key toggles sound effects (not while typing).
 
 ### Landing digs
 
