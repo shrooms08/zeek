@@ -248,7 +248,7 @@ Pocket's own change address.
 | Only when | fewer than two notes of at least 0.02 exist | With two, a second dig already has its own note |
 | Fee cap | at most 1 % of the amount | Never pay more than it helps (many dust inputs raise the action count) |
 
-The faucet's 0.125 becomes four notes of 0.0312 for 0.0002. The split itself
+The faucet's 1 TAZ becomes four notes of about 0.25 for 0.0002. The split itself
 needs its 3 confirmations, so right after a deposit the coins are ready about
 a minute later than they would be unsplit; after that, a second dig in a
 round, and Pro auto-dig's next round, use another note instead of waiting

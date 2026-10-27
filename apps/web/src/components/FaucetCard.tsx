@@ -1,6 +1,6 @@
 /**
  * "Get free test coins" (testnet only): how to fill a new Pocket from the
- * Valar Group testnet faucet, then follows the coins:
+ * fauzec.com testnet faucet, then follows the coins:
  *
  *   waiting   nothing seen yet ("Waiting for coins")
  *   coming    seen but confirming: "Test coins on the way · ready in about
@@ -18,8 +18,12 @@ import { readyIn } from "../lib/readiness";
 import { Icon } from "./Icon";
 import { CopyButton } from "./ui";
 
-/** The Valar Group testnet faucet: 0.125 TAZ per address per 24 hours. */
-export const FAUCET_URL = "https://faucet.testnet.valargroup.dev/";
+/**
+ * The fauzec.com testnet faucet: 1 TAZ per address, once every 24 hours. It
+ * pays unified and Sapling addresses (the Pocket's is unified, Orchard
+ * receiver only), not transparent ones.
+ */
+export const FAUCET_URL = "https://fauzec.com";
 
 const WAIT_KEY = "zeek-awaiting-coins";
 const RESYNC_MS = 30_000;
@@ -179,8 +183,8 @@ export function FaucetCard({
         <Icon name="coin" size={18} /> Get free test coins
       </div>
       <p className="text-mist">
-        This is the Zcash testnet: its coins (TAZ) have no value. The Valar Group faucet gives 0.125
-        TAZ per address each day, enough for about a hundred digs.
+        This is the Zcash testnet: its coins (TAZ) have no value. The fauzec.com faucet gives 1 TAZ
+        per address, once every 24 hours, enough for hundreds of digs.
       </p>
       <ol className="text-mist list-decimal pl-5 flex flex-col gap-1">
         <li>Copy your Pocket address (the faucet page cannot receive it from a link).</li>

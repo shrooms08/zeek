@@ -12,8 +12,8 @@ Nobody can see who dug, which digs are whose, or who won.
 2. Create a Zeek Pocket, the wallet that lives in your browser: choose a
    passphrase and write down its 24 words.
 3. Get free testnet ZEC from the
-   [testnet faucet](https://faucet.testnet.valargroup.dev/) (linked from the
-   Pocket's wallet screen) and send it to your Pocket's address.
+   [testnet faucet](https://fauzec.com) (1 TAZ per address, once every 24
+   hours; linked from the Pocket's wallet screen) and send it to your Pocket's address.
 4. Pick tiles on the 5×5 field and press DIG. Each dig is a shielded payment
    of at least 0.001 ZEC.
 5. Wait for the reveal. The round closes after about 10 minutes, and about

@@ -2,8 +2,8 @@
  * Live 8c: a fresh Pocket on the deployed site, from the faucet to several
  * digs in one round.
  *
- * 1. Create a Pocket (fresh browser profile) and claim the faucet's 0.125
- *    TAZ through the card's own "Open the faucet" link.
+ * 1. Create a Pocket (fresh browser profile) and claim the faucet's 1 TAZ
+ *    through the card's own "Open the faucet" link.
  * 2. Watch the card: waiting, then "Test coins on the way · ready in about
  *    N min" while they confirm (the balance headline shows the total with
  *    the split), then "You can dig now" only once spendable.
@@ -11,7 +11,7 @@
  * 4. In one round: dig with each note in turn (no waiting for change), then
  *    one more dig meets "Your change is on its way" (no Add ZEC).
  *
- * The faucet pays one network every 24 hours. When it already has,
+ * The faucet pays 1 TAZ per address, once every 24 hours. When it already has,
  * ZEEK_FUND=test-wallets keeps everything else the same (the card's own
  * "Open the faucet" link starts the wait) but the coins come from Zeek's
  * own public test Pocket's Withdraw (0.045). Results go to
