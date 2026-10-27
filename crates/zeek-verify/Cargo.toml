@@ -56,5 +56,14 @@ cli = [
 ]
 
 
+[dev-dependencies]
+# tests/quicknet_pin.rs plays the attack the quicknet pin stops: a beacon
+# validly signed under a key other than quicknet's. All already in Cargo.lock
+# (drand-verify's own dependencies).
+bls12_381 = { version = "0.8", features = ["experimental"] }
+sha2_09 = { package = "sha2", version = "0.9" }
+drand-verify = { version = "0.6.2", default-features = false }
+
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }
