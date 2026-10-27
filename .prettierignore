@@ -13,3 +13,4 @@ design
 test-results*
 **/.wrangler
 apps/web/dist-fixtures
+.gstack
