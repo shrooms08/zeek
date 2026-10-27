@@ -17,6 +17,12 @@
  *
  * Bar: 30 % when this bundle starts, 60 % once the current round has
  * loaded, 100 % when the field (or another screen) is rendered.
+ *
+ * Keyboard: while it is up, the load screen has the keyboard to itself
+ * (whatever the app behind has focused, such as a first visit's onboarding):
+ * Enter or Space starts the game once the prompt shows, Tab stays on it, and
+ * no key reaches the app. Focus moves to the app only once it has gone
+ * (`whenBootGone`).
  */
 
 import { sound } from "./sound/sound";
@@ -47,6 +53,7 @@ let silent = false;
 let prompting = false;
 let leaving = false;
 let shown = 0;
+const gone = new Set<() => void>();
 
 function node(): HTMLElement | null {
   return document.getElementById("zeek-boot");
@@ -68,11 +75,23 @@ function leave(ms: number): void {
   if (leaving || el === null) return;
   leaving = true;
   el.removeEventListener("pointerdown", onTap);
-  el.removeEventListener("keydown", onTap);
   const now = reducedMotion();
   el.style.transitionDuration = `${now ? 0 : ms}ms`;
   el.classList.add("zb-out");
   remove(el, now ? 0 : ms);
+}
+
+/** Keys while the load screen is up: its own, never the app's. */
+function guardKeys(e: KeyboardEvent): void {
+  const el = node();
+  if (el === null) return;
+  e.stopPropagation();
+  if (e.key === "Tab") {
+    e.preventDefault();
+    if (prompting && !leaving) el.focus({ preventScroll: true });
+    return;
+  }
+  if ((e.key === "Enter" || e.key === " ") && prompting && !leaving) onTap(e);
 }
 
 /** The bar gives way to "Tap to dig in"; the screen becomes a button. */
@@ -85,14 +104,31 @@ function prompt(): void {
   el.setAttribute("aria-label", "Tap to start Zeek");
   el.classList.add("zb-tap");
   el.addEventListener("pointerdown", onTap);
-  el.addEventListener("keydown", onTap);
   el.focus({ preventScroll: true });
 }
 
 function remove(el: HTMLElement, ms: number): void {
   window.setTimeout(() => {
     el.remove();
+    window.removeEventListener("keydown", guardKeys, true);
+    for (const run of gone) run();
+    gone.clear();
   }, ms);
+}
+
+/**
+ * Runs `run` once the load screen has gone (at once if it is not up), so
+ * the app takes focus only then. Returns a cancel.
+ */
+export function whenBootGone(run: () => void): () => void {
+  if (node() === null) {
+    run();
+    return () => undefined;
+  }
+  gone.add(run);
+  return () => {
+    gone.delete(run);
+  };
 }
 
 function onTap(e: Event): void {
@@ -102,7 +138,6 @@ function onTap(e: Event): void {
   if (el === null || leaving) return;
   leaving = true;
   el.removeEventListener("pointerdown", onTap);
-  el.removeEventListener("keydown", onTap);
   sound.unlock();
   sound.playIntro("enter", GONE_MS);
   if (reducedMotion()) {
@@ -173,6 +208,7 @@ export function startBoot(): void {
     return;
   }
   bootProgress(30);
+  window.addEventListener("keydown", guardKeys, true);
   window.setTimeout(
     () => {
       if (!silent) prompt();

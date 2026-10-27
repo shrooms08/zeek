@@ -11,6 +11,7 @@ import type { IconName } from "../art/icons";
 import { EASE } from "../motion/tokens";
 import { PictoBubble } from "./PictoBubble";
 import { StoryField, type Story } from "./StoryField";
+import { whenBootGone } from "../boot";
 
 const STEPS: {
   title: string;
@@ -69,12 +70,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     onDone();
   };
   useEffect(() => {
-    nextRef.current?.focus();
+    // Not while the load screen is up: it has the keyboard until it has gone.
+    const stopFocus = whenBootGone(() => {
+      nextRef.current?.focus();
+    });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") finish();
     };
     window.addEventListener("keydown", onKey);
     return () => {
+      stopFocus();
       window.removeEventListener("keydown", onKey);
     };
   });
