@@ -20,6 +20,8 @@ export type WalletEvent =
   | { type: "create" }
   | { type: "created" }
   | { type: "backed-up" }
+  /** The backup screen went away with the words (the player tapped elsewhere). */
+  | { type: "backup-left" }
   | { type: "unlock" }
   | { type: "unlock-ok" }
   | { type: "unlock-failed"; message: string; now: number }
@@ -49,6 +51,8 @@ export function walletReducer(state: WalletState, event: WalletEvent): WalletSta
     case "created":
       return state.kind === "creating" ? { kind: "backup" } : state;
     case "backed-up":
+    case "backup-left":
+      // The Pocket exists and is open either way: never "Make your Pocket" again.
       return state.kind === "backup" ? { kind: "unlocked" } : state;
     case "unlock":
       return state.kind === "locked" ? { kind: "unlocking", failures: state.failures } : state;

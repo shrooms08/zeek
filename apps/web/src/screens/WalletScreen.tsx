@@ -55,7 +55,7 @@ function StrengthMeter({ strength }: { strength: ReturnType<typeof passphraseStr
   );
 }
 
-function CreateCard() {
+export function CreateCard() {
   const { pocket, dispatch } = usePocket();
   const [show, setShow] = useState(false);
   const [pass, setPass] = useState("");
@@ -63,6 +63,18 @@ function CreateCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [words, setWords] = useState<string[] | null>(null);
+  // Leaving while the words show (logo, Back, a menu link) loses them: the
+  // Pocket exists and stays open, so the wallet moves on from the backup step.
+  const showingWords = useRef(false);
+  showingWords.current = words !== null;
+  const leave = useRef(dispatch);
+  leave.current = dispatch;
+  useEffect(
+    () => () => {
+      if (showingWords.current) leave.current({ type: "backup-left" });
+    },
+    [],
+  );
   const strength = passphraseStrength(pass);
   if (words !== null)
     return (

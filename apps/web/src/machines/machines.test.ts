@@ -13,6 +13,22 @@ import { estimatedShare, initialReveal, outcomeFor, resultSound, revealReducer }
 import { canTryUnlock, initialWallet, walletReducer } from "./wallet";
 
 describe("wallet machine", () => {
+  it("leaving the backup step leaves the new Pocket unlocked, never back to Make your Pocket", () => {
+    const backup = walletReducer(
+      walletReducer(
+        walletReducer(initialWallet, { type: "status", exists: false, unlocked: false }),
+        {
+          type: "create",
+        },
+      ),
+      { type: "created" },
+    );
+    expect(backup.kind).toBe("backup");
+    expect(walletReducer(backup, { type: "backup-left" }).kind).toBe("unlocked");
+    // Elsewhere it changes nothing.
+    expect(walletReducer({ kind: "none" }, { type: "backup-left" }).kind).toBe("none");
+  });
+
   it("follows the lifecycle and throttles wrong passphrases", () => {
     let s = walletReducer(initialWallet, { type: "status", exists: false, unlocked: false });
     expect(s.kind).toBe("none");
