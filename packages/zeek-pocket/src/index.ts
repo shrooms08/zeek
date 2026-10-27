@@ -1,5 +1,5 @@
 export { Pocket, buildDigRequest } from "./pocket.js";
-export { PocketError, toPocketError } from "./errors.js";
+export { BROADCAST_UNKNOWN_TEXT, PocketError, toPocketError } from "./errors.js";
 export type { PartialDig, PocketErrorCode, PocketErrorData } from "./errors.js";
 export { RelayClient } from "./relay.js";
 export { planTransactionFetches } from "./decoys.js";

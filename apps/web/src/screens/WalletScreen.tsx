@@ -25,6 +25,7 @@ import { useNow } from "../lib/useNow";
 import { canTryUnlock } from "../machines/wallet";
 import { autoDigRunning } from "../state/autoDigFlag";
 import { asWithdrawal, withdrawing } from "../state/pocketActivity";
+import { MAYBE_SENT_HOLD_MS, useHold } from "../lib/useHold";
 
 function random(): number {
   const b = new Uint32Array(1);
@@ -532,13 +533,15 @@ function historyLabel(e: HistoryEntry): {
   };
 }
 
-function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => void }) {
+export function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => void }) {
   const { pocket } = usePocket();
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  // A broadcast that may have been sent holds the next one (no double withdrawal).
+  const [held, holdUntil] = useHold();
   const fee = 10_000n; // ZIP 317: one payment output + change, one input.
   let value: bigint | null = null;
   try {
@@ -566,7 +569,9 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
               setResult(`Sent privately. ${sent.txid}`);
               onDone();
             } catch (err) {
-              setResult(toPocketError(err).message);
+              const e = toPocketError(err);
+              if (e.code === "broadcast_unknown") holdUntil(Date.now() + MAYBE_SENT_HOLD_MS);
+              setResult(e.message);
             } finally {
               setBusy(false);
             }
@@ -643,10 +648,15 @@ function WithdrawCard({ spendable, onDone }: { spendable: bigint; onDone: () => 
           type="submit"
           className="btn btn-primary"
           disabled={
-            busy || value === null || !verdict.ok || value + fee > spendable || passphrase === ""
+            busy ||
+            held > 0 ||
+            value === null ||
+            !verdict.ok ||
+            value + fee > spendable ||
+            passphrase === ""
           }
         >
-          {busy ? "Sending…" : "Withdraw"}
+          {busy ? "Sending…" : held > 0 ? `Withdraw again in ${held} s` : "Withdraw"}
         </button>
       </form>
     </Panel>

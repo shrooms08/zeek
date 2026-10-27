@@ -22,6 +22,7 @@ import { useBlockSpacing } from "../api/queries";
 import { fitsInRound, readyIn, readySecs, roundAcceptsDigs, shortfall } from "../lib/readiness";
 import { formatClock } from "../lib/time";
 import { armResplit } from "../state/pocketActivity";
+import { MAYBE_SENT_HOLD_MS, useHold } from "../lib/useHold";
 
 /** Most tiles affordable from `spendable` at `amountEach`. */
 function affordable(spendable: bigint, amountEach: bigint, separate: boolean): number {
@@ -426,25 +427,54 @@ export default function DigPocketScreen() {
       );
     case "error":
       return (
-        <Modal title="That dig didn’t go through" onClose={close} testId="dig-error">
-          <div className="flex justify-center mb-3">
-            <Zeb pose="shrug" width={88} label={null} />
-          </div>
-          <p className="text-mist mb-2">{state.message}</p>
-          <p className="text-fog text-sm mb-5">Nothing was sent.</p>
-          <button
-            type="button"
-            className="btn btn-primary w-full"
-            onClick={() => {
-              dispatch({ type: "review" });
-            }}
-          >
-            Try again
-          </button>
-        </Modal>
+        <DigErrorModal
+          code={state.code}
+          message={state.message}
+          onRetry={() => {
+            dispatch({ type: "review" });
+          }}
+          onClose={close}
+        />
       );
   }
   return null;
+}
+
+/**
+ * A dig that failed. Refused: nothing was sent, try again. Maybe sent (the
+ * broadcast's answer was lost): say so, and hold Try again for two minutes
+ * so the same dig is not paid twice before it shows up in History.
+ */
+export function DigErrorModal({
+  code,
+  message,
+  onRetry,
+  onClose,
+}: {
+  code: string;
+  message: string;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const maybeSent = code === "broadcast_unknown";
+  const [held] = useHold(maybeSent ? Date.now() + MAYBE_SENT_HOLD_MS : 0);
+  return (
+    <Modal title="That dig didn’t go through" onClose={onClose} testId="dig-error">
+      <div className="flex justify-center mb-3">
+        <Zeb pose="shrug" width={88} label={null} />
+      </div>
+      <p className="text-mist mb-2">{message}</p>
+      {!maybeSent && <p className="text-fog text-sm mb-5">Nothing was sent.</p>}
+      <button
+        type="button"
+        className="btn btn-primary w-full mt-3"
+        disabled={held > 0}
+        onClick={onRetry}
+      >
+        {held > 0 ? `Try again in ${held} s` : "Try again"}
+      </button>
+    </Modal>
+  );
 }
 
 /**

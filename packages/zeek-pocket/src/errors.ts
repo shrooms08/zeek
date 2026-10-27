@@ -22,6 +22,7 @@ export type PocketErrorCode =
   | "network"
   | "relay"
   | "broadcast_rejected"
+  | "broadcast_unknown"
   | "not_isolated"
   | "partial_dig"
   | "config_mismatch"
@@ -48,6 +49,7 @@ const CODES: ReadonlySet<string> = new Set<PocketErrorCode>([
   "network",
   "relay",
   "broadcast_rejected",
+  "broadcast_unknown",
   "not_isolated",
   "partial_dig",
   "config_mismatch",
@@ -104,6 +106,24 @@ export class PocketError extends Error {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+/**
+ * Whether a failed broadcast may still have reached the chain: the
+ * connection dropped, the relay gave up (it may have handed the transaction
+ * on before timing out), or a node answered that it already has it (or a
+ * transaction spending the same notes). Only a plain refusal is proof that
+ * nothing was sent.
+ */
+export function isUnclearBroadcast(error: PocketError): boolean {
+  if (error.code === "network" || error.code === "relay") return true;
+  return (
+    error.code === "broadcast_rejected" && /already|duplicate|known|mempool/i.test(error.message)
+  );
+}
+
+/** What the player is told when a broadcast may or may not have reached the chain. */
+export const BROADCAST_UNKNOWN_TEXT =
+  "We couldn’t confirm it reached the chain. Check History in a minute before trying again.";
 
 /** Normalises anything thrown (wasm `{ code, message }` objects included). */
 export function toPocketError(error: unknown): PocketError {

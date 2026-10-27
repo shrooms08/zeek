@@ -28,7 +28,12 @@ import {
 import { blockchairHash, compareHashes, sourceName, type BlockHash } from "./crosscheck.js";
 import { cryptoRandom, planTransactionFetches, type TxRef } from "./decoys.js";
 import { fetchPublicBeacon } from "./drand.js";
-import { PocketError, toPocketError } from "./errors.js";
+import {
+  BROADCAST_UNKNOWN_TEXT,
+  isUnclearBroadcast,
+  PocketError,
+  toPocketError,
+} from "./errors.js";
 import type { Methods, MethodName, RequestMessage, ResponseMessage } from "./protocol.js";
 import { hexToBytes, MAX_BLOCK_RANGE, RelayClient } from "./relay.js";
 import { WalletStorage } from "./storage.js";
@@ -212,6 +217,14 @@ async function broadcastBuilt(c: PocketCore, built: BuiltTransaction): Promise<v
   try {
     await needRelay().broadcast(hexToBytes(built.rawHex));
   } catch (error) {
+    const failure = toPocketError(error);
+    if (isUnclearBroadcast(failure)) {
+      // It may be on its way: keep it (its notes stay reserved) until it is
+      // mined or expires, and never say nothing was sent.
+      c.markBroadcast(built.txid);
+      await persist();
+      throw new PocketError("broadcast_unknown", BROADCAST_UNKNOWN_TEXT);
+    }
     c.abandon(built.txid);
     await persist();
     throw error;
