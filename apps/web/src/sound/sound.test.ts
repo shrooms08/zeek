@@ -223,6 +223,70 @@ describe("the load screen's tap", () => {
   });
 });
 
+describe("a reveal's result", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    FakeAudio.allow = true;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const plays = (name: string) => named(name).reduce((n, a) => n + a.plays, 0);
+
+  it("a win: coin at once, win 400 ms later; a miss: miss", async () => {
+    const { sound } = await freshSound();
+    sound.unlock();
+    vi.useFakeTimers();
+    sound.playResult("win");
+    expect(plays("coin")).toBe(1);
+    expect(plays("win")).toBe(0);
+    vi.advanceTimersByTime(400);
+    expect(plays("win")).toBe(1);
+    sound.playResult("miss");
+    expect(plays("miss")).toBe(1);
+  });
+
+  it("reached before sound is unlocked, it plays once at the first gesture", async () => {
+    const { sound, cues } = await freshSound();
+    cues.unlockOnFirstGesture();
+    vi.useFakeTimers();
+    sound.playResult("miss");
+    expect(FakeAudio.made).toHaveLength(0);
+    window.dispatchEvent(new Event("pointerdown"));
+    vi.advanceTimersByTime(0);
+    expect(plays("miss")).toBe(1);
+    window.dispatchEvent(new Event("keydown"));
+    vi.advanceTimersByTime(5000);
+    expect(plays("miss")).toBe(1);
+  });
+
+  it("behind the load screen, it plays when the screen has gone", async () => {
+    const { sound } = await freshSound();
+    vi.useFakeTimers();
+    sound.playResult("win");
+    // The tap: unlock, then the intro.
+    sound.unlock();
+    sound.playIntro("enter", 3200);
+    vi.advanceTimersByTime(3100);
+    expect(plays("coin")).toBe(0);
+    vi.advanceTimersByTime(100);
+    expect(plays("coin")).toBe(1);
+    vi.advanceTimersByTime(400);
+    expect(plays("win")).toBe(1);
+  });
+
+  it("leaving first cancels it", async () => {
+    const { sound } = await freshSound();
+    vi.useFakeTimers();
+    const cancel = sound.playResult("miss");
+    cancel();
+    sound.unlock();
+    vi.advanceTimersByTime(5000);
+    expect(plays("miss")).toBe(0);
+  });
+});
+
 describe("music ducking", () => {
   beforeEach(() => {
     localStorage.clear();

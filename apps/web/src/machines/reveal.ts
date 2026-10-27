@@ -74,6 +74,27 @@ export function outcomeFor(result: RevealResult, myTiles: readonly number[]): Ou
 }
 
 /**
+ * The sound a result plays, only on the player's own round: coin then win
+ * when they found the treasure, miss for every other outcome (missed,
+ * nobody found it, voided and refunded). A round only watched is silent.
+ */
+export type ResultSound = "win" | "miss";
+
+export function resultSound(outcome: Outcome, own: boolean): ResultSound | null {
+  if (!own) return null;
+  switch (outcome) {
+    case "win":
+    case "cache-win":
+      return "win";
+    case "watched":
+      return null;
+    case "not-this-time":
+    case "voided":
+      return "miss";
+  }
+}
+
+/**
  * The player's share of a drawn round: their amount on the treasure tile
  * over the tile's total, of the distributable prize plus the Cache paid
  * (truncated, as the rules do). Zatoshis.

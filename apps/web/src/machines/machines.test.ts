@@ -9,7 +9,7 @@ import {
   paymentStatus,
   type PaymentModel,
 } from "./otherWallet";
-import { estimatedShare, initialReveal, outcomeFor, revealReducer } from "./reveal";
+import { estimatedShare, initialReveal, outcomeFor, resultSound, revealReducer } from "./reveal";
 import { canTryUnlock, initialWallet, walletReducer } from "./wallet";
 
 describe("wallet machine", () => {
@@ -116,6 +116,24 @@ describe("reveal machine", () => {
     expect(estimatedShare(100_000n, 100_000n, 2_256_250n, 0n)).toBe(2_256_250n);
     expect(estimatedShare(1n, 3n, 10n, 0n)).toBe(3n);
   });
+});
+
+describe("the result's sound", () => {
+  const drawn = { round: 5, treasureTile: 7, cacheTriggered: false, voided: false };
+  const cases: [string, Parameters<typeof outcomeFor>[0], number[], "win" | "miss" | null][] = [
+    ["found the treasure", drawn, [7], "win"],
+    ["found it as the Deep Cache broke open", { ...drawn, cacheTriggered: true }, [7], "win"],
+    ["missed (another tile)", drawn, [2], "miss"],
+    ["missed while the Deep Cache broke open", { ...drawn, cacheTriggered: true }, [2], "miss"],
+    ["voided and refunded", { ...drawn, treasureTile: null, voided: true }, [2], "miss"],
+    ["only watched", drawn, [], null],
+    ["only watched a voided round", { ...drawn, voided: true }, [], null],
+  ];
+  for (const [name, result, mine, expected] of cases) {
+    it(`${name}: ${expected ?? "silent"}`, () => {
+      expect(resultSound(outcomeFor(result, mine), mine.length > 0)).toBe(expected);
+    });
+  }
 });
 
 describe("check machine", () => {

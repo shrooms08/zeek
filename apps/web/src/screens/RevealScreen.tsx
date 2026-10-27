@@ -29,6 +29,7 @@ import {
   estimatedShare,
   initialReveal,
   outcomeFor,
+  resultSound,
   revealReducer,
   STAGE_MS,
 } from "../machines/reveal";
@@ -106,7 +107,7 @@ export default function RevealScreen() {
   // Sound, for the player's own reveal only (a round watched plays none):
   // waiting for the draw, then the draw, the rays and the result.
   const own = myTiles.length > 0;
-  useLoop("waiting-loop", own && state.stage === "closed");
+  useLoop("waiting-loop", own && state.stage === "closed" && settled === null);
   useEffect(() => {
     if (!own) return;
     if (state.stage === "draw") {
@@ -117,24 +118,27 @@ export default function RevealScreen() {
     }
     // "Light from tile N": the rays.
     if (state.stage === "burst") sound.play("draw");
-    if (state.stage === "result") {
-      sound.releaseDuck();
-      if (outcome === "win" || outcome === "cache-win") {
-        sound.play("coin");
-        const id = setTimeout(() => {
-          sound.play("win");
-        }, 400);
-        return () => {
-          clearTimeout(id);
-        };
-      }
-      if (outcome === "not-this-time") sound.play("miss");
-    }
-    return undefined;
-  }, [own, state.stage, outcome]);
-  // Leaving mid-reveal: the music comes back.
+  }, [own, state.stage]);
+  // The result, however it is reached (the sequence, "Skip to the result",
+  // a voided round, reduced motion, a reload landing on it): the waiting
+  // stops, the music comes back, and its sound plays once per visit.
+  const wanted = outcome === null ? null : resultSound(outcome, own);
+  const resultPlayed = useRef(false);
+  const cancelResult = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (state.stage !== "result") return;
+    sound.stopLoop("waiting-loop", 0);
+    sound.releaseDuck();
+    if (wanted === null || resultPlayed.current) return;
+    resultPlayed.current = true;
+    cancelResult.current = sound.playResult(wanted);
+  }, [state.stage, wanted]);
+  // Leaving mid-reveal: the music comes back; a result not heard yet is dropped.
   useEffect(
     () => () => {
+      cancelResult.current?.();
+      cancelResult.current = null;
+      resultPlayed.current = false;
       sound.releaseDuck();
     },
     [],

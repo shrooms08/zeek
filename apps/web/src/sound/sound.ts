@@ -43,6 +43,8 @@ const VOLUME: Record<Name, number> = {
 export type Duck = "reveal" | "campfire";
 const DUCK_LEVEL: Record<Duck, number> = { reveal: 0.05, campfire: 0.06 };
 const UNDUCK_MS = 600;
+/** The win sound follows the coin by this much. */
+const WIN_AFTER_COIN_MS = 400;
 /** The music's fade-in after the load screen's enter sound. */
 const MUSIC_IN_MS = 1500;
 /** Copies per effect (tile picks come quickly). */
@@ -131,6 +133,11 @@ class Sound {
   private listeners = new Set<() => void>();
   /** The load screen's enter sound is playing: the music waits for it. */
   private introPlaying = false;
+  /** Until then (performance.now()), the load screen covers the app. */
+  private introUntil = 0;
+  /** A reveal's result reached before sound was unlocked. */
+  private pendingResult: "win" | "miss" | null = null;
+  private resultTimers = new Set<number>();
 
   /** Allows sound and preloads the effects; call from a user gesture. */
   unlock(): void {
@@ -143,6 +150,13 @@ class Sound {
     }
     for (const name of PRELOADED_LOOPS) this.loop(name).load();
     for (const name of this.wanted) this.resume(name);
+    // After this gesture's own handlers (the load screen's tap sets the
+    // intro first), so a waiting result knows when the app is visible.
+    if (this.pendingResult !== null) {
+      window.setTimeout(() => {
+        this.flushResult();
+      }, 0);
+    }
   }
 
   /** Plays an effect (overlapping copies of quick ones). The rumble ducks the music. */
@@ -196,6 +210,7 @@ class Sound {
     this.wanted.add("music");
     this.introPlaying = true;
     const tapped = performance.now();
+    this.introUntil = tapped + fallbackMs;
     let started = false;
     const start = () => {
       if (started) return;
@@ -219,6 +234,52 @@ class Sound {
       void audio.play().catch(fallback);
     } catch {
       fallback();
+    }
+  }
+
+  /**
+   * A reveal's result: the coin, then the win 400 ms later, or the miss.
+   * Reached before sound is unlocked (a reload landing on the result), it
+   * plays at the unlock; after the load screen's tap, once the screen has
+   * gone (`fallbackMs` of `playIntro`). Returns a cancel.
+   */
+  playResult(kind: "win" | "miss"): () => void {
+    if (!this.unlocked) {
+      this.pendingResult = kind;
+    } else {
+      this.scheduleResult(kind);
+    }
+    return () => {
+      this.pendingResult = null;
+      for (const id of this.resultTimers) window.clearTimeout(id);
+      this.resultTimers.clear();
+    };
+  }
+
+  private flushResult(): void {
+    const kind = this.pendingResult;
+    this.pendingResult = null;
+    if (kind !== null) this.scheduleResult(kind);
+  }
+
+  private scheduleResult(kind: "win" | "miss"): void {
+    const at = (ms: number, name: Effect) => {
+      if (ms <= 0) {
+        this.play(name);
+        return;
+      }
+      const id = window.setTimeout(() => {
+        this.resultTimers.delete(id);
+        this.play(name);
+      }, ms);
+      this.resultTimers.add(id);
+    };
+    const wait = Math.max(0, this.introUntil - performance.now());
+    if (kind === "miss") {
+      at(wait, "miss");
+    } else {
+      at(wait, "coin");
+      at(wait + WIN_AFTER_COIN_MS, "win");
     }
   }
 
