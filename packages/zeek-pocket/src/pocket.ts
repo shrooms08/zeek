@@ -130,13 +130,18 @@ export class Pocket {
     return this.call("create", { passphrase });
   }
 
-  /** Restores from a 24-word phrase, scanning from `birthdayHeight`. */
+  /**
+   * Restores from a 24-word phrase, scanning from `birthdayHeight`. With
+   * `replace`, it replaces the Pocket already in this browser, but only once
+   * the restored one is built (a wrong word leaves the old one untouched).
+   */
   restore(
     phrase: string,
     birthdayHeight: number,
     passphrase: string,
+    replace = false,
   ): Promise<{ address: string; birthdayHeight: number }> {
-    return this.call("restore", { phrase, birthdayHeight, passphrase });
+    return this.call("restore", { phrase, birthdayHeight, passphrase, replace });
   }
 
   unlock(passphrase: string): Promise<{ address: string }> {

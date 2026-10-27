@@ -34,6 +34,7 @@ import {
   PocketError,
   toPocketError,
 } from "./errors.js";
+import { restoreOver } from "./restore.js";
 import type { Methods, MethodName, RequestMessage, ResponseMessage } from "./protocol.js";
 import { hexToBytes, MAX_BLOCK_RANGE, RelayClient } from "./relay.js";
 import { WalletStorage } from "./storage.js";
@@ -340,13 +341,16 @@ const handlers: { [M in MethodName]: Handler<M> } = {
     const treeState = await client.treeState(tip);
     return openFromTreeState(PocketCore.create(passphrase, treeState));
   },
-  async restore({ phrase, birthdayHeight, passphrase }) {
+  async restore({ phrase, birthdayHeight, passphrase, replace }) {
     await wasm();
-    if (await storage.exists()) {
-      throw new PocketError("wallet_exists", "a wallet already exists in this browser");
-    }
-    const treeState = await needRelay().treeState(Math.max(1, birthdayHeight - 1));
-    return openFromTreeState(PocketCore.restore(phrase, passphrase, treeState));
+    return restoreOver({
+      exists: () => storage.exists(),
+      birthdayHeight,
+      replace: replace === true,
+      build: async (fromHeight) =>
+        PocketCore.restore(phrase, passphrase, await needRelay().treeState(fromHeight)),
+      commit: openFromTreeState,
+    });
   },
   async unlock({ passphrase }) {
     await wasm();

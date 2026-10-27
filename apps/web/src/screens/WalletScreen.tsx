@@ -402,7 +402,7 @@ function UnlockCard() {
   );
 }
 
-function RestoreCard({ onCancel }: { onCancel: () => void }) {
+export function RestoreCard({ onCancel }: { onCancel: () => void }) {
   const { pocket, dispatch, refresh } = usePocket();
   const [phrase, setPhrase] = useState("");
   const [birthday, setBirthday] = useState("");
@@ -421,8 +421,9 @@ function RestoreCard({ onCancel }: { onCancel: () => void }) {
           void (async () => {
             try {
               const p = await pocket();
-              await p.forget();
-              await p.restore(phrase.trim().toLowerCase(), Number(birthday), pass);
+              // Replaces the Pocket here only once the restored one is built:
+              // a wrong word or birthday leaves it as it was.
+              await p.restore(phrase.trim().toLowerCase(), Number(birthday), pass, true);
               setPhrase("");
               dispatch({ type: "unlock-ok" });
               await refresh();

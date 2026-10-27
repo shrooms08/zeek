@@ -85,7 +85,7 @@ export interface Methods {
   status: [undefined, WalletStatus];
   create: [{ passphrase: string }, { address: string; birthdayHeight: number }];
   restore: [
-    { phrase: string; birthdayHeight: number; passphrase: string },
+    { phrase: string; birthdayHeight: number; passphrase: string; replace?: boolean },
     { address: string; birthdayHeight: number },
   ];
   unlock: [{ passphrase: string }, { address: string }];
