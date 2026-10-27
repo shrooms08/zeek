@@ -71,16 +71,20 @@ export default defineConfig({
       }
     : {}),
   projects: [
+    // These tests wait up to 60-120 s at a time on the live engine (a round,
+    // a sync): the default 30 s test timeout would cut those waits short.
     {
       name: "smoke",
       testMatch: /((smoke|chest)\.spec\.ts|features\/.*\.spec\.ts)$/,
       use: { ...devices["Desktop Chrome"] },
+      timeout: 180_000,
     },
     // Safari's engine: cross-origin isolation and wasm threads must work there too.
     {
       name: "smoke-webkit",
       testMatch: /((smoke|chest)\.spec\.ts|features\/.*\.spec\.ts)$/,
       use: { ...devices["Desktop Safari"] },
+      timeout: 180_000,
     },
     { name: "live", testMatch: /live\/.*\.spec\.ts/, timeout: 3 * 60 * 60_000 },
     // No text overflows its box (both engines), at six widths.
