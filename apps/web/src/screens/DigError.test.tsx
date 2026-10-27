@@ -42,7 +42,7 @@ describe("a dig that failed", () => {
     act(() => {
       vi.advanceTimersByTime(119_000);
     });
-    expect((screen.getByRole("button", { name: /Try again/ }) as HTMLButtonElement).disabled).toBe(
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /Try again/ }).disabled).toBe(
       true,
     );
     act(() => {

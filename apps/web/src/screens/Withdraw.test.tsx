@@ -20,7 +20,7 @@ function fill() {
   fireEvent.change(screen.getByLabelText(/Passphrase/), { target: { value: "horse battery" } });
 }
 
-const withdraw = () => screen.getByRole("button", { name: /Withdraw/ }) as HTMLButtonElement;
+const withdraw = () => screen.getByRole<HTMLButtonElement>("button", { name: /Withdraw/ });
 
 describe("a withdrawal whose broadcast may have been sent", () => {
   beforeEach(() => {
