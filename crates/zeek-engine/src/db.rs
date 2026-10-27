@@ -214,6 +214,15 @@ fn parse_payout_state(s: &str) -> Result<PayoutState, EngineError> {
     }
 }
 
+/// What a reorg did to the settlements it reached (`Db::rollback_to`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Rollback {
+    /// Rounds with no payout to recompute from the new chain (must match).
+    pub recheck: Vec<u32>,
+    /// Rounds with a payout transaction, kept as they are.
+    pub kept_paying: Vec<u32>,
+}
+
 /// A settled round.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettlementRow {
@@ -388,6 +397,10 @@ impl Db {
                  round INTEGER NOT NULL,
                  created_at INTEGER NOT NULL,
                  proof BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS settlement_rechecks (
+                 round INTEGER PRIMARY KEY,
+                 fork_height INTEGER NOT NULL
              );",
         )?;
         conn.execute(
@@ -1194,31 +1207,73 @@ impl Db {
 
     // ---- reorgs ----
 
-    /// Forgets every block and note at or above `height`, plus any settlement
-    /// computed from a tip at or above it (which the confirmation policy
-    /// should make impossible; it is logged by the caller).
-    pub fn rollback_to(&mut self, height: u32) -> Result<Vec<u32>, EngineError> {
+    /// Forgets every block and note at or above `height` (a reorg forked
+    /// there). Settlements are never deleted:
+    ///
+    /// * one whose inputs the fork does not reach (its last block read,
+    ///   `last_read(round)`, is below `height`) cannot change and is left as
+    ///   it is: an ordinary reorg of the tip;
+    /// * one with a payout transaction (signing, broadcast or mined) is kept
+    ///   with its payout, whatever the depth (`Rollback::kept_paying`);
+    /// * one with no payout whose inputs it reaches is flagged to be
+    ///   recomputed from the new chain (`settlement_rechecks`), and must
+    ///   match (`Rollback::recheck`).
+    pub fn rollback_to(
+        &mut self,
+        height: u32,
+        last_read: impl Fn(u32) -> Result<u32, EngineError>,
+    ) -> Result<Rollback, EngineError> {
         let tx = self.conn.transaction()?;
-        let affected: Vec<u32> = {
+        let candidates: Vec<(u32, bool)> = {
+            // A settlement is made at least SETTLE_CONFIRMATIONS past its
+            // last block read, so its stored height bounds the candidates.
             let mut stmt = tx.prepare(
-                "SELECT round FROM settlements WHERE settled_at_height >= ?1 ORDER BY round",
+                "SELECT s.round, p.round IS NOT NULL FROM settlements s
+                 LEFT JOIN payouts p ON p.round = s.round
+                 WHERE s.settled_at_height >= ?1 ORDER BY s.round",
             )?;
-            let rows = stmt.query_map(params![height], |r| r.get::<_, u32>(0))?;
+            let rows = stmt.query_map(params![height], |r| {
+                Ok((r.get::<_, u32>(0)?, r.get::<_, bool>(1)?))
+            })?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
-        tx.execute(
-            "DELETE FROM unclaimable_payouts WHERE round IN
-             (SELECT round FROM settlements WHERE settled_at_height >= ?1)",
-            params![height],
-        )?;
-        tx.execute(
-            "DELETE FROM settlements WHERE settled_at_height >= ?1",
-            params![height],
-        )?;
+        let mut rollback = Rollback::default();
+        for (round, has_payout) in candidates {
+            if last_read(round)? < height {
+                continue;
+            }
+            if has_payout {
+                rollback.kept_paying.push(round);
+            } else {
+                tx.execute(
+                    "INSERT OR REPLACE INTO settlement_rechecks (round, fork_height) VALUES (?1, ?2)",
+                    params![round, height],
+                )?;
+                rollback.recheck.push(round);
+            }
+        }
         tx.execute("DELETE FROM notes WHERE height >= ?1", params![height])?;
         tx.execute("DELETE FROM blocks WHERE height >= ?1", params![height])?;
         tx.commit()?;
-        Ok(affected)
+        Ok(rollback)
+    }
+
+    /// Rounds a reorg reached that must be recomputed and match, in order.
+    pub fn settlement_rechecks(&self) -> Result<Vec<u32>, EngineError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT round FROM settlement_rechecks ORDER BY round")?;
+        let rows = stmt.query_map([], |r| r.get::<_, u32>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The round's settlement matched the new chain.
+    pub fn clear_settlement_recheck(&self, round: u32) -> Result<(), EngineError> {
+        self.conn.execute(
+            "DELETE FROM settlement_rechecks WHERE round = ?1",
+            params![round],
+        )?;
+        Ok(())
     }
 
     /// A canonical dump of all state, for idempotency checks.
@@ -1370,8 +1425,8 @@ mod tests {
         );
         assert!(db.note_by_cmx(&[8; 32]).expect("lookup").is_none());
 
-        let affected = db.rollback_to(4).expect("rollback");
-        assert!(affected.is_empty());
+        let affected = db.rollback_to(4, |_| Ok(0)).expect("rollback");
+        assert_eq!(affected, Rollback::default());
         assert_eq!(db.tip().expect("tip").map(|b| b.height), Some(3));
         assert_eq!(db.note_count().expect("count"), 0);
     }

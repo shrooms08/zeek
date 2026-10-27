@@ -133,6 +133,15 @@ pub struct PendingRound {
     pub beacon_time: u64,
 }
 
+/// A round's settlement computed from the chain as stored now.
+struct Computed {
+    row: SettlementRow,
+    /// The beacon fetched for it, to store with it.
+    new_beacon: Option<BeaconRow>,
+    /// Its draw (a voided round has none).
+    reveal: Option<Event>,
+}
+
 /// Drives rounds forward.
 pub struct Processor {
     config: GameConfig,
@@ -402,116 +411,71 @@ impl Processor {
     ///
     /// The beacon is fetched with no database connection held; each round's
     /// beacon and settlement are then written in one short transaction.
+    ///
+    /// Rounds a deep reorg reached (`settlement_rechecks`) are recomputed from
+    /// the chain as it is now first. The same result clears the flag; a
+    /// different one is never written over the stored settlement: it is
+    /// logged as an error and settling stops there until it is resolved.
     pub async fn process(
         &mut self,
         store: &Store,
         fetcher: &mut dyn BeaconFetcher,
         now: u64,
     ) -> Result<Vec<Event>, EngineError> {
-        let params = self.config.params.clone();
         let mut events = Vec::new();
         let Some(tip) = store.read(|db| db.tip())? else {
             return Ok(events);
         };
+        for round in store.read(|db| db.settlement_rechecks())? {
+            let stored = store
+                .read(|db| db.settlement(round))?
+                .ok_or_else(|| EngineError::Corrupt(format!("settlement {round} vanished")))?;
+            let recomputed = self
+                .compute(
+                    store,
+                    fetcher,
+                    tip.height,
+                    round,
+                    now,
+                    Some(stored.settlement.previous_cache),
+                )
+                .await?;
+            let Some(Computed { row, .. }) = recomputed else {
+                // The new chain is not deep enough yet: wait for it.
+                return Ok(events);
+            };
+            if row.outcome == stored.outcome && row.settlement == stored.settlement {
+                store.write(|db| db.clear_settlement_recheck(round))?;
+                tracing::info!(round, "settlement rechecked after a reorg: unchanged");
+            } else {
+                tracing::error!(
+                    round,
+                    stored_outcome = ?stored.outcome,
+                    recomputed_outcome = ?row.outcome,
+                    stored_payouts = stored.settlement.payouts.len(),
+                    recomputed_payouts = row.settlement.payouts.len(),
+                    "SETTLEMENT DIFFERS AFTER A REORG: the stored settlement is kept, not overwritten; settling stops until an operator resolves it"
+                );
+                return Ok(events);
+            }
+        }
         let mut round = store
             .read(|db| db.last_settled_round())?
             .map(|r| r + 1)
             .unwrap_or(0);
         loop {
-            let (window, status, ctx) = store.read(|db| self.status(db, round))?;
-            let required_tip = window
-                .end
-                .checked_add(params.mtp_window - 1)
-                .and_then(|h| h.checked_add(SETTLE_CONFIRMATIONS))
-                .ok_or(EngineError::Overflow("settlement height"))?;
-            if tip.height < required_tip
-                || ctx.post_close_block_times.len() < params.mtp_window as usize
-            {
+            let Some(Computed {
+                row,
+                new_beacon,
+                reveal,
+            }) = self
+                .compute(store, fetcher, tip.height, round, now, None)
+                .await?
+            else {
                 break;
-            }
-            let start_time = ctx.start_block_time.ok_or_else(|| {
-                EngineError::Corrupt(format!("start block of round {round} missing"))
-            })?;
-            let drand_round = beacon::beacon_round_for(&params, start_time)?;
-            let beacon_time = beacon::beacon_time(&params, drand_round)?;
-            let timing = zeek_core::timing::check_window_close(
-                &params,
-                beacon_time,
-                &ctx.post_close_block_times,
-            )?;
-
-            let mut new_beacon = None;
-            let outcome = match (status, timing) {
-                (RoundStatus::Voided, _) | (_, TimingVerdict::Unsafe { .. }) => {
-                    RoundOutcome::Voided
-                }
-                (RoundStatus::Revealable, TimingVerdict::Safe { .. }) => {
-                    let fetched = match store.read(|db| db.beacon(drand_round))? {
-                        Some(row) => row,
-                        None => {
-                            if now < beacon_time || !self.backoff.ready(drand_round, now) {
-                                break;
-                            }
-                            match fetcher.fetch(&params.drand, drand_round).await {
-                                Ok(f) => {
-                                    self.backoff.succeeded(drand_round);
-                                    let row = BeaconRow {
-                                        beacon: f.beacon,
-                                        randomness: f.randomness,
-                                        relay: f.relay,
-                                    };
-                                    new_beacon = Some(row.clone());
-                                    row
-                                }
-                                Err(e) => {
-                                    let delay = self.backoff.failed(drand_round, now);
-                                    tracing::warn!(round, drand_round, retry_in_secs = delay, error = %e, "beacon not available yet");
-                                    break;
-                                }
-                            }
-                        }
-                    };
-                    let treasure_tile =
-                        zeek_core::random::treasure_tile(round, &fetched.randomness)?;
-                    let cache_triggered =
-                        zeek_core::random::cache_triggers(&params, round, &fetched.randomness)?;
-                    events.push(Event::Reveal {
-                        round,
-                        drand_round,
-                        treasure_tile,
-                        cache_triggered,
-                    });
-                    RoundOutcome::Drawn {
-                        treasure_tile,
-                        cache_triggered,
-                    }
-                }
-                (other, _) => {
-                    return Err(EngineError::Corrupt(format!(
-                        "round {round} has status {other:?} although its blocks are confirmed"
-                    )));
-                }
             };
-
-            let voided = matches!(outcome, RoundOutcome::Voided);
-            let (classified, previous_cache) = store.read(|db| {
-                Ok::<_, EngineError>((self.classified(db, round, voided)?, self.cache_balance(db)?))
-            })?;
-            let settlement = settle::settle(&params, round, &classified, previous_cache, outcome)?;
-            let row = SettlementRow {
-                round,
-                settled_at_height: tip.height,
-                start_block_time: start_time,
-                post_close_block_times: ctx.post_close_block_times[..params.mtp_window as usize]
-                    .to_vec(),
-                drand_round,
-                beacon_time,
-                timing,
-                outcome,
-                settlement: settlement.clone(),
-                status: PlanStatus::AwaitingSignatures,
-                rules_version: rounds::rules_version(&params, round)?,
-            };
+            events.extend(reveal);
+            let settlement = row.settlement.clone();
             store.write(|db| {
                 db.transaction(|tx| {
                     if let Some(beacon) = &new_beacon {
@@ -522,7 +486,7 @@ impl Processor {
             })?;
             tracing::info!(
                 round,
-                ?outcome,
+                outcome = ?row.outcome,
                 pot = settlement.pot,
                 payouts = settlement.payouts.len(),
                 new_cache = settlement.new_cache,
@@ -530,12 +494,129 @@ impl Processor {
             );
             events.push(Event::Settled {
                 round,
-                outcome,
+                outcome: row.outcome,
                 new_cache: settlement.new_cache,
             });
             round += 1;
         }
         Ok(events)
+    }
+
+    /// The settlement of `round` from the chain as stored now, or `None` when
+    /// it is not ready (not confirmed deep enough, or its beacon is not
+    /// available yet). `previous_cache` is the Cache it starts from (`None`:
+    /// the latest settled round's).
+    async fn compute(
+        &mut self,
+        store: &Store,
+        fetcher: &mut dyn BeaconFetcher,
+        tip_height: u32,
+        round: u32,
+        now: u64,
+        previous_cache: Option<u64>,
+    ) -> Result<Option<Computed>, EngineError> {
+        let params = self.config.params.clone();
+        let (window, status, ctx) = store.read(|db| self.status(db, round))?;
+        let required_tip = window
+            .end
+            .checked_add(params.mtp_window - 1)
+            .and_then(|h| h.checked_add(SETTLE_CONFIRMATIONS))
+            .ok_or(EngineError::Overflow("settlement height"))?;
+        if tip_height < required_tip
+            || ctx.post_close_block_times.len() < params.mtp_window as usize
+        {
+            return Ok(None);
+        }
+        let start_time = ctx
+            .start_block_time
+            .ok_or_else(|| EngineError::Corrupt(format!("start block of round {round} missing")))?;
+        let drand_round = beacon::beacon_round_for(&params, start_time)?;
+        let beacon_time = beacon::beacon_time(&params, drand_round)?;
+        let timing = zeek_core::timing::check_window_close(
+            &params,
+            beacon_time,
+            &ctx.post_close_block_times,
+        )?;
+
+        let mut new_beacon = None;
+        let mut reveal = None;
+        let outcome = match (status, timing) {
+            (RoundStatus::Voided, _) | (_, TimingVerdict::Unsafe { .. }) => RoundOutcome::Voided,
+            (RoundStatus::Revealable, TimingVerdict::Safe { .. }) => {
+                let fetched = match store.read(|db| db.beacon(drand_round))? {
+                    Some(row) => row,
+                    None => {
+                        if now < beacon_time || !self.backoff.ready(drand_round, now) {
+                            return Ok(None);
+                        }
+                        match fetcher.fetch(&params.drand, drand_round).await {
+                            Ok(f) => {
+                                self.backoff.succeeded(drand_round);
+                                let row = BeaconRow {
+                                    beacon: f.beacon,
+                                    randomness: f.randomness,
+                                    relay: f.relay,
+                                };
+                                new_beacon = Some(row.clone());
+                                row
+                            }
+                            Err(e) => {
+                                let delay = self.backoff.failed(drand_round, now);
+                                tracing::warn!(round, drand_round, retry_in_secs = delay, error = %e, "beacon not available yet");
+                                return Ok(None);
+                            }
+                        }
+                    }
+                };
+                let treasure_tile = zeek_core::random::treasure_tile(round, &fetched.randomness)?;
+                let cache_triggered =
+                    zeek_core::random::cache_triggers(&params, round, &fetched.randomness)?;
+                reveal = Some(Event::Reveal {
+                    round,
+                    drand_round,
+                    treasure_tile,
+                    cache_triggered,
+                });
+                RoundOutcome::Drawn {
+                    treasure_tile,
+                    cache_triggered,
+                }
+            }
+            (other, _) => {
+                return Err(EngineError::Corrupt(format!(
+                    "round {round} has status {other:?} although its blocks are confirmed"
+                )));
+            }
+        };
+
+        let voided = matches!(outcome, RoundOutcome::Voided);
+        let (classified, previous_cache) = store.read(|db| {
+            let previous = match previous_cache {
+                Some(cache) => cache,
+                None => self.cache_balance(db)?,
+            };
+            Ok::<_, EngineError>((self.classified(db, round, voided)?, previous))
+        })?;
+        let settlement = settle::settle(&params, round, &classified, previous_cache, outcome)?;
+        let row = SettlementRow {
+            round,
+            settled_at_height: tip_height,
+            start_block_time: start_time,
+            post_close_block_times: ctx.post_close_block_times[..params.mtp_window as usize]
+                .to_vec(),
+            drand_round,
+            beacon_time,
+            timing,
+            outcome,
+            settlement,
+            status: PlanStatus::AwaitingSignatures,
+            rules_version: rounds::rules_version(&params, round)?,
+        };
+        Ok(Some(Computed {
+            row,
+            new_beacon,
+            reveal,
+        }))
     }
 }
 

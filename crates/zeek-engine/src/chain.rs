@@ -210,7 +210,8 @@ pub struct IngestReport {
     pub new_notes: usize,
     /// First height that was rolled back, if a reorg was handled.
     pub reorg_from: Option<u32>,
-    /// Settlements discarded by the rollback (should be empty; logged).
+    /// Rounds with no payout whose inputs the reorg reached: recomputed from
+    /// the new chain and checked (empty for an ordinary reorg of the tip).
     pub rolled_back_settlements: Vec<u32>,
 }
 
@@ -282,10 +283,30 @@ pub async fn ingest(
             }
             if let Some(fork) = detect_reorg(source, store, config, &block).await? {
                 tracing::warn!(fork, height, "reorg detected; rolling back");
-                let discarded = store.write(|db| db.rollback_to(fork))?;
-                if !discarded.is_empty() {
-                    tracing::error!(?discarded, "rollback discarded settled rounds");
+                let params = &config.params;
+                let last_read = |round: u32| -> Result<u32, EngineError> {
+                    let window = zeek_core::rounds::round_window(params, round)?;
+                    window
+                        .end
+                        .checked_add(params.mtp_window - 1)
+                        .ok_or(EngineError::Overflow("last block read"))
+                };
+                let rollback = store.write(|db| db.rollback_to(fork, last_read))?;
+                if !rollback.kept_paying.is_empty() {
+                    tracing::error!(
+                        rounds = ?rollback.kept_paying,
+                        fork,
+                        "a reorg reached the blocks these paid rounds were settled from; their settlements and payouts are kept as they are"
+                    );
                 }
+                if !rollback.recheck.is_empty() {
+                    tracing::warn!(
+                        rounds = ?rollback.recheck,
+                        fork,
+                        "a reorg reached the blocks these rounds were settled from; they will be recomputed from the new chain and must match"
+                    );
+                }
+                let discarded = rollback.recheck;
                 report.reorg_from = Some(fork);
                 report.rolled_back_settlements = discarded;
                 next = fork;
