@@ -46,6 +46,15 @@ pub struct Scenario {
 /// text-memo note, followed by the blocks the timing rule and the
 /// confirmation policy need.
 pub fn scenario(delay_close_secs: u64) -> Scenario {
+    scenario_with(delay_close_secs, |_, _| {})
+}
+
+/// The same round with `extra` transactions mined inside its window (after
+/// bob's dig).
+pub fn scenario_with(
+    delay_close_secs: u64,
+    extra: impl FnOnce(&mut SyntheticChain, &TestVault),
+) -> Scenario {
     let vault = TestVault::new(42);
     let config = vault.config(GENESIS);
     let mut chain = SyntheticChain::new(&vault, GENESIS - 3, start_time(&config.params) - 75);
@@ -62,6 +71,7 @@ pub fn scenario(delay_close_secs: u64) -> Scenario {
         Pool::Ironwood,
         vault.dig_memo(0, 3, 2).encode(),
     )]);
+    extra(&mut chain, &vault);
     chain.advance(2);
     chain.push_block(vec![
         chain.payment(400_000, Pool::Ironwood, vault.dig_memo(0, 17, 3).encode()),

@@ -413,7 +413,17 @@ async fn block_notes(
         display.reverse();
         let txid_hex = hex::encode(display);
         let raw = source.transaction(&txid).await?;
-        for note in scanner.decrypt_full(&txid_hex, &raw, branch, &hits)? {
+        let full = scanner.decrypt_full(&txid_hex, &raw, branch, &hits)?;
+        if !full.undecryptable.is_empty() {
+            // Valid for the compact block, corrupt after it: not a game note.
+            tracing::warn!(
+                txid = %txid_hex,
+                height,
+                actions = ?full.undecryptable,
+                "a payment to the vault does not decrypt in full; ignored (not a game note)"
+            );
+        }
+        for note in full.notes {
             notes.push(NoteRow {
                 txid,
                 action_index: note.action_index,

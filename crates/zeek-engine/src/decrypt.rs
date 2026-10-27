@@ -42,6 +42,16 @@ pub struct FullNote {
     pub cmx: [u8; 32],
 }
 
+/// The outputs of one transaction that pay the vault.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FullDecryption {
+    /// Outputs that decrypt in full: value and memo.
+    pub notes: Vec<FullNote>,
+    /// Action indices detected in the compact block whose full ciphertext
+    /// does not decrypt: not game notes, ignored.
+    pub undecryptable: Vec<u16>,
+}
+
 /// Trial-decrypts outputs with one prepared incoming viewing key.
 pub struct DigScanner {
     ivk: PreparedIncomingViewingKey,
@@ -198,18 +208,32 @@ impl DigScanner {
 
     /// Decrypts the hit outputs of the full transaction `raw` (mined under
     /// `branch`), returning value and memo for each.
+    ///
+    /// A hit whose action is the one the compact block described (same note
+    /// commitment) but whose full ciphertext does not decrypt is not a game
+    /// note: anyone can pay the vault an output that is valid for the 52
+    /// bytes a compact block carries and corrupt after them, and consensus
+    /// does not check it. It is returned in `undecryptable` (to log and
+    /// ignore) instead of failing, so it can never halt the follower. Anything
+    /// else that does not match the compact block (a transaction that does not
+    /// parse, a missing action, another note commitment or value) means the
+    /// source served something else than the block describes: that stays an
+    /// error, retried against another source, so a real dig is never dropped.
     pub fn decrypt_full(
         &self,
         txid_hex: &str,
         raw: &[u8],
         branch: BranchId,
         hits: &[CompactHit],
-    ) -> Result<Vec<FullNote>, EngineError> {
+    ) -> Result<FullDecryption, EngineError> {
         let tx = Transaction::read(raw, branch).map_err(|e| EngineError::MalformedTransaction {
             txid: txid_hex.to_owned(),
             reason: e.to_string(),
         })?;
-        let mut notes = Vec::with_capacity(hits.len());
+        let mut out = FullDecryption {
+            notes: Vec::with_capacity(hits.len()),
+            undecryptable: Vec::new(),
+        };
         for hit in hits {
             let bundle = match hit.pool {
                 Pool::Ironwood => tx.ironwood_bundle(),
@@ -226,28 +250,6 @@ impl DigScanner {
                     txid: txid_hex.to_owned(),
                     reason: format!("action {} missing", hit.action_index),
                 })?;
-            let decrypted = match hit.pool {
-                Pool::Ironwood => {
-                    try_note_decryption(&IronwoodDomain::for_action(action), &self.ivk, action)
-                }
-                Pool::Orchard => {
-                    try_note_decryption(&OrchardDomain::for_action(action), &self.ivk, action)
-                }
-            };
-            let (note, _address, memo) =
-                decrypted.ok_or_else(|| EngineError::MalformedTransaction {
-                    txid: txid_hex.to_owned(),
-                    reason: format!(
-                        "action {} decrypted in the compact block but not in the full transaction",
-                        hit.action_index
-                    ),
-                })?;
-            if note.value().inner() != hit.value {
-                return Err(EngineError::MalformedTransaction {
-                    txid: txid_hex.to_owned(),
-                    reason: "value differs between compact and full decryption".into(),
-                });
-            }
             let cmx = action.cmx().to_bytes();
             if cmx != hit.cmx {
                 return Err(EngineError::MalformedTransaction {
@@ -256,7 +258,25 @@ impl DigScanner {
                         .into(),
                 });
             }
-            notes.push(FullNote {
+            let decrypted = match hit.pool {
+                Pool::Ironwood => {
+                    try_note_decryption(&IronwoodDomain::for_action(action), &self.ivk, action)
+                }
+                Pool::Orchard => {
+                    try_note_decryption(&OrchardDomain::for_action(action), &self.ivk, action)
+                }
+            };
+            let Some((note, _address, memo)) = decrypted else {
+                out.undecryptable.push(hit.action_index);
+                continue;
+            };
+            if note.value().inner() != hit.value {
+                return Err(EngineError::MalformedTransaction {
+                    txid: txid_hex.to_owned(),
+                    reason: "value differs between compact and full decryption".into(),
+                });
+            }
+            out.notes.push(FullNote {
                 pool: hit.pool,
                 action_index: hit.action_index,
                 value: hit.value,
@@ -264,7 +284,7 @@ impl DigScanner {
                 cmx,
             });
         }
-        Ok(notes)
+        Ok(out)
     }
 }
 
@@ -294,7 +314,8 @@ mod tests {
                 let raw = chain.transaction(&tx.txid).expect("raw");
                 let notes = scanner
                     .decrypt_full("tx", &raw, BranchId::Nu6_3, std::slice::from_ref(hit))
-                    .expect("full");
+                    .expect("full")
+                    .notes;
                 all.push((i, notes));
             }
         }

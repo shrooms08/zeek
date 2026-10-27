@@ -107,6 +107,8 @@ pub struct Hit {
     pub ironwood: bool,
     pub action_index: u16,
     pub value: u64,
+    /// Note commitment of the compact action.
+    pub cmx: [u8; 32],
 }
 
 fn scan_actions(
@@ -130,13 +132,18 @@ fn scan_actions(
         } else {
             try_compact_note_decryption(&OrchardDomain::for_compact_action(&compact), ivk, &compact)
         };
-        if let (Some((note, _)), Ok(action_index)) = (decrypted, u16::try_from(index)) {
+        if let (Some((note, _)), Ok(action_index), Ok(cmx)) = (
+            decrypted,
+            u16::try_from(index),
+            <[u8; 32]>::try_from(action.cmx.as_slice()),
+        ) {
             hits.push(Hit {
                 txid: txid.to_owned(),
                 height,
                 ironwood,
                 action_index,
                 value: note.value().inner(),
+                cmx,
             });
         }
     }
@@ -428,14 +435,19 @@ fn check_digs(input: &RoundInput<'_>, hits: &[Hit]) -> CheckResult {
             return fail(id, "A compact action is missing from its full transaction.")
                 .with(format!("{}:{}", hit.txid, hit.action_index));
         };
+        if action.cmx().to_bytes() != hit.cmx {
+            return fail(id, "A full transaction does not match its compact block.")
+                .with(format!("{}:{}", hit.txid, hit.action_index));
+        }
         let decrypted = if hit.ironwood {
             try_note_decryption(&IronwoodDomain::for_action(action), input.ivk, action)
         } else {
             try_note_decryption(&OrchardDomain::for_action(action), input.ivk, action)
         };
+        // Valid for the compact block, corrupt after it: not a game note
+        // (the engine and the keyholders ignore it the same way).
         let Some((note, _, memo)) = decrypted else {
-            return fail(id, "A detected output does not decrypt in full.")
-                .with(format!("{}:{}", hit.txid, hit.action_index));
+            continue;
         };
         found.insert(
             (hit.txid.clone(), hit.action_index),
