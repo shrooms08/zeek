@@ -20,7 +20,13 @@ vi.mock("../sound/sound", () => ({
 }));
 
 /** Round 5, settled: tile 7 (0-based) held the treasure, or the round was voided. */
-const round = vi.hoisted(() => ({ voided: false }));
+const round = vi.hoisted(() => ({ voided: false, waiting: false }));
+const notified = vi.hoisted(() => ({ titles: [] as string[] }));
+vi.mock("../lib/notify", () => ({
+  notify: (title: string) => notified.titles.push(title),
+  notifyState: () => "granted",
+  askToNotify: () => Promise.resolve("granted"),
+}));
 vi.mock("../api/queries", () => ({
   useRound: () => ({
     isPending: false,
@@ -28,18 +34,20 @@ vi.mock("../api/queries", () => ({
     data: {
       round: 5,
       depths: Array<number>(25).fill(0),
-      settled: {
-        outcome: round.voided
-          ? { outcome: "voided" }
-          : { outcome: "drawn", treasure_tile: 7, cache_triggered: false },
-        tile_totals: Array<number>(25).fill(100_000),
-        drand_round: 1,
-        distributable: 2_000_000,
-        winners: 1,
-        previous_cache: 0,
-        new_cache: 100_000,
-        cache_paid: 0,
-      },
+      settled: round.waiting
+        ? null
+        : {
+            outcome: round.voided
+              ? { outcome: "voided" }
+              : { outcome: "drawn", treasure_tile: 7, cache_triggered: false },
+            tile_totals: Array<number>(25).fill(100_000),
+            drand_round: 1,
+            distributable: 2_000_000,
+            winners: 1,
+            previous_cache: 0,
+            new_cache: 100_000,
+            cache_paid: 0,
+          },
     },
   }),
   usePending: () => ({ data: [] }),
@@ -81,6 +89,8 @@ describe("the reveal's result sound", () => {
     played.results = [];
     played.effects = [];
     round.voided = false;
+    round.waiting = false;
+    notified.titles = [];
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: false,
       media: query,
@@ -97,6 +107,13 @@ describe("the reveal's result sound", () => {
         disconnect() {}
       },
     );
+    // jsdom has no Web Animations API (a tile's dig pulse uses it).
+    if (!("animate" in Element.prototype)) {
+      Object.defineProperty(Element.prototype, "animate", {
+        configurable: true,
+        value: () => ({ cancel: () => undefined, finished: Promise.resolve() }),
+      });
+    }
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -131,6 +148,24 @@ describe("the reveal's result sound", () => {
     open();
     expect(screen.getByTestId("result-card").getAttribute("data-outcome")).toBe("voided");
     expect(played.results).toEqual(["miss"]);
+  });
+
+  it("a reveal that was waiting still notifies when the refreshed round lands", () => {
+    dug([2]);
+    round.waiting = true;
+    const view = open();
+    expect(screen.getByTestId("reveal-waiting")).toBeTruthy();
+    // The tab comes back; the refreshed round is settled.
+    round.waiting = false;
+    view.rerender(
+      <MemoryRouter initialEntries={["/reveal/5"]}>
+        <Routes>
+          <Route path="/reveal/:round" element={<RevealScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    run(1_000);
+    expect(notified.titles).toEqual(["Round 5 is revealed"]);
   });
 
   it("a round only watched is silent", () => {

@@ -92,6 +92,41 @@ describe("LiveClient", () => {
     vi.useRealTimers();
   });
 
+  it("announces every reconnect, but not the first connection", () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    let reconnects = 0;
+    const client = new LiveClient({
+      url: "ws://x/v1/stream",
+      onEvent: () => undefined,
+      onState: () => undefined,
+      onReconnect: () => {
+        reconnects += 1;
+      },
+      createSocket: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+      random: () => 0.5,
+    });
+    client.start();
+    sockets[0]?.onopen?.();
+    expect(reconnects).toBe(0);
+    // The engine restarts: the stream drops and comes back.
+    sockets[0]?.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]?.onopen?.();
+    expect(reconnects).toBe(1);
+    // The tab was hidden and comes back.
+    client.pause();
+    client.resume();
+    sockets[2]?.onopen?.();
+    expect(reconnects).toBe(2);
+    client.stop();
+    vi.useRealTimers();
+  });
+
   it("derives the stream URL", () => {
     expect(streamUrl("http://127.0.0.1:8787")).toBe("ws://127.0.0.1:8787/v1/stream");
     expect(streamUrl("https://zeek.example")).toBe("wss://zeek.example/v1/stream");

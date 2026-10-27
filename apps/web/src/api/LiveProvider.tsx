@@ -9,7 +9,7 @@
  * requests); on return it reconnects at once and refreshes what it missed.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import { onVisibilityChange } from "../lib/visibility";
 import { ENGINE_URL } from "./engine";
@@ -52,6 +52,18 @@ export function applyEvent(
   }
 }
 
+/**
+ * What a gap in the stream (a hidden tab, a dropped connection) may have
+ * left stale: round and payout events, including the round an open reveal
+ * waits on, and the Campfire. The board comes with the stream itself.
+ */
+export function refreshMissed(client: QueryClient): Promise<void> {
+  const keys = [["pending"], ["rounds"], ["round"], ["ledger"], ["campfire"]] as const;
+  return Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey }))).then(
+    () => undefined,
+  );
+}
+
 /** How long a hidden tab keeps the stream open (quick tab switches). */
 export const HIDDEN_GRACE_MS = 60_000;
 /** Round and payout events come in bursts: their refetches wait this long. */
@@ -82,6 +94,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const live = new LiveClient({
       url: streamUrl(ENGINE_URL),
       onState: setState,
+      onReconnect: () => {
+        void refreshMissed(client);
+      },
       onEvent: (event) => {
         applyEvent(event, {
           // A board event carries no landing digs: keep the last known set.
@@ -111,11 +126,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         }, HIDDEN_GRACE_MS);
       } else if (paused) {
         paused = false;
+        // Reopening refreshes what the pause missed (onReconnect).
         live.resume();
-        // Round events missed while paused (the board comes with the stream).
-        for (const key of [["pending"], ["rounds"], ["ledger"], ["campfire"]] as const) {
-          void client.invalidateQueries({ queryKey: key });
-        }
       }
     });
     return () => {

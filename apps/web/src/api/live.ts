@@ -17,6 +17,8 @@ export interface LiveOptions {
   url: string;
   onEvent: (event: LiveEvent) => void;
   onState: (state: LiveState) => void;
+  /** Every open after the first (a drop, a hidden tab): events may have been missed. */
+  onReconnect?: () => void;
   /** Injected for tests. */
   createSocket?: (url: string) => WebSocket;
   random?: () => number;
@@ -46,6 +48,7 @@ export class LiveClient {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  private everOpened = false;
   private readonly options: LiveOptions;
 
   constructor(options: LiveOptions) {
@@ -88,6 +91,8 @@ export class LiveClient {
     socket.onopen = () => {
       this.attempt = 0;
       this.options.onState("open");
+      if (this.everOpened) this.options.onReconnect?.();
+      this.everOpened = true;
     };
     socket.onmessage = (message: MessageEvent<unknown>) => {
       const event = parse(message.data);
