@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::BranchId;
+use zeek_core::proof::ProofBundle;
 use zeek_core::settle::Settlement;
 use zeek_engine::chain::{ingest, ChainSource};
 use zeek_engine::config::GameConfig;
@@ -29,7 +30,7 @@ use zeek_engine::synthetic::{SyntheticChain, TestVault};
 use zeek_engine::EngineError;
 use zeek_verify::chain::{Blocks, MinedTx};
 use zeek_verify::checks::{verify_round, PublicConfig};
-use zeek_verify::{CheckId, CheckStatus};
+use zeek_verify::{CheckId, CheckResult, CheckStatus, RoundReport};
 
 use common::{fixture_beacons, scenario, scenario_with, start_time, Scenario, GENESIS};
 
@@ -46,10 +47,30 @@ enum Corrupt {
 /// Ironwood action's ciphertext is corrupted past the compact part.
 fn crafted(chain: &mut SyntheticChain, vault: &TestVault, value: u64, at: Corrupt) -> Vec<u8> {
     let spec = chain.payment(value, Pool::Ironwood, vault.dig_memo(0, 3, 9).encode());
-    let mut raw = chain.unmined_transaction(&spec);
+    let raw = chain.unmined_transaction(&spec);
+    corrupt(raw, at)
+}
+
+/// `raw` with every Ironwood action's ciphertext corrupted at `at` (one of
+/// them pays the vault; the others are change or dummies).
+fn corrupt(raw: Vec<u8>, at: Corrupt) -> Vec<u8> {
+    let actions = Transaction::read(&raw[..], BranchId::Nu6_3)
+        .expect("parse")
+        .ironwood_bundle()
+        .expect("an Ironwood bundle")
+        .actions()
+        .len();
+    (0..actions).fold(raw, |raw, index| corrupt_one(raw, index, at))
+}
+
+/// `raw` with Ironwood action `index`'s ciphertext corrupted at `at`.
+fn corrupt_one(mut raw: Vec<u8>, index: usize, at: Corrupt) -> Vec<u8> {
     let tx = Transaction::read(&raw[..], BranchId::Nu6_3).expect("parse");
     let bundle = tx.ironwood_bundle().expect("an Ironwood bundle");
-    let ciphertext = bundle.actions()[0].encrypted_note().enc_ciphertext.to_vec();
+    let ciphertext = bundle.actions()[index]
+        .encrypted_note()
+        .enc_ciphertext
+        .to_vec();
     let start = raw
         .windows(ciphertext.len())
         .position(|w| w == ciphertext.as_slice())
@@ -224,38 +245,190 @@ async fn engine_keyholder_and_verifier_classify_the_crafted_payment_alike() {
     let bundle = engine
         .read(|db| processor.proof_bundle(db, &row))
         .expect("bundle");
-    let tip = chain.next_height() - 1;
-    let blocks = Blocks::new((GENESIS..=tip).filter_map(|h| chain.block(h).cloned()));
+    let report = verify(&config, &bundle, &chain, chain_txs(&chain));
+    for id in [CheckId::Digs, CheckId::Settlement] {
+        let check = find(&report, id);
+        assert_eq!(check.status, CheckStatus::Pass, "{id:?}: {check:?}");
+    }
+}
+
+/// Every mined transaction of `chain`, by display txid, as a verifier
+/// fetches them.
+fn chain_txs(chain: &SyntheticChain) -> BTreeMap<String, MinedTx> {
     let mut txs = BTreeMap::new();
-    for h in GENESIS..=tip {
+    for h in GENESIS..chain.next_height() {
         for tx in &chain.block(h).expect("block").vtx {
             let txid: [u8; 32] = tx.txid.as_slice().try_into().expect("32 bytes");
             let mut display = txid;
             display.reverse();
-            if let Some(raw) = SyntheticChain::transaction(&chain, &txid) {
+            if let Some(raw) = SyntheticChain::transaction(chain, &txid) {
                 txs.insert(hex::encode(display), MinedTx { raw, height: h });
             }
         }
     }
+    txs
+}
+
+/// The verifier's report on `bundle`, from `chain`'s blocks and `txs`.
+fn verify(
+    config: &GameConfig,
+    bundle: &ProofBundle,
+    chain: &SyntheticChain,
+    txs: BTreeMap<String, MinedTx>,
+) -> RoundReport {
+    let blocks =
+        Blocks::new((GENESIS..chain.next_height()).filter_map(|h| chain.block(h).cloned()));
     let public = PublicConfig {
         params: config.params.clone(),
         vault_address: config.vault_address.clone(),
         uivk: config.uivk.clone(),
     };
     let ivk = public.ivk().expect("ivk");
-    let report = verify_round(&zeek_verify::checks::RoundInput {
+    verify_round(&zeek_verify::checks::RoundInput {
         config: &public,
-        bundle: &bundle,
+        bundle,
         blocks: &blocks,
         txs: &txs,
         ivk: &ivk,
-    });
-    for id in [CheckId::Digs, CheckId::Settlement] {
-        let check = report
-            .checks
-            .iter()
-            .find(|c| c.id == id)
-            .expect("check present");
-        assert_eq!(check.status, CheckStatus::Pass, "{id:?}: {check:?}");
+    })
+}
+
+fn find(report: &RoundReport, id: CheckId) -> &CheckResult {
+    report
+        .checks
+        .iter()
+        .find(|c| c.id == id)
+        .expect("check present")
+}
+
+/// Alice's dig (a real one) and its mined transaction.
+fn alice(chain: &SyntheticChain) -> ([u8; 32], Vec<u8>) {
+    let txid: [u8; 32] = chain
+        .block(GENESIS + 5)
+        .expect("block")
+        .vtx
+        .first()
+        .expect("tx")
+        .txid
+        .as_slice()
+        .try_into()
+        .expect("32 bytes");
+    let raw = SyntheticChain::transaction(chain, &txid).expect("raw");
+    (txid, raw)
+}
+
+#[tokio::test]
+async fn a_source_flipping_a_byte_of_a_real_dig_is_an_error_not_a_skip() {
+    // The same transaction, one memo byte changed: same note commitment, so
+    // only its txid shows it is not the transaction the block holds.
+    let (chain, vault) = round_with(|_, _| {});
+    let config = vault.config(GENESIS);
+    let (txid, honest) = alice(&chain);
+    let mut source = Swapped {
+        chain,
+        txid,
+        raw: corrupt(honest, Corrupt::Memo),
+    };
+    let result = follow_and_settle(&mut source, &config).await;
+    assert!(
+        result.is_err(),
+        "a real dig must never be ignored because a source altered its transaction"
+    );
+}
+
+#[tokio::test]
+async fn the_verifier_rejects_a_transaction_that_does_not_hash_to_its_txid() {
+    // A bundle missing alice's dig (an engine fooled by such a source) and
+    // the same altered transaction: the verifier must not agree with it.
+    let (mut chain, vault) = round_with(|_, _| {});
+    let config = vault.config(GENESIS);
+    let (engine, processor) = follow_and_settle(&mut chain, &config)
+        .await
+        .expect("engine");
+    let row = engine
+        .read(|db| db.settlement(0))
+        .expect("read")
+        .expect("settled");
+    let mut bundle = engine
+        .read(|db| processor.proof_bundle(db, &row))
+        .expect("bundle");
+    let (txid, honest) = alice(&chain);
+    let mut display = txid;
+    display.reverse();
+    let alice_hex = hex::encode(display);
+    bundle.notes.retain(|n| n.txid != alice_hex);
+    let mut txs = chain_txs(&chain);
+    let altered = corrupt(honest, Corrupt::Memo);
+    let height = txs.get(&alice_hex).expect("alice").height;
+    txs.insert(
+        alice_hex,
+        MinedTx {
+            raw: altered,
+            height,
+        },
+    );
+    let report = verify(&config, &bundle, &chain, txs);
+    let digs = find(&report, CheckId::Digs);
+    assert_eq!(digs.status, CheckStatus::Fail, "{digs:?}");
+    assert!(
+        digs.summary.contains("does not hash to its txid"),
+        "{digs:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_real_dig_sharing_a_transaction_with_a_crafted_output_still_counts() {
+    // One transaction, two outputs to the vault (two digs on tile 5); one
+    // of them corrupted after its compact part. Either order of actions.
+    for crafted_index in 0..2 {
+        let mut txid = [0u8; 32];
+        let (mut chain, vault) = round_with(|chain, vault| {
+            let a = chain.payment(250_000, Pool::Ironwood, vault.dig_memo(0, 5, 20).encode());
+            let b = chain.payment(250_000, Pool::Ironwood, vault.dig_memo(0, 5, 21).encode());
+            let raw = chain.unmined_transaction_with(&[a, b]);
+            let raw = corrupt_one(raw, crafted_index, Corrupt::Memo);
+            txid = *Transaction::read(&raw[..], BranchId::Nu6_3)
+                .expect("parse")
+                .txid()
+                .as_ref();
+            chain.push_raw_transaction(raw).expect("mined");
+        });
+        let config = vault.config(GENESIS);
+        let (engine, processor) = follow_and_settle(&mut chain, &config)
+            .await
+            .unwrap_or_else(|e| panic!("action {crafted_index}: the follower halted: {e}"));
+        let kept: Vec<_> = engine
+            .read(|db| db.notes_in_range(GENESIS, chain.next_height()))
+            .expect("notes")
+            .into_iter()
+            .filter(|n| n.txid == txid)
+            .collect();
+        assert_eq!(
+            kept.len(),
+            1,
+            "action {crafted_index}: the real dig is kept"
+        );
+        assert_ne!(usize::from(kept[0].action_index), crafted_index);
+        assert_eq!(kept[0].value, 250_000);
+        let digs = [20, 21].map(|p| vault.dig_memo(0, 5, p).encode().to_vec());
+        assert!(digs.contains(&kept[0].memo), "it is one of the two digs");
+
+        // A keyholder settles it the same, and the verifier agrees.
+        let (keyholder, _) = follow_and_settle(&mut chain, &config)
+            .await
+            .expect("keyholder");
+        assert_eq!(settlement(&engine), settlement(&keyholder));
+        let row = engine
+            .read(|db| db.settlement(0))
+            .expect("read")
+            .expect("settled");
+        let bundle = engine
+            .read(|db| processor.proof_bundle(db, &row))
+            .expect("bundle");
+        let report = verify(&config, &bundle, &chain, chain_txs(&chain));
+        for id in [CheckId::Digs, CheckId::Settlement] {
+            let check = find(&report, id);
+            assert_eq!(check.status, CheckStatus::Pass, "{id:?}: {check:?}");
+        }
     }
 }

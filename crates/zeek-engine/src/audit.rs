@@ -301,6 +301,12 @@ async fn audit_tx(
             reason: e.to_string(),
         }
     })?;
+    if parsed.txid().to_string() != txid {
+        return Err(EngineError::MalformedTransaction {
+            txid,
+            reason: "the transaction served does not hash to this txid".into(),
+        });
+    }
     let fee = parsed
         .orchard_bundle()
         .map_or(0i64, |b| i64::from(*b.value_balance()))

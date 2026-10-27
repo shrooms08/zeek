@@ -17,6 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_backend::proto::service::{BlockId, BlockRange, RawTransaction, TxFilter};
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::{BlockHeight, BranchId, MAIN_NETWORK, TEST_NETWORK};
 use zeek_core::params::Network;
 use zeek_vault::lightwalletd::{self, Client};
@@ -119,18 +120,41 @@ async fn stream_blocks(
     Ok(blocks)
 }
 
+/// Fails unless `raw` (as a server returned it) hashes to `txid`.
+fn served_as(
+    network: Network,
+    txid: &[u8; 32],
+    raw: &RawTransaction,
+) -> Result<(), zeek_vault::VaultError> {
+    let height = u32::try_from(raw.height).unwrap_or(0);
+    let served = Transaction::read(&raw.data[..], branch_for(network, height))
+        .map_err(|e| zeek_vault::VaultError::BadResponse(format!("transaction: {e}")))?
+        .txid();
+    if served.as_ref() != txid {
+        return Err(zeek_vault::VaultError::BadResponse(
+            "the transaction served does not hash to the txid asked for".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Fetches transaction `txid` from one server, and fails (so the pool tries
+/// the next server) unless the bytes served hash to `txid`.
 async fn get_transaction(
     mut client: Client,
+    network: Network,
     txid: [u8; 32],
 ) -> Result<RawTransaction, zeek_vault::VaultError> {
-    Ok(client
+    let raw = client
         .get_transaction(TxFilter {
             block: None,
             index: 0,
             hash: txid.to_vec(),
         })
         .await?
-        .into_inner())
+        .into_inner();
+    served_as(network, &txid, &raw)?;
+    Ok(raw)
 }
 
 #[async_trait]
@@ -186,13 +210,20 @@ impl ChainSource for PoolSource {
     }
 
     async fn transaction(&mut self, txid: &[u8; 32]) -> Result<Vec<u8>, EngineError> {
-        let txid = *txid;
-        Ok(self.pool.unary(|c| get_transaction(c, txid)).await?.data)
+        let (txid, network) = (*txid, self.pool.network());
+        Ok(self
+            .pool
+            .unary(|c| get_transaction(c, network, txid))
+            .await?
+            .data)
     }
 
     async fn transaction_height(&mut self, txid: &[u8; 32]) -> Result<u32, EngineError> {
-        let txid = *txid;
-        let raw = self.pool.unary(|c| get_transaction(c, txid)).await?;
+        let (txid, network) = (*txid, self.pool.network());
+        let raw = self
+            .pool
+            .unary(|c| get_transaction(c, network, txid))
+            .await?;
         Ok(u32::try_from(raw.height).unwrap_or(0))
     }
 }
@@ -482,6 +513,46 @@ mod tests {
     use super::*;
     use crate::db::Pool;
     use crate::synthetic::{SyntheticChain, TestVault};
+
+    #[test]
+    fn a_server_serving_altered_bytes_is_failed_over() {
+        let vault = TestVault::new(11);
+        let mut chain = SyntheticChain::new(&vault, 100, 1_700_000_000);
+        chain.push_block(vec![chain.payment(
+            250_000,
+            Pool::Ironwood,
+            vault.dig_memo(0, 4, 2).encode(),
+        )]);
+        let id = chain.block(100).expect("block").vtx[0].txid.clone();
+        let txid: [u8; 32] = id.as_slice().try_into().expect("32 bytes");
+        let data = chain.transaction(&id).expect("raw");
+        let served = |data: Vec<u8>| RawTransaction { data, height: 100 };
+        assert!(served_as(Network::Test, &txid, &served(data.clone())).is_ok());
+
+        // One byte of the last ciphertext (its tag) changed: same note
+        // commitments, another txid.
+        let mut altered = data.clone();
+        let tx = Transaction::read(&data[..], BranchId::Nu6_3).expect("parse");
+        let ct = tx.ironwood_bundle().expect("bundle").actions()[0]
+            .encrypted_note()
+            .enc_ciphertext
+            .to_vec();
+        let at = data
+            .windows(ct.len())
+            .position(|w| w == ct.as_slice())
+            .expect("ciphertext");
+        altered[at + ct.len() - 1] ^= 1;
+        let err = served_as(Network::Test, &txid, &served(altered)).expect_err("altered");
+        assert!(
+            matches!(err, zeek_vault::VaultError::BadResponse(_)),
+            "{err}"
+        );
+
+        let mut other = txid;
+        other[0] ^= 1;
+        assert!(served_as(Network::Test, &other, &served(data)).is_err());
+        assert!(served_as(Network::Test, &txid, &served(vec![1, 2, 3])).is_err());
+    }
 
     #[tokio::test]
     async fn follows_the_chain_and_records_vault_notes() {

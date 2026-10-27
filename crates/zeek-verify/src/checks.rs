@@ -425,6 +425,15 @@ fn check_digs(input: &RoundInput<'_>, hits: &[Hit]) -> CheckResult {
                     .with(e.to_string())
             }
         };
+        // Without this, a source could alter one memo byte of a real dig (same
+        // note commitment) and have it skipped below as undecryptable.
+        if tx.txid().to_string() != hit.txid {
+            return fail(
+                id,
+                "A transaction paying the vault does not hash to its txid.",
+            )
+            .with(hit.txid.clone());
+        }
         let bundle_ref = if hit.ironwood {
             tx.ironwood_bundle()
         } else {

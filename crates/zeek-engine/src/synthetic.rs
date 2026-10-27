@@ -227,7 +227,13 @@ impl SyntheticChain {
     /// next block but not mined: what a mempool stream would carry. Mine it
     /// later with [`SyntheticChain::push_raw_transaction`].
     pub fn unmined_transaction(&mut self, spec: &TxSpec) -> Vec<u8> {
-        let (_txid, raw, _compact) = self.build_transaction(self.next_height, spec);
+        self.unmined_transaction_with(std::slice::from_ref(spec))
+    }
+
+    /// Like [`SyntheticChain::unmined_transaction`], with one output per
+    /// spec in one transaction (all specs in the same pool).
+    pub fn unmined_transaction_with(&mut self, specs: &[TxSpec]) -> Vec<u8> {
+        let (_txid, raw, _compact) = self.build_transaction(self.next_height, specs);
         raw
     }
 
@@ -253,7 +259,7 @@ impl SyntheticChain {
         let height = self.next_height;
         let mut vtx = Vec::new();
         for (index, spec) in specs.into_iter().enumerate() {
-            let (txid, raw, compact) = self.build_transaction(height, &spec);
+            let (txid, raw, compact) = self.build_transaction(height, std::slice::from_ref(&spec));
             self.transactions.insert(txid, raw);
             vtx.push(CompactTx {
                 index: index as u64,
@@ -312,12 +318,21 @@ impl SyntheticChain {
             .and_then(|id| self.transactions.get(&id).cloned())
     }
 
-    fn build_transaction(&mut self, height: u32, spec: &TxSpec) -> ([u8; 32], Vec<u8>, CompactTx) {
+    fn build_transaction(
+        &mut self,
+        height: u32,
+        specs: &[TxSpec],
+    ) -> ([u8; 32], Vec<u8>, CompactTx) {
+        let pool = specs.first().expect("at least one output").pool;
+        assert!(
+            specs.iter().all(|s| s.pool == pool),
+            "one pool per transaction"
+        );
         // Post-NU6.3 every pool's bundle is version 3; the Orchard pool forbids
         // cross-address outputs, so its only representable output is a change
         // output to an address the vault's key owns (paired by the builder with
         // a wallet-controlled zero-value spend).
-        let bundle_version = match spec.pool {
+        let bundle_version = match pool {
             Pool::Ironwood => BundleVersion::ironwood_v3(),
             Pool::Orchard => BundleVersion::orchard_v3(),
         };
@@ -328,20 +343,22 @@ impl SyntheticChain {
             Anchor::empty_tree(),
         )
         .expect("default flags are representable");
-        let value = orchard::value::NoteValue::from_raw(spec.value);
-        match spec.pool {
-            Pool::Ironwood => builder
-                .add_output(None, spec.recipient, value, spec.memo)
-                .expect("output"),
-            Pool::Orchard => builder
-                .add_change_output(
-                    self.vault_fvk.clone(),
-                    None,
-                    spec.recipient,
-                    value,
-                    spec.memo,
-                )
-                .expect("change output to an owned address"),
+        for spec in specs {
+            let value = orchard::value::NoteValue::from_raw(spec.value);
+            match pool {
+                Pool::Ironwood => builder
+                    .add_output(None, spec.recipient, value, spec.memo)
+                    .expect("output"),
+                Pool::Orchard => builder
+                    .add_change_output(
+                        self.vault_fvk.clone(),
+                        None,
+                        spec.recipient,
+                        value,
+                        spec.memo,
+                    )
+                    .expect("change output to an owned address"),
+            }
         }
         let (bundle, _meta) = builder
             .build::<ZatBalance>(&mut self.rng)
@@ -360,7 +377,7 @@ impl SyntheticChain {
                 )
             },
         );
-        let (orchard_bundle, ironwood_bundle) = match spec.pool {
+        let (orchard_bundle, ironwood_bundle) = match pool {
             Pool::Ironwood => (None, Some(bundle)),
             Pool::Orchard => (Some(bundle), None),
         };
@@ -379,7 +396,7 @@ impl SyntheticChain {
         tx.write(&mut raw).expect("serialize");
         let txid: [u8; 32] = *tx.txid().as_ref();
 
-        let bundle = match spec.pool {
+        let bundle = match pool {
             Pool::Ironwood => tx.ironwood_bundle(),
             Pool::Orchard => tx.orchard_bundle(),
         }
@@ -400,7 +417,7 @@ impl SyntheticChain {
                     .to_vec(),
             })
             .collect();
-        let compact = match spec.pool {
+        let compact = match pool {
             Pool::Ironwood => CompactTx {
                 ironwood_actions: actions,
                 ..CompactTx::default()

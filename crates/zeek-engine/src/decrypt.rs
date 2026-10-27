@@ -207,7 +207,8 @@ impl DigScanner {
     }
 
     /// Decrypts the hit outputs of the full transaction `raw` (mined under
-    /// `branch`), returning value and memo for each.
+    /// `branch`), returning value and memo for each. `raw` must hash to
+    /// `txid_hex` (display order), or this is an error.
     ///
     /// A hit whose action is the one the compact block described (same note
     /// commitment) but whose full ciphertext does not decrypt is not a game
@@ -216,7 +217,8 @@ impl DigScanner {
     /// does not check it. It is returned in `undecryptable` (to log and
     /// ignore) instead of failing, so it can never halt the follower. Anything
     /// else that does not match the compact block (a transaction that does not
-    /// parse, a missing action, another note commitment or value) means the
+    /// parse or hash to its txid, a missing action, another note commitment or
+    /// value) means the
     /// source served something else than the block describes: that stays an
     /// error, retried against another source, so a real dig is never dropped.
     pub fn decrypt_full(
@@ -230,6 +232,15 @@ impl DigScanner {
             txid: txid_hex.to_owned(),
             reason: e.to_string(),
         })?;
+        // The txid commits to every ciphertext byte: without this check a
+        // source could alter one memo byte of a real dig (same note
+        // commitment) and have it ignored as undecryptable.
+        if tx.txid().to_string() != txid_hex {
+            return Err(EngineError::MalformedTransaction {
+                txid: txid_hex.to_owned(),
+                reason: "the transaction served does not hash to this txid".into(),
+            });
+        }
         let mut out = FullDecryption {
             notes: Vec::with_capacity(hits.len()),
             undecryptable: Vec::new(),
@@ -312,8 +323,15 @@ mod tests {
             let hits = scanner.scan_compact_tx(100, tx).expect("scan");
             for hit in &hits {
                 let raw = chain.transaction(&tx.txid).expect("raw");
+                let mut display = tx.txid.clone();
+                display.reverse();
                 let notes = scanner
-                    .decrypt_full("tx", &raw, BranchId::Nu6_3, std::slice::from_ref(hit))
+                    .decrypt_full(
+                        &hex::encode(display),
+                        &raw,
+                        BranchId::Nu6_3,
+                        std::slice::from_ref(hit),
+                    )
                     .expect("full")
                     .notes;
                 all.push((i, notes));
