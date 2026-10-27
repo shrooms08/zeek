@@ -64,6 +64,19 @@ pub struct DrandChain {
     pub scheme: String,
 }
 
+/// drand quicknet's chain hash. Source:
+/// `https://api.drand.sh/v2/chains/52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971/info`;
+/// the same value is in the recorded beacons (`tests/fixtures/quicknet.json`),
+/// `config/game.*.json` and every published proof bundle.
+pub const QUICKNET_CHAIN_HASH: &str =
+    "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971";
+/// drand quicknet's group public key (BLS12-381 G2, compressed, hex).
+pub const QUICKNET_PUBLIC_KEY: &str = "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a";
+/// drand quicknet's period, seconds.
+pub const QUICKNET_PERIOD_SECS: u64 = 3;
+/// drand quicknet's genesis (Unix time of round 1).
+pub const QUICKNET_GENESIS_TIME: u64 = 1_692_803_367;
+
 impl DrandChain {
     /// The League of Entropy quicknet chain.
     ///
@@ -71,11 +84,36 @@ impl DrandChain {
     pub fn quicknet() -> Self {
         DrandChain {
             beacon_id: "quicknet".to_owned(),
-            chain_hash: "52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971".to_owned(),
-            public_key: "83cf0f2896adee7eb8b5f01fcad3912212c437e0073e911fb90022d3e760183c8c4b450b6a0a6c3ac6a5776a2d1064510d1fec758c921cc22b0e17e63aaf4bcb5ed66304de9cf809bd274ca73bab4af5a6e9c76a4bc09e76eae8991ef5ece45a".to_owned(),
-            period_secs: 3,
-            genesis_time: 1_692_803_367,
+            chain_hash: QUICKNET_CHAIN_HASH.to_owned(),
+            public_key: QUICKNET_PUBLIC_KEY.to_owned(),
+            period_secs: QUICKNET_PERIOD_SECS,
+            genesis_time: QUICKNET_GENESIS_TIME,
             scheme: SCHEME_BLS_UNCHAINED_G1_RFC9380.to_owned(),
+        }
+    }
+
+    /// The first field in which this chain differs from drand quicknet, or
+    /// `None` if it is quicknet.
+    ///
+    /// The public key decides who can sign beacons; the period and genesis
+    /// decide which drand round a game round binds to and when it was
+    /// published. A game that named its own key could sign its own beacon,
+    /// and one that moved the period or genesis could bind a round to a
+    /// beacon already published, so all of them are pinned. (`beacon_id` is
+    /// only a label.)
+    pub fn quicknet_mismatch(&self) -> Option<&'static str> {
+        if !self.chain_hash.eq_ignore_ascii_case(QUICKNET_CHAIN_HASH) {
+            Some("chain hash")
+        } else if !self.public_key.eq_ignore_ascii_case(QUICKNET_PUBLIC_KEY) {
+            Some("public key")
+        } else if self.period_secs != QUICKNET_PERIOD_SECS {
+            Some("period")
+        } else if self.genesis_time != QUICKNET_GENESIS_TIME {
+            Some("genesis time")
+        } else if self.scheme != SCHEME_BLS_UNCHAINED_G1_RFC9380 {
+            Some("scheme")
+        } else {
+            None
         }
     }
 }
@@ -190,6 +228,8 @@ pub enum ParamsError {
     UnsupportedDrandScheme(String),
     #[error("drand public key is not 96 hex-encoded bytes")]
     BadDrandPublicKey,
+    #[error("beacon key is not drand quicknet: the drand {field} differs from quicknet's, and testnet and mainnet games must draw from drand quicknet")]
+    NotQuicknet { field: &'static str },
     #[error("reveal_delay_secs is too short: it must cover the mtp_window blocks after the close plus the honest clock skew ({minimum} s), got {actual} s")]
     RevealDelayTooShort { minimum: u64, actual: u64 },
     #[error("min_dig_zat {min_dig} must exceed dig_fee_zat {dig_fee} so that every valid dig contributes to the pot")]
@@ -323,6 +363,15 @@ impl GameParams {
             Ok(bytes) if bytes.len() == 96 => {}
             _ => return Err(ParamsError::BadDrandPublicKey),
         }
+        match self.network {
+            // Both networks draw from drand quicknet: a config naming any
+            // other beacon chain could let its operator sign the beacon.
+            Network::Test | Network::Main => {
+                if let Some(field) = self.drand.quicknet_mismatch() {
+                    return Err(ParamsError::NotQuicknet { field });
+                }
+            }
+        }
         let minimum = self
             .target_spacing_secs
             .checked_mul(2)
@@ -426,6 +475,40 @@ mod tests {
                 dig_fee: 100_000
             })
         );
+    }
+
+    #[test]
+    fn testnet_and_mainnet_require_drand_quicknet() {
+        // 96 well-formed bytes that are not quicknet's key (the attack itself,
+        // a beacon validly signed under another key, is in zeek-verify's
+        // tests/quicknet_pin.rs).
+        let other_key = "ab".repeat(96);
+        for base in [GameParams::testnet(1), GameParams::mainnet(1)] {
+            let mut cases = Vec::new();
+            let mut p = base.clone();
+            p.drand.public_key = other_key.clone();
+            cases.push((p, "public key"));
+            let mut p = base.clone();
+            p.drand.chain_hash = "00".repeat(32);
+            cases.push((p, "chain hash"));
+            let mut p = base.clone();
+            p.drand.period_secs = 30;
+            p.reveal_delay_secs = 10_000;
+            cases.push((p, "period"));
+            let mut p = base.clone();
+            p.drand.genesis_time -= 3_000;
+            cases.push((p, "genesis time"));
+            for (p, field) in cases {
+                let err = p.validate().expect_err("not quicknet");
+                assert_eq!(err, ParamsError::NotQuicknet { field });
+                assert!(err.to_string().contains("beacon key is not drand quicknet"));
+            }
+            // Upper-case hex is still quicknet.
+            let mut p = base.clone();
+            p.drand.public_key = QUICKNET_PUBLIC_KEY.to_uppercase();
+            p.validate().expect("same key");
+        }
+        assert_eq!(DrandChain::quicknet().quicknet_mismatch(), None);
     }
 
     #[test]

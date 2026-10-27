@@ -47,6 +47,8 @@ pub enum BeaconError {
     InvalidSignature { round: u64 },
     #[error("BLS verification failed: {0}")]
     Verification(String),
+    #[error("beacon key is not drand quicknet: the drand {field} differs from quicknet's")]
+    NotQuicknet { field: &'static str },
     #[error("drand rounds start at 1")]
     RoundZero,
     #[error("arithmetic overflow in beacon timing")]
@@ -91,9 +93,16 @@ impl<'de> Deserialize<'de> for Randomness {
 }
 
 /// Verifies `beacon` against `chain` and returns its randomness.
+///
+/// `chain` must be drand quicknet (every network Zeek plays on, testnet and
+/// mainnet, draws from it): a signature that verifies under any other key
+/// proves nothing, since whoever chose that key could have signed it.
 pub fn verify_beacon(chain: &DrandChain, beacon: &Beacon) -> Result<Randomness, BeaconError> {
     if chain.scheme != SCHEME_BLS_UNCHAINED_G1_RFC9380 {
         return Err(BeaconError::UnsupportedScheme(chain.scheme.clone()));
+    }
+    if let Some(field) = chain.quicknet_mismatch() {
+        return Err(BeaconError::NotQuicknet { field });
     }
     if beacon.round == 0 {
         return Err(BeaconError::RoundZero);

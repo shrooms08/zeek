@@ -288,6 +288,20 @@ fn check_beacon(input: &RoundInput<'_>) -> CheckResult {
     let id = CheckId::Beacon;
     let bundle = input.bundle;
     let params = &bundle.params;
+    // First, and for voided rounds too: a beacon chain other than quicknet
+    // (its key, or the period and genesis that bind the drand round) lets
+    // the operator choose the randomness, whatever its config publishes.
+    // Every "quicknet" in the texts below is true only past this point.
+    if let Some(field) = params.drand.quicknet_mismatch() {
+        return fail(
+            id,
+            "The beacon key is not drand quicknet: whoever chose this key could sign any beacon.",
+        )
+        .with(format!(
+            "the bundle's drand {field} differs from quicknet's (chain hash {}); testnet and mainnet rounds must draw from drand quicknet",
+            zeek_core::params::QUICKNET_CHAIN_HASH
+        ));
+    }
     if let Err(e) = params_agree(params, &input.config.params) {
         return fail(
             id,
