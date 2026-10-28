@@ -153,6 +153,7 @@ Running the engine, the keyholders and the public site:
   is not hosted; the steps are in [docs/mainnet-runbook.md](docs/mainnet-runbook.md).
 - Keyholders run by separate, independent operators. Today all three run in
   one Railway project operated by the Zeek team (see the note above).
+- **Private rewards with Zcash Shielded Assets.** Once ZSAs reach Zcash mainnet, each round can mint a private ZEEK reward to the winners, while nobody can see who holds it. ZSAs are not on mainnet or in NU7 yet; a proof of concept on the ZSA test network comes first.
 
 ## Security
 
