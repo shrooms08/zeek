@@ -301,6 +301,12 @@ async fn audit_tx(
             reason: e.to_string(),
         }
     })?;
+    if parsed.txid().to_string() != txid {
+        return Err(EngineError::MalformedTransaction {
+            txid,
+            reason: "the transaction served does not hash to this txid".into(),
+        });
+    }
     let fee = parsed
         .orchard_bundle()
         .map_or(0i64, |b| i64::from(*b.value_balance()))
@@ -352,11 +358,39 @@ async fn audit_tx(
                             try_note_decryption(&OrchardDomain::for_action(action), ivk, action)
                         }
                     };
-                    let (note, _, memo) =
-                        decrypted.ok_or_else(|| EngineError::MalformedTransaction {
-                            txid: txid.clone(),
-                            reason: format!("action {index} decrypts compactly but not in full"),
-                        })?;
+                    // Valid for the compact block but corrupt after it (no
+                    // memo): still the vault's note, recorded from its
+                    // compact decryption so its value and later spend are
+                    // counted; not a game note.
+                    let (note, kind) = match decrypted {
+                        Some((note, _, memo)) => (note, describe_memo(&memo)),
+                        None => {
+                            let compact = CompactAction::from(action);
+                            let note = match pool {
+                                Pool::Ironwood => try_compact_note_decryption(
+                                    &IronwoodDomain::for_compact_action(&compact),
+                                    ivk,
+                                    &compact,
+                                ),
+                                Pool::Orchard => try_compact_note_decryption(
+                                    &OrchardDomain::for_compact_action(&compact),
+                                    ivk,
+                                    &compact,
+                                ),
+                            }
+                            .map(|(note, _)| note)
+                            .ok_or_else(|| EngineError::MalformedTransaction {
+                                txid: txid.clone(),
+                                reason: format!(
+                                    "action {index} decrypted in the compact block but not from the transaction"
+                                ),
+                            })?;
+                            (
+                                note,
+                                "does not decrypt in full (not a game note)".to_owned(),
+                            )
+                        }
+                    };
                     let key: NoteKey = (pool, txid.clone(), index16);
                     vault
                         .nullifiers
@@ -367,7 +401,7 @@ async fn audit_tx(
                             height,
                             value: note.value().inner(),
                             scope: *scope,
-                            kind: describe_memo(&memo),
+                            kind,
                             cmx: action.cmx().to_bytes(),
                             spent_in: None,
                         },
